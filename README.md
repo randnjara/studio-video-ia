@@ -20,8 +20,8 @@ Le cahier des charges complet et le guide pas à pas sont dans le document du pr
 | --- | --- |
 | Site | Next.js 15 + Tailwind CSS, hébergé sur Cloudflare Workers (OpenNext) |
 | Comptes et base | Supabase |
-| Stockage des vidéos | Cloudflare R2 (étape 3) |
-| GPU | RunPod Serverless (étape 3) |
+| Stockage des photos et vidéos | Supabase Storage (puis Cloudflare R2 pour les gros volumes) |
+| Génération vidéo | Wan 2.2 image → vidéo, via RunPod (Public Endpoint) |
 
 ## Mise en route
 

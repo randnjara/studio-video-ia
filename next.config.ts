@@ -1,6 +1,9 @@
 import type { NextConfig } from "next";
 
-const nextConfig: NextConfig = {};
+const nextConfig: NextConfig = {
+  // Les photos des plans passent par les formulaires (10 Mo maximum)
+  experimental: { serverActions: { bodySizeLimit: "11mb" } },
+};
 
 export default nextConfig;
 

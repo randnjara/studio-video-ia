@@ -50,6 +50,9 @@ export default async function PageProjet({
         <p className="text-sourdine">
           {STATUTS_PROJET[projet.status]} · modifié le {dateCourte(projet.updated_at)}
         </p>
+        <Link href={`/projets/${id}/plans`} className="bouton mt-3">
+          Plans et vidéos →
+        </Link>
       </div>
 
       {enregistre && <p className="rounded-md bg-accent-doux px-4 py-2 text-sm">Projet enregistré.</p>}
@@ -104,7 +107,7 @@ export default async function PageProjet({
             Scénario
           </label>
           <p className="mb-2 text-sm text-sourdine">
-            Collez ici le scénario et le texte de la voix off. Le découpage automatique en scènes arrive à l'étape 4.
+            Collez ici le scénario et le texte de la voix off. Pour l'instant, créez les plans à la main dans « Plans et vidéos ». Le découpage automatique par Claude arrive à l'étape 4.
           </p>
           <textarea
             id="scenario_text"
