@@ -1,12 +1,12 @@
 import { redirect } from "next/navigation";
 import { requireProfile, type Profile } from "@/lib/session";
-import { changerAcces, fixerBudget, inviterMembre } from "./actions";
+import { BoutonEnvoi } from "@/components/bouton-envoi";
+import { changerAcces, changerRole, fixerBudget, inviterMembre } from "./actions";
 
 const ERREURS: Record<string, string> = {
   "email-vide": "Saisissez l'adresse e-mail de la personne à inviter.",
-  "equipe-complete": "L'équipe compte déjà 4 personnes actives. Désactivez un compte avant d'en inviter un autre.",
   invitation: "L'invitation n'a pas pu être envoyée.",
-  "soi-meme": "Vous ne pouvez pas désactiver votre propre compte.",
+  "soi-meme": "Vous ne pouvez pas changer votre propre accès ni votre propre rôle.",
   budget: "Saisissez un montant en dollars, par exemple 25.",
 };
 
@@ -17,6 +17,13 @@ const ACTIONS: Record<string, string> = {
   desactivation: "a désactivé un compte",
   reactivation: "a réactivé un compte",
   budget: "a fixé le budget du mois",
+  role: "a changé le rôle d'un membre",
+  restauration: "a restauré un projet",
+  ajout: "a ajouté un plan",
+  import: "a importé des plans",
+  generation: "a lancé une génération",
+  validation: "a validé une vidéo",
+  "validation-scenario": "a validé un scénario",
 };
 
 export default async function Equipe({
@@ -49,12 +56,12 @@ export default async function Equipe({
 
   return (
     <div className="flex flex-col gap-8">
-      <h1 className="text-2xl font-bold">Équipe et budget</h1>
+      <h1 className="text-2xl font-bold tracking-tight">Équipe et budget</h1>
 
-      {invite && <p className="rounded-md bg-accent-doux px-4 py-2 text-sm">Invitation envoyée à {invite}.</p>}
-      {budget && <p className="rounded-md bg-accent-doux px-4 py-2 text-sm">Budget du mois enregistré.</p>}
+      {invite && <p className="message-ok">Invitation envoyée à {invite}.</p>}
+      {budget && <p className="message-ok">Budget du mois enregistré.</p>}
       {erreur && ERREURS[erreur] && (
-        <p className="text-sm text-alerte">
+        <p className="message-erreur">
           {ERREURS[erreur]} {detail}
         </p>
       )}
@@ -93,9 +100,7 @@ export default async function Equipe({
               className="champ w-32"
             />
           </div>
-          <button type="submit" className="bouton">
-            Enregistrer la limite
-          </button>
+          <BoutonEnvoi enCours="Enregistrement…">Enregistrer la limite</BoutonEnvoi>
         </form>
       </section>
 
@@ -108,11 +113,18 @@ export default async function Equipe({
               <span className="text-sm text-sourdine">{m.role === "responsable" ? "Responsable" : "Membre"}</span>
               {!m.active && <span className="rounded bg-fond px-2 py-0.5 text-xs font-semibold">Désactivé</span>}
               {m.id !== profile.id && (
-                <form action={changerAcces.bind(null, m.id, !m.active)} className="ml-auto">
-                  <button type="submit" className="text-sm font-semibold text-accent hover:underline">
-                    {m.active ? "Désactiver" : "Réactiver"}
-                  </button>
-                </form>
+                <div className="ml-auto flex items-center gap-2">
+                  <form action={changerRole.bind(null, m.id, m.role === "responsable" ? "membre" : "responsable")}>
+                    <BoutonEnvoi className="bouton-discret px-3 py-1 text-sm" enCours="…">
+                      {m.role === "responsable" ? "Passer membre" : "Passer responsable"}
+                    </BoutonEnvoi>
+                  </form>
+                  <form action={changerAcces.bind(null, m.id, !m.active)}>
+                    <BoutonEnvoi className={m.active ? "bouton-danger" : "bouton-discret px-3 py-1 text-sm"} enCours="…">
+                      {m.active ? "Désactiver" : "Réactiver"}
+                    </BoutonEnvoi>
+                  </form>
+                </div>
               )}
             </li>
           ))}
@@ -130,9 +142,7 @@ export default async function Equipe({
             </label>
             <input id="email" name="email" type="email" required className="champ" />
           </div>
-          <button type="submit" className="bouton">
-            Inviter
-          </button>
+          <BoutonEnvoi enCours="Envoi…">Inviter</BoutonEnvoi>
         </form>
       </section>
 

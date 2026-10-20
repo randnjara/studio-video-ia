@@ -1,38 +1,103 @@
 @import "tailwindcss";
 
-@theme {
-  --color-encre: #15212c;
-  --color-sourdine: #5a6876;
-  --color-ligne: #d9e0e7;
-  --color-fond: #f4f6f8;
-  --color-surface: #ffffff;
-  --color-accent: #0d7a64;
-  --color-accent-doux: #e1f2ed;
-  --color-alerte: #b0302a;
-  --font-sans: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+/* Thème clair par défaut, thème sombre choisi ou suivi du téléphone / ordinateur */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+:root {
+  --encre: #0f172a;
+  --sourdine: #64748b;
+  --ligne: #e2e8f0;
+  --fond: #f6f7fb;
+  --surface: #ffffff;
+  --surface-2: #f1f5f9;
+  --accent: #4f46e5;
+  --accent-texte: #ffffff;
+  --accent-doux: #eef2ff;
+  --succes: #059669;
+  --succes-doux: #ecfdf5;
+  --alerte: #dc2626;
+  --alerte-doux: #fef2f2;
+  --ombre: 0 1px 2px rgb(15 23 42 / 0.04), 0 4px 16px rgb(15 23 42 / 0.05);
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  --encre: #e2e8f0;
+  --sourdine: #94a3b8;
+  --ligne: #1e293b;
+  --fond: #0b1120;
+  --surface: #111827;
+  --surface-2: #1e293b;
+  --accent: #818cf8;
+  --accent-texte: #0b1120;
+  --accent-doux: #1e1b4b;
+  --succes: #34d399;
+  --succes-doux: #052e2b;
+  --alerte: #f87171;
+  --alerte-doux: #3b0d0d;
+  --ombre: 0 1px 2px rgb(0 0 0 / 0.3), 0 4px 16px rgb(0 0 0 / 0.25);
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-encre: var(--encre);
+  --color-sourdine: var(--sourdine);
+  --color-ligne: var(--ligne);
+  --color-fond: var(--fond);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-accent: var(--accent);
+  --color-accent-texte: var(--accent-texte);
+  --color-accent-doux: var(--accent-doux);
+  --color-succes: var(--succes);
+  --color-succes-doux: var(--succes-doux);
+  --color-alerte: var(--alerte);
+  --color-alerte-doux: var(--alerte-doux);
+  --font-sans: "Inter", "Segoe UI", system-ui, sans-serif;
 }
 
 body {
-  background: var(--color-fond);
-  color: var(--color-encre);
+  background: var(--fond);
+  color: var(--encre);
 }
 
 .champ {
-  @apply w-full rounded-md border border-ligne bg-surface px-3 py-2 text-base outline-none focus:border-accent focus:ring-2 focus:ring-accent/20;
+  @apply w-full rounded-lg border border-ligne bg-surface px-3 py-2 text-base text-encre outline-none transition placeholder:text-sourdine/70 focus:border-accent focus:ring-2 focus:ring-accent/25;
 }
 
 .bouton {
-  @apply inline-flex items-center justify-center rounded-md bg-accent px-4 py-2 font-semibold text-white hover:bg-accent/90 disabled:opacity-50;
+  @apply inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2 font-semibold text-accent-texte shadow-sm transition hover:opacity-90 disabled:cursor-wait disabled:opacity-60;
 }
 
 .bouton-discret {
-  @apply inline-flex items-center justify-center rounded-md border border-ligne bg-surface px-4 py-2 font-semibold hover:bg-fond;
+  @apply inline-flex items-center justify-center gap-2 rounded-lg border border-ligne bg-surface px-4 py-2 font-semibold text-encre transition hover:bg-surface-2 disabled:cursor-wait disabled:opacity-60;
+}
+
+.bouton-danger {
+  @apply inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-alerte transition hover:bg-alerte-doux disabled:cursor-wait disabled:opacity-60;
+}
+
+.lien {
+  @apply font-semibold text-accent hover:underline;
 }
 
 .carte {
-  @apply rounded-lg border border-ligne bg-surface p-5;
+  @apply rounded-xl border border-ligne bg-surface p-5;
+  box-shadow: var(--ombre);
 }
 
 .etiquette {
   @apply mb-1 block text-sm font-semibold;
+}
+
+.pastille {
+  @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold;
+}
+
+.message-ok {
+  @apply rounded-lg bg-succes-doux px-4 py-2 text-sm text-succes;
+}
+
+.message-erreur {
+  @apply rounded-lg bg-alerte-doux px-4 py-2 text-sm text-alerte;
 }

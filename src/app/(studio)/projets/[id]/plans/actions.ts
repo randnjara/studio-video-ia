@@ -3,39 +3,25 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { journaliser } from "@/lib/journal";
+import { MOUVEMENT_PAR_DEFAUT } from "@/lib/libelles";
 import { PRIX_ESTIME_5S_USD, lancerGeneration, lireStatut } from "@/lib/runpod";
 import { requireProfile } from "@/lib/session";
 
 const BUCKET = "medias";
-const TYPES_PHOTO: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
-const PHOTO_MAX_OCTETS = 10 * 1024 * 1024;
 
 function retour(projectId: string, params = ""): never {
   revalidatePath(`/projets/${projectId}/plans`);
   redirect(`/projets/${projectId}/plans${params}`);
 }
 
-// Dépose la photo d'un plan dans le stockage et renvoie son chemin, ou null s'il n'y en a pas
-async function deposerPhoto(
-  supabase: Awaited<ReturnType<typeof requireProfile>>["supabase"],
-  projectId: string,
-  sceneId: string,
-  fichier: FormDataEntryValue | null,
-) {
-  if (!(fichier instanceof File) || fichier.size === 0) return null;
-  const ext = TYPES_PHOTO[fichier.type];
-  if (!ext) retour(projectId, "?erreur=photo-format");
-  if (fichier.size > PHOTO_MAX_OCTETS) retour(projectId, "?erreur=photo-taille");
-
-  const chemin = `${projectId}/photos/${sceneId}-${Date.now()}.${ext}`;
-  const { error } = await supabase.storage.from(BUCKET).upload(chemin, fichier, { contentType: fichier.type });
-  if (error) retour(projectId, "?erreur=photo-envoi");
-  return chemin;
+// Les photos sont envoyées directement par le navigateur dans le stockage ;
+// on vérifie seulement que le chemin reçu appartient bien à ce projet.
+function cheminPhoto(projectId: string, valeur: FormDataEntryValue | string | null | undefined) {
+  const chemin = String(valeur ?? "");
+  return chemin.startsWith(`${projectId}/photos/`) && !chemin.includes("..") ? chemin : null;
 }
 
-export async function ajouterPlan(projectId: string, formData: FormData) {
-  const { supabase, profile } = await requireProfile();
-
+async function prochainePosition(supabase: Awaited<ReturnType<typeof requireProfile>>["supabase"], projectId: string) {
   const { data: dernier } = await supabase
     .from("scenes")
     .select("position")
@@ -43,30 +29,59 @@ export async function ajouterPlan(projectId: string, formData: FormData) {
     .order("position", { ascending: false })
     .limit(1)
     .maybeSingle();
+  return (dernier?.position ?? 0) + 1;
+}
+
+export async function ajouterPlan(projectId: string, formData: FormData) {
+  const { supabase, profile } = await requireProfile();
 
   const { data: scene, error } = await supabase
     .from("scenes")
     .insert({
       project_id: projectId,
-      position: (dernier?.position ?? 0) + 1,
+      position: await prochainePosition(supabase, projectId),
       motion_prompt: String(formData.get("motion_prompt") ?? "").trim(),
       voiceover_text: String(formData.get("voiceover_text") ?? "").trim(),
       consent_confirmed: formData.get("consent_confirmed") === "on",
+      image_path: cheminPhoto(projectId, formData.get("image_path")),
     })
     .select("id")
     .single();
   if (error || !scene) retour(projectId, "?erreur=plan");
 
-  const photo = await deposerPhoto(supabase, projectId, scene.id, formData.get("photo"));
-  if (photo) await supabase.from("scenes").update({ image_path: photo }).eq("id", scene.id);
-
   await journaliser(supabase, profile.id, "ajout", "plan", scene.id);
-  retour(projectId, `#plan-${scene.id}`);
+  retour(projectId, `?ajoute=1#plan-${scene.id}`);
+}
+
+// Crée d'un coup un plan par scène du script, avec les photos dans l'ordre
+export async function importerPlans(
+  projectId: string,
+  plans: { voix: string; mouvement: string; image_path: string | null }[],
+  accord: boolean,
+) {
+  const { supabase, profile } = await requireProfile();
+  if (plans.length === 0) retour(projectId, "?erreur=import-vide");
+
+  const debut = await prochainePosition(supabase, projectId);
+  const { error } = await supabase.from("scenes").insert(
+    plans.slice(0, 200).map((p, i) => ({
+      project_id: projectId,
+      position: debut + i,
+      voiceover_text: p.voix.trim(),
+      motion_prompt: p.mouvement.trim() || MOUVEMENT_PAR_DEFAUT,
+      image_path: cheminPhoto(projectId, p.image_path),
+      consent_confirmed: accord,
+    })),
+  );
+  if (error) retour(projectId, "?erreur=import");
+
+  await journaliser(supabase, profile.id, "import", "plan", null, { nombre: plans.length });
+  retour(projectId, `?importe=${plans.length}`);
 }
 
 export async function modifierPlan(projectId: string, sceneId: string, formData: FormData) {
   const { supabase } = await requireProfile();
-  const photo = await deposerPhoto(supabase, projectId, sceneId, formData.get("photo"));
+  const photo = cheminPhoto(projectId, formData.get("image_path"));
 
   const { error } = await supabase
     .from("scenes")
@@ -109,22 +124,20 @@ export async function deplacerPlan(projectId: string, sceneId: string, sens: -1 
   retour(projectId, `#plan-${sceneId}`);
 }
 
-export async function genererEssai(projectId: string, sceneId: string) {
-  const { supabase, profile } = await requireProfile();
+type Ctx = Awaited<ReturnType<typeof requireProfile>>;
 
-  const [{ data: scene }, { data: projet }] = await Promise.all([
-    supabase
-      .from("scenes")
-      .select("id, motion_prompt, image_path, consent_confirmed, duration_s, status")
-      .eq("id", sceneId)
-      .eq("project_id", projectId)
-      .single(),
-    supabase.from("projects").select("aspect_ratio").eq("id", projectId).single(),
-  ]);
-  if (!scene || !projet) retour(projectId, "?erreur=plan");
-  if (!scene.image_path) retour(projectId, `?erreur=sans-photo#plan-${sceneId}`);
-  if (!scene.motion_prompt) retour(projectId, `?erreur=sans-prompt#plan-${sceneId}`);
-  if (!scene.consent_confirmed) retour(projectId, `?erreur=sans-accord#plan-${sceneId}`);
+// Lance une génération pour un plan. Renvoie un code d'erreur, ou null si c'est parti.
+async function lancerPlan({ supabase, profile }: Ctx, projectId: string, sceneId: string, format: string) {
+  const { data: scene } = await supabase
+    .from("scenes")
+    .select("id, motion_prompt, image_path, consent_confirmed, duration_s, status")
+    .eq("id", sceneId)
+    .eq("project_id", projectId)
+    .single();
+  if (!scene) return "plan";
+  if (!scene.image_path) return "sans-photo";
+  if (!scene.motion_prompt) return "sans-prompt";
+  if (!scene.consent_confirmed) return "sans-accord";
 
   const duree = Number(scene.duration_s) || 5;
   const seed = Math.floor(Math.random() * 2_000_000_000);
@@ -141,9 +154,7 @@ export async function genererEssai(projectId: string, sceneId: string) {
     })
     .select("id")
     .single();
-  if (error || !essai) {
-    retour(projectId, error?.code === "P0001" ? "?erreur=budget" : "?erreur=essai");
-  }
+  if (error || !essai) return error?.code === "P0001" ? "budget" : "essai";
 
   try {
     const { data: signee, error: errSigne } = await supabase.storage
@@ -154,7 +165,7 @@ export async function genererEssai(projectId: string, sceneId: string) {
     const jobId = await lancerGeneration({
       prompt: scene.motion_prompt,
       imageUrl: signee.signedUrl,
-      format: projet.aspect_ratio,
+      format,
       duree,
       seed,
     });
@@ -173,9 +184,45 @@ export async function genererEssai(projectId: string, sceneId: string) {
       })
       .eq("id", essai.id);
   }
-
   await journaliser(supabase, profile.id, "generation", "essai", essai.id, { scene_id: sceneId });
-  retour(projectId, `#plan-${sceneId}`);
+  return null;
+}
+
+async function formatProjet(supabase: Ctx["supabase"], projectId: string) {
+  const { data } = await supabase.from("projects").select("aspect_ratio").eq("id", projectId).single();
+  return data?.aspect_ratio ?? "16:9";
+}
+
+export async function genererEssai(projectId: string, sceneId: string) {
+  const ctx = await requireProfile();
+  const erreur = await lancerPlan(ctx, projectId, sceneId, await formatProjet(ctx.supabase, projectId));
+  retour(projectId, erreur ? `?erreur=${erreur}#plan-${sceneId}` : `#plan-${sceneId}`);
+}
+
+// Lance la génération de tous les plans prêts qui n'ont encore aucune vidéo
+export async function genererTout(projectId: string) {
+  const ctx = await requireProfile();
+  const format = await formatProjet(ctx.supabase, projectId);
+  const { data: scenes } = await ctx.supabase
+    .from("scenes")
+    .select("id, image_path, motion_prompt, consent_confirmed, takes(status)")
+    .eq("project_id", projectId)
+    .order("position");
+
+  const aLancer = (scenes ?? []).filter(
+    (s) =>
+      s.image_path &&
+      s.motion_prompt &&
+      s.consent_confirmed &&
+      !(s.takes as { status: string }[]).some((t) => t.status === "en_cours" || t.status === "terminee"),
+  );
+  let lances = 0;
+  for (const s of aLancer) {
+    const erreur = await lancerPlan(ctx, projectId, s.id, format);
+    if (erreur === "budget") retour(projectId, `?erreur=budget&lances=${lances}`);
+    if (!erreur) lances++;
+  }
+  retour(projectId, `?lances=${lances}`);
 }
 
 // Interroge RunPod pour les essais en cours du projet et range les vidéos terminées.
@@ -253,7 +300,8 @@ export async function validerEssai(projectId: string, sceneId: string, takeId: s
     .eq("id", sceneId)
     .eq("project_id", projectId);
   await journaliser(supabase, profile.id, "validation", "essai", takeId, { scene_id: sceneId });
-  retour(projectId, `#plan-${sceneId}`);
+  revalidatePath(`/projets/${projectId}`);
+  retour(projectId, `?valide=1#plan-${sceneId}`);
 }
 
 export async function annulerValidation(projectId: string, sceneId: string) {

@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
@@ -9,11 +10,14 @@ export type Profile = {
 };
 
 // Renvoie la personne connectée et son profil, ou renvoie vers la page de connexion.
-export async function requireProfile() {
+// Une seule fois par affichage (mise en commun entre le cadre et la page). L'identité a déjà été
+// vérifiée auprès de Supabase par le middleware, et la base revérifie le jeton à chaque requête.
+export const requireProfile = cache(async () => {
   const supabase = await createClient();
   const {
-    data: { user },
-  } = await supabase.auth.getUser();
+    data: { session },
+  } = await supabase.auth.getSession();
+  const user = session?.user;
   if (!user) redirect("/connexion");
 
   const { data: profile } = await supabase
@@ -28,4 +32,4 @@ export async function requireProfile() {
   }
 
   return { supabase, user, profile };
-}
+});

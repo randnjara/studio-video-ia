@@ -1,17 +1,20 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { BoutonEnvoi } from "@/components/bouton-envoi";
+import { STATUTS_PLAN, couleurStatut, dureeLisible } from "@/lib/libelles";
 import { PRIX_ESTIME_5S_USD } from "@/lib/runpod";
 import { requireProfile } from "@/lib/session";
 import {
   actualiserEssais,
-  ajouterPlan,
   annulerValidation,
   deplacerPlan,
   genererEssai,
-  modifierPlan,
+  genererTout,
   supprimerPlan,
   validerEssai,
 } from "./actions";
+import { FormulairePlan } from "./formulaire-plan";
+import { ImportGroupe } from "./import-groupe";
 import { SuiviEssais } from "./suivi-essais";
 
 type Essai = {
@@ -30,29 +33,21 @@ type Plan = {
   voiceover_text: string;
   image_path: string | null;
   consent_confirmed: boolean;
+  duration_s: number;
   status: string;
   validated_take_id: string | null;
   takes: Essai[];
 };
 
-const STATUTS_PLAN: Record<string, string> = {
-  brouillon: "Brouillon",
-  en_generation: "En génération",
-  a_valider: "À valider",
-  validee: "Validé",
-  refusee: "Refusé",
-};
-
 const ERREURS: Record<string, string> = {
   plan: "Le plan n'a pas pu être enregistré. Réessayez.",
-  "photo-format": "La photo doit être au format JPG, PNG ou WebP.",
-  "photo-taille": "La photo est trop lourde (10 Mo maximum).",
-  "photo-envoi": "La photo n'a pas pu être envoyée. Réessayez.",
   "sans-photo": "Ajoutez une photo au plan avant de générer.",
   "sans-prompt": "Décrivez le mouvement voulu avant de générer.",
   "sans-accord": "Cochez la case d'accord des personnes photographiées avant de générer.",
   budget: "Le plafond GPU du mois est atteint. Le responsable peut l'augmenter dans « Équipe et budget ».",
   essai: "La génération n'a pas pu démarrer. Réessayez.",
+  import: "Les plans n'ont pas pu être créés. Réessayez.",
+  "import-vide": "Ajoutez un script ou des photos avant de créer les plans.",
 };
 
 export default async function PagePlans({
@@ -60,15 +55,15 @@ export default async function PagePlans({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ erreur?: string; enregistre?: string }>;
+  searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const { id } = await params;
-  const { erreur, enregistre } = await searchParams;
+  const sp = await searchParams;
   const { supabase } = await requireProfile();
 
   const { data: projet } = await supabase
     .from("projects")
-    .select("id, title, aspect_ratio")
+    .select("id, title, aspect_ratio, scenario_text")
     .eq("id", id)
     .is("deleted_at", null)
     .single();
@@ -80,7 +75,7 @@ export default async function PagePlans({
   const { data } = await supabase
     .from("scenes")
     .select(
-      "id, position, motion_prompt, voiceover_text, image_path, consent_confirmed, status, validated_take_id, takes(id, status, video_path, cost_usd, error, created_at)",
+      "id, position, motion_prompt, voiceover_text, image_path, consent_confirmed, duration_s, status, validated_take_id, takes(id, status, video_path, cost_usd, error, created_at)",
     )
     .eq("project_id", id)
     .order("position")
@@ -101,91 +96,104 @@ export default async function PagePlans({
   const enCours = plans.reduce((n, p) => n + p.takes.filter((t) => t.status === "en_cours").length, 0);
   const valides = plans.filter((p) => p.status === "validee").length;
   const cout = plans.reduce((n, p) => n + p.takes.reduce((m, t) => m + Number(t.cost_usd ?? 0), 0), 0);
+  const prets = plans.filter(
+    (p) =>
+      p.image_path &&
+      p.motion_prompt &&
+      p.consent_confirmed &&
+      !p.takes.some((t) => t.status === "en_cours" || t.status === "terminee"),
+  ).length;
+  const duree = plans.reduce((n, p) => n + Number(p.duration_s || 5), 0);
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <Link href={`/projets/${id}`} className="text-sm font-semibold text-accent hover:underline">
-          ← Fiche du projet
-        </Link>
-        <h1 className="mt-2 text-2xl font-bold">Plans de « {projet.title} »</h1>
-        <p className="text-sourdine">
-          Format {projet.aspect_ratio} · {plans.length} plan{plans.length > 1 ? "s" : ""} · {valides} validé
-          {valides > 1 ? "s" : ""} · dépensé {cout.toFixed(2)} $
-        </p>
+      <div className="flex flex-wrap items-end gap-4">
+        <div className="min-w-0 flex-1">
+          <Link href={`/projets/${id}`} className="lien text-sm">
+            ← Fiche du projet
+          </Link>
+          <h1 className="mt-2 text-2xl font-bold tracking-tight">Plans de « {projet.title} »</h1>
+          <p className="text-sm text-sourdine">
+            Format {projet.aspect_ratio} · {plans.length} plan{plans.length > 1 ? "s" : ""} ({dureeLisible(duree)}) ·{" "}
+            {valides} validé{valides > 1 ? "s" : ""} · dépensé {cout.toFixed(2)} $
+          </p>
+        </div>
+        {prets > 0 && (
+          <form action={genererTout.bind(null, id)}>
+            <BoutonEnvoi
+              enCours="Lancement…"
+              confirmer={`Générer ${prets} vidéo${prets > 1 ? "s" : ""} pour environ ${(prets * PRIX_ESTIME_5S_USD).toFixed(2)} $ ?`}
+            >
+              ▶ Générer les {prets} plans prêts
+            </BoutonEnvoi>
+          </form>
+        )}
       </div>
 
-      {erreur && ERREURS[erreur] && <p className="rounded-md bg-red-50 px-4 py-2 text-sm text-alerte">{ERREURS[erreur]}</p>}
-      {enregistre && <p className="rounded-md bg-accent-doux px-4 py-2 text-sm">Plan enregistré.</p>}
+      {sp.erreur && ERREURS[sp.erreur] && <p className="message-erreur">{ERREURS[sp.erreur]}</p>}
+      {sp.enregistre && <p className="message-ok">Plan enregistré.</p>}
+      {sp.ajoute && <p className="message-ok">Plan ajouté.</p>}
+      {sp.importe && <p className="message-ok">{sp.importe} plans créés. Vérifiez chaque photo et chaque mouvement, puis générez.</p>}
+      {sp.lances && <p className="message-ok">{sp.lances} génération(s) lancée(s).</p>}
+      {sp.valide && (
+        <p className="message-ok">
+          Plan validé : il est maintenant dans le <Link href={`/projets/${id}`} className="underline">montage du projet</Link>, à sa
+          place dans l'ordre du scénario.
+        </p>
+      )}
       <SuiviEssais projectId={id} enCours={enCours} />
+
+      <details className="carte" open={plans.length === 0}>
+        <summary className="cursor-pointer font-semibold">⚡ Ajouter toutes les photos et le script en une fois</summary>
+        <div className="mt-4">
+          <ImportGroupe projectId={id} scenario={projet.scenario_text ?? ""} />
+        </div>
+      </details>
 
       {plans.map((plan, i) => {
         const photo = plan.image_path ? liens.get(plan.image_path) : undefined;
         const enGeneration = plan.takes.some((t) => t.status === "en_cours");
         return (
-          <section key={plan.id} id={`plan-${plan.id}`} className="carte flex flex-col gap-4">
+          <section
+            key={plan.id}
+            id={`plan-${plan.id}`}
+            className={`carte flex scroll-mt-24 flex-col gap-4 ${plan.status === "validee" ? "border-succes/50" : ""}`}
+          >
             <div className="flex flex-wrap items-center gap-3">
               <h2 className="text-lg font-bold">Plan {i + 1}</h2>
-              <span
-                className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                  plan.status === "validee" ? "bg-accent text-white" : "bg-fond text-sourdine"
-                }`}
-              >
-                {STATUTS_PLAN[plan.status] ?? plan.status}
-              </span>
-              <div className="ml-auto flex gap-3 text-sm font-semibold">
+              <span className={`pastille ${couleurStatut(plan.status)}`}>{STATUTS_PLAN[plan.status] ?? plan.status}</span>
+              <div className="ml-auto flex items-center gap-1 text-sm">
                 {i > 0 && (
                   <form action={deplacerPlan.bind(null, id, plan.id, -1)}>
-                    <button type="submit" className="text-accent hover:underline">
-                      ↑ Monter
-                    </button>
+                    <BoutonEnvoi className="bouton-discret px-2 py-1" enCours="…">
+                      ↑
+                    </BoutonEnvoi>
                   </form>
                 )}
                 {i < plans.length - 1 && (
                   <form action={deplacerPlan.bind(null, id, plan.id, 1)}>
-                    <button type="submit" className="text-accent hover:underline">
-                      ↓ Descendre
-                    </button>
+                    <BoutonEnvoi className="bouton-discret px-2 py-1" enCours="…">
+                      ↓
+                    </BoutonEnvoi>
                   </form>
                 )}
+                <form action={supprimerPlan.bind(null, id, plan.id)}>
+                  <BoutonEnvoi className="bouton-danger" enCours="…" confirmer={`Supprimer le plan ${i + 1} et ses vidéos ?`}>
+                    Supprimer
+                  </BoutonEnvoi>
+                </form>
               </div>
             </div>
 
-            <form action={modifierPlan.bind(null, id, plan.id)} className="grid gap-4 sm:grid-cols-[200px_1fr]">
-              <div>
-                {photo ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={photo} alt={`Photo du plan ${i + 1}`} className="w-full rounded-md border border-ligne" />
-                ) : (
-                  <div className="flex aspect-video items-center justify-center rounded-md border border-dashed border-ligne text-sm text-sourdine">
-                    Pas de photo
-                  </div>
-                )}
-                <label className="etiquette mt-2" htmlFor={`photo-${plan.id}`}>
-                  {photo ? "Changer la photo" : "Ajouter une photo"}
-                </label>
-                <input id={`photo-${plan.id}`} name="photo" type="file" accept="image/jpeg,image/png,image/webp" className="text-sm" />
-              </div>
-              <ChampsPlan plan={plan} />
-              <div className="sm:col-span-2">
-                <button type="submit" className="bouton-discret">
-                  Enregistrer le plan
-                </button>
-              </div>
-            </form>
+            <FormulairePlan projectId={id} plan={plan} photoUrl={photo} />
 
             <div className="flex flex-wrap items-center gap-3 border-t border-ligne pt-4">
               <form action={genererEssai.bind(null, id, plan.id)}>
-                <button type="submit" className="bouton" disabled={enGeneration}>
-                  {enGeneration ? "Génération en cours…" : plan.takes.length > 0 ? "Générer un autre essai" : "Générer la vidéo"}
-                </button>
+                <BoutonEnvoi enCours="Lancement…" disabled={enGeneration}>
+                  {enGeneration ? "Génération en cours…" : plan.takes.length > 0 ? "▶ Générer un autre essai" : "▶ Générer la vidéo"}
+                </BoutonEnvoi>
               </form>
               <span className="text-sm text-sourdine">environ {PRIX_ESTIME_5S_USD.toFixed(2)} $ par essai de 5 s</span>
-              <form action={supprimerPlan.bind(null, id, plan.id)} className="ml-auto">
-                <button type="submit" className="text-sm font-semibold text-alerte hover:underline">
-                  Supprimer le plan
-                </button>
-              </form>
             </div>
 
             {plan.takes.length > 0 && (
@@ -196,11 +204,11 @@ export default async function PagePlans({
                   return (
                     <div
                       key={t.id}
-                      className={`rounded-md border p-3 ${choisi ? "border-accent ring-2 ring-accent/30" : "border-ligne"}`}
+                      className={`rounded-lg border p-3 ${choisi ? "border-succes bg-succes-doux" : "border-ligne"}`}
                     >
-                      <p className="mb-2 text-sm font-semibold">
+                      <p className="mb-2 flex items-center gap-2 text-sm font-semibold">
                         Essai {plan.takes.length - n}
-                        {choisi && <span className="ml-2 text-accent">✓ choisi pour le montage</span>}
+                        {choisi && <span className="pastille bg-succes text-surface">✓ Dans le montage</span>}
                       </p>
                       {t.status === "en_cours" && <p className="text-sm text-sourdine">Génération en cours…</p>}
                       {t.status === "echouee" && (
@@ -209,21 +217,21 @@ export default async function PagePlans({
                       {video && (
                         <>
                           <video src={video} controls loop playsInline className="w-full rounded-md bg-black" />
-                          <div className="mt-2 flex flex-wrap gap-3 text-sm font-semibold">
+                          <div className="mt-2 flex flex-wrap items-center gap-3 text-sm">
                             {choisi ? (
                               <form action={annulerValidation.bind(null, id, plan.id)}>
-                                <button type="submit" className="text-sourdine hover:underline">
-                                  Annuler le choix
-                                </button>
+                                <BoutonEnvoi className="bouton-discret px-3 py-1" enCours="…">
+                                  Retirer du montage
+                                </BoutonEnvoi>
                               </form>
                             ) : (
                               <form action={validerEssai.bind(null, id, plan.id, t.id)}>
-                                <button type="submit" className="text-accent hover:underline">
+                                <BoutonEnvoi className="bouton px-3 py-1" enCours="Validation…">
                                   ✓ Valider cet essai
-                                </button>
+                                </BoutonEnvoi>
                               </form>
                             )}
-                            <a href={video} download className="text-accent hover:underline">
+                            <a href={video} download className="lien">
                               Télécharger
                             </a>
                           </div>
@@ -240,61 +248,12 @@ export default async function PagePlans({
 
       <section className="carte">
         <h2 className="text-lg font-bold">Ajouter un plan</h2>
-        <p className="mt-1 text-sm text-sourdine">
-          Un plan = une photo + le mouvement voulu. Il donnera un clip de 5 secondes. Comptez environ 20 plans pour 1 min 40.
+        <p className="mt-1 mb-4 text-sm text-sourdine">
+          Un plan = une photo + le mouvement voulu, pour un clip de 5 secondes. Ajoutez autant de plans qu'il en faut : la durée
+          de la vidéo finale n'est pas limitée.
         </p>
-        <form action={ajouterPlan.bind(null, id)} className="mt-4 grid gap-4 sm:grid-cols-[200px_1fr]">
-          <div>
-            <label className="etiquette" htmlFor="photo-nouveau">
-              Photo
-            </label>
-            <input id="photo-nouveau" name="photo" type="file" accept="image/jpeg,image/png,image/webp" className="text-sm" />
-          </div>
-          <ChampsPlan />
-          <div className="sm:col-span-2">
-            <button type="submit" className="bouton">
-              Ajouter le plan
-            </button>
-          </div>
-        </form>
+        <FormulairePlan projectId={id} />
       </section>
-    </div>
-  );
-}
-
-function ChampsPlan({ plan }: { plan?: Plan }) {
-  const suffixe = plan?.id ?? "nouveau";
-  return (
-    <div className="flex flex-col gap-3">
-      <div>
-        <label className="etiquette" htmlFor={`motion-${suffixe}`}>
-          Mouvement voulu (en anglais de préférence)
-        </label>
-        <textarea
-          id={`motion-${suffixe}`}
-          name="motion_prompt"
-          rows={3}
-          defaultValue={plan?.motion_prompt}
-          placeholder="Ex. : slow zoom in, the woman smiles and turns her head toward the camera, soft morning light"
-          className="champ text-sm"
-        />
-      </div>
-      <div>
-        <label className="etiquette" htmlFor={`voix-${suffixe}`}>
-          Texte de la voix off sur ce plan
-        </label>
-        <textarea
-          id={`voix-${suffixe}`}
-          name="voiceover_text"
-          rows={2}
-          defaultValue={plan?.voiceover_text}
-          className="champ text-sm"
-        />
-      </div>
-      <label className="flex items-start gap-2 text-sm">
-        <input type="checkbox" name="consent_confirmed" defaultChecked={plan?.consent_confirmed} className="mt-1" />
-        Les personnes visibles sur la photo sont d'accord pour être animées en vidéo.
-      </label>
     </div>
   );
 }
