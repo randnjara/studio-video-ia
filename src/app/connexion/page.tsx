@@ -1,9 +1,11 @@
 import { envoyerLien } from "./actions";
+import { SessionDepuisLien } from "./session-depuis-lien";
 
 const MESSAGES: Record<string, string> = {
   "email-vide": "Saisissez votre adresse e-mail.",
   "non-invite": "Cette adresse n'a pas été invitée. Demandez une invitation au responsable de l'équipe.",
-  "lien-invalide": "Ce lien de connexion a expiré ou a déjà servi. Demandez-en un nouveau.",
+  "lien-invalide":
+    "Ce lien n'a pas fonctionné. Il a peut-être expiré, ou il a été ouvert dans un autre navigateur que celui de la demande. Demandez un nouveau lien depuis cet appareil.",
   "compte-inactif": "Votre accès a été désactivé. Contactez le responsable de l'équipe.",
 };
 
@@ -24,11 +26,14 @@ export default async function Connexion({
         </p>
       </div>
 
+      <SessionDepuisLien />
+
       {envoye ? (
         <div className="carte">
           <p className="font-semibold">Lien envoyé à {envoye}.</p>
           <p className="mt-1 text-sourdine">
-            Ouvrez l'e-mail sur cet appareil et cliquez sur le lien. Pensez à regarder dans les spams.
+            Ouvrez l'e-mail sur cet appareil, dans ce même navigateur, et cliquez sur le lien. Pensez à regarder dans
+            les spams.
           </p>
         </div>
       ) : (

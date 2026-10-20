@@ -27,7 +27,7 @@ export async function inviterMembre(formData: FormData) {
   const admin = createAdminClient();
   const { error } = await admin.auth.admin.inviteUserByEmail(email, {
     data: { display_name: nom || email.split("@")[0] },
-    redirectTo: `${await siteUrl()}/auth/callback`,
+    redirectTo: `${await siteUrl()}/connexion`,
   });
   if (error) redirect(`/equipe?erreur=invitation&detail=${encodeURIComponent(error.message)}`);
 

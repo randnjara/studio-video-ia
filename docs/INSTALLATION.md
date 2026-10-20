@@ -9,14 +9,7 @@ Trois services à régler : Supabase (comptes et base), Cloudflare (le site) et 
 1. Sur [supabase.com](https://supabase.com), créez un projet nommé `studio-video-ia`. Choisissez la région la plus proche (par exemple Frankfurt) et notez le mot de passe de la base dans un endroit sûr.
 2. Menu **SQL Editor** → **New query**. Copiez tout le contenu du fichier `supabase/migrations/0001_init.sql`, collez-le, puis cliquez sur **Run**. Le message « Success » doit apparaître. Faites de même avec `supabase/migrations/0002_securite.sql`.
 3. Menu **Authentication** → **Sign In / Providers** : laissez **Email** activé et **désactivez** « Allow new users to sign up ». Seules les personnes invitées pourront entrer.
-4. Menu **Authentication** → **Email Templates** :
-   - modèle **Invite user** : remplacez le lien `{{ .ConfirmationURL }}` par
-     `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=invite`
-   - modèle **Magic Link** : remplacez le lien `{{ .ConfirmationURL }}` par
-     `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=magiclink`
-
-   Ainsi, le lien marche même si l'e-mail est ouvert sur un autre appareil que celui de la demande.
-5. Menu **Project Settings** → **API** : gardez cette page ouverte, vous aurez besoin de **Project URL**, de la clé **anon public** et de la clé **service_role** (secrète).
+4. Menu **Project Settings** → **API** : gardez cette page ouverte, vous aurez besoin de **Project URL**, de la clé **anon public** et de la clé **service_role** (secrète).
 
 ## 2. Cloudflare
 
@@ -42,7 +35,7 @@ Trois services à régler : Supabase (comptes et base), Cloudflare (le site) et 
 Dans Supabase, menu **Authentication** → **URL Configuration** :
 
 - **Site URL** : l'adresse du site Cloudflare.
-- **Redirect URLs** : ajoutez `https://<adresse du site>/auth/callback` et `http://localhost:3000/auth/callback`.
+- **Redirect URLs** : ajoutez `https://<adresse du site>/**` et `http://localhost:3000/**`.
 
 ## 4. Votre compte de responsable
 
@@ -59,5 +52,7 @@ Ouvrez l'e-mail reçu et cliquez sur le lien : vous arrivez sur l'application. E
 
 ## Limites à connaître
 
-- Le service d'e-mail gratuit de Supabase n'envoie que quelques e-mails par heure. C'est suffisant pour 4 personnes. Pour plus, on branchera un service d'e-mail gratuit (par exemple Resend).
+- Le service d'e-mail gratuit de Supabase n'envoie que quelques e-mails par heure, en anglais, et ses modèles ne sont pas modifiables. C'est suffisant pour 4 personnes.
+- Avec ces e-mails par défaut, un lien de connexion doit être ouvert dans le même navigateur que celui où il a été demandé. Les liens d'invitation, eux, marchent partout.
+- Plus tard, on pourra brancher un service d'e-mail gratuit (par exemple Resend) : e-mails en français, sans limite gênante, et liens valables sur n'importe quel appareil (modèles pointant vers `/auth/confirm`).
 - Un projet Supabase gratuit se met en pause après 7 jours sans aucune connexion. Il se réactive depuis le tableau de bord Supabase.
