@@ -73,5 +73,21 @@ export async function mettreALaCorbeille(projectId: string) {
   await supabase.from("projects").update({ deleted_at: new Date().toISOString() }).eq("id", projectId);
   await journaliser(supabase, profile.id, "corbeille", "projet", projectId);
   revalidatePath("/");
-  redirect("/?corbeille=1");
+  redirect("/?supprime=1");
+}
+
+// Le scénario est validé : on passe à la production des plans
+export async function validerScenario(projectId: string, valide: boolean) {
+  const { supabase, profile } = await requireProfile();
+  await supabase
+    .from("projects")
+    .update(
+      valide
+        ? { scenario_validated_at: new Date().toISOString(), status: "production" }
+        : { scenario_validated_at: null, status: "scenario" },
+    )
+    .eq("id", projectId);
+  await journaliser(supabase, profile.id, valide ? "validation-scenario" : "reouverture-scenario", "projet", projectId);
+  revalidatePath(`/projets/${projectId}`);
+  redirect(`/projets/${projectId}?${valide ? "scenario-valide" : "scenario-rouvert"}=1`);
 }

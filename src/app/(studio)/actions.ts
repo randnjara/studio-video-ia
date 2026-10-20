@@ -32,3 +32,19 @@ export async function creerProjet(formData: FormData) {
   revalidatePath("/");
   redirect(`/projets/${data.id}`);
 }
+
+export async function supprimerProjet(projectId: string) {
+  const { supabase, profile } = await requireProfile();
+  await supabase.from("projects").update({ deleted_at: new Date().toISOString() }).eq("id", projectId);
+  await journaliser(supabase, profile.id, "corbeille", "projet", projectId);
+  revalidatePath("/");
+  redirect("/?supprime=1");
+}
+
+export async function restaurerProjet(projectId: string) {
+  const { supabase, profile } = await requireProfile();
+  await supabase.from("projects").update({ deleted_at: null }).eq("id", projectId);
+  await journaliser(supabase, profile.id, "restauration", "projet", projectId);
+  revalidatePath("/");
+  redirect("/?corbeille=1");
+}

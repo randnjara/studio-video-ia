@@ -7,8 +7,6 @@ import { requireProfile } from "@/lib/session";
 import { siteUrl } from "@/lib/site-url";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-const MAX_MEMBRES = 4;
-
 async function requireResponsable() {
   const ctx = await requireProfile();
   if (ctx.profile.role !== "responsable") redirect("/");
@@ -20,9 +18,6 @@ export async function inviterMembre(formData: FormData) {
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const nom = String(formData.get("display_name") ?? "").trim();
   if (!email) redirect("/equipe?erreur=email-vide");
-
-  const { count } = await supabase.from("profiles").select("id", { count: "exact", head: true }).eq("active", true);
-  if ((count ?? 0) >= MAX_MEMBRES) redirect("/equipe?erreur=equipe-complete");
 
   const admin = createAdminClient();
   const { error } = await admin.auth.admin.inviteUserByEmail(email, {
@@ -56,4 +51,14 @@ export async function fixerBudget(formData: FormData) {
   await journaliser(supabase, profile.id, "budget", "budget", null, { mois, montant });
   revalidatePath("/equipe");
   redirect("/equipe?budget=1");
+}
+
+// Le nombre de responsables n'est pas limité : l'équipe peut grandir et se réorganiser
+export async function changerRole(userId: string, role: "responsable" | "membre") {
+  const { supabase, profile } = await requireResponsable();
+  if (userId === profile.id) redirect("/equipe?erreur=soi-meme");
+
+  await supabase.from("profiles").update({ role }).eq("id", userId);
+  await journaliser(supabase, profile.id, "role", "membre", userId, { role });
+  revalidatePath("/equipe");
 }
