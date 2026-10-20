@@ -25,6 +25,7 @@ Trois services à régler : Supabase (comptes et base), Cloudflare (le site) et 
    | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | déjà dans `.env.production` | — |
    | `SUPABASE_SERVICE_ROLE_KEY` | clé service_role | **Secret** (exécution seulement) |
    | `NEXT_PUBLIC_SITE_URL` | l'adresse du site, par exemple `https://studio-video-ia.votre-nom.workers.dev` | Texte |
+   | `RUNPOD_API_KEY` | clé RunPod (voir partie 5) | **Secret** (exécution seulement) |
 
 4. Lancez le déploiement. Cloudflare affiche l'adresse du site.
 
@@ -43,12 +44,23 @@ Dans Supabase, menu **Authentication** → **Users** → **Invite user**, saisis
 
 Ouvrez l'e-mail reçu et cliquez sur le lien : vous arrivez sur l'application. Ensuite, invitez les membres depuis la page **Équipe et budget**, sans repasser par Supabase.
 
+## 5. Générer les vidéos (RunPod)
+
+1. Créez un compte sur [runpod.io](https://www.runpod.io) et ajoutez au moins 10 $ de crédit (**Billing**).
+2. Menu **Settings** → **API Keys** → **Create API Key**. Donnez-lui un nom (`studio`) et l'accès **All** (ou au minimum *Serverless : lecture et écriture*). Copiez la clé : elle ne s'affiche qu'une fois.
+3. Dans Cloudflare, ouvrez le Worker `studio-video-ia` → **Settings** → **Variables and Secrets** → **Add**. Type **Secret**, nom `RUNPOD_API_KEY`, valeur : la clé copiée. Enregistrez (**Deploy**).
+
+Le studio utilise le modèle Wan 2.2 image → vidéo déjà hébergé par RunPod : rien à installer, environ 0,30 $ par clip de 5 s en 720p, et les échecs ne sont pas facturés. Quand le volume augmentera, on pourra passer à notre propre machine RunPod, environ 5 fois moins chère par clip.
+
+Photos et vidéos sont rangées dans le stockage Supabase (dossier privé `medias`, 1 Go gratuit, soit environ 200 clips). Cloudflare R2 prendra le relais plus tard pour les gros volumes.
+
 ## Vérifications
 
 - [ ] Je me connecte et je vois « Responsable » en haut à droite.
 - [ ] Je crée un projet dans « Mon espace » et un autre dans « Équipe ».
 - [ ] J'invite un membre. Il voit le projet d'équipe, mais pas mon projet personnel.
 - [ ] Je fixe un budget du mois sur la page Équipe et budget.
+- [ ] Dans un projet, « Plans et vidéos » : j'ajoute un plan avec une photo et un mouvement, je clique « Générer la vidéo », la vidéo apparaît en 1 à 4 minutes.
 
 ## Limites à connaître
 
