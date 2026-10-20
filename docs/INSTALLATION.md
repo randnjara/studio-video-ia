@@ -21,8 +21,8 @@ Trois services à régler : Supabase (comptes et base), Cloudflare (le site) et 
 
    | Nom | Valeur | Type |
    | --- | --- | --- |
-   | `NEXT_PUBLIC_SUPABASE_URL` | Project URL de Supabase | Texte |
-   | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | clé anon public | Texte |
+   | `NEXT_PUBLIC_SUPABASE_URL` | déjà dans `.env.production` | — |
+   | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | déjà dans `.env.production` | — |
    | `SUPABASE_SERVICE_ROLE_KEY` | clé service_role | **Secret** (exécution seulement) |
    | `NEXT_PUBLIC_SITE_URL` | l'adresse du site, par exemple `https://studio-video-ia.votre-nom.workers.dev` | Texte |
 
