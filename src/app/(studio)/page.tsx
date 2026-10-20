@@ -2,7 +2,7 @@ import Link from "next/link";
 import { BoutonEnvoi } from "@/components/bouton-envoi";
 import { requireProfile } from "@/lib/session";
 import { FORMATS, LIBELLES_FORMAT, STATUTS_PROJET, couleurStatut, dateCourte } from "@/lib/libelles";
-import { creerProjet, restaurerProjet, supprimerProjet } from "./actions";
+import { creerProjet, restaurerProjet, supprimerProjet, viderCorbeille } from "./actions";
 
 type Espace = { id: string; name: string; kind: "personnel" | "equipe"; owner_id: string | null };
 type Projet = {
@@ -25,9 +25,9 @@ const ERREURS: Record<string, string> = {
 export default async function Accueil({
   searchParams,
 }: {
-  searchParams: Promise<{ erreur?: string; corbeille?: string; supprime?: string }>;
+  searchParams: Promise<{ erreur?: string; corbeille?: string; supprime?: string; vide?: string }>;
 }) {
-  const { erreur, corbeille, supprime } = await searchParams;
+  const { erreur, corbeille, supprime, vide } = await searchParams;
   const { supabase, profile } = await requireProfile();
 
   const [{ data: espacesBruts }, { data: projetsBruts }] = await Promise.all([
@@ -58,6 +58,7 @@ export default async function Accueil({
       </div>
 
       {supprime && <p className="message-ok">Projet mis à la corbeille. Vous pouvez le restaurer en bas de la page.</p>}
+      {vide && <p className="message-ok">Corbeille vidée.</p>}
       {erreur && ERREURS[erreur] && <p className="message-erreur">{ERREURS[erreur]}</p>}
 
       <details className="carte group" open={projets.length === 0}>
@@ -162,7 +163,18 @@ export default async function Accueil({
       {supprimes.length > 0 && (
         <details className="carte" open={Boolean(corbeille)}>
           <summary className="cursor-pointer font-semibold">Corbeille ({supprimes.length})</summary>
-          <p className="mt-1 text-sm text-sourdine">Les projets de la corbeille peuvent être restaurés.</p>
+          <div className="mt-1 flex flex-wrap items-center gap-3">
+            <p className="flex-1 text-sm text-sourdine">Les projets de la corbeille peuvent être restaurés.</p>
+            <form action={viderCorbeille}>
+              <BoutonEnvoi
+                className="bouton-danger"
+                enCours="Suppression…"
+                confirmer={`Effacer définitivement ${supprimes.length} projet(s), avec leurs plans ? C'est irréversible.`}
+              >
+                Vider la corbeille
+              </BoutonEnvoi>
+            </form>
+          </div>
           <ul className="mt-3 divide-y divide-ligne">
             {supprimes.map((p) => (
               <li key={p.id} className="flex items-center gap-3 py-2 text-sm">

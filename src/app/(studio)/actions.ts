@@ -48,3 +48,12 @@ export async function restaurerProjet(projectId: string) {
   revalidatePath("/");
   redirect("/?corbeille=1");
 }
+
+// Efface pour de bon les projets de la corbeille (avec leurs plans et leur historique)
+export async function viderCorbeille() {
+  const { supabase, profile } = await requireProfile();
+  const { data } = await supabase.from("projects").delete().not("deleted_at", "is", null).select("id");
+  await journaliser(supabase, profile.id, "vidage-corbeille", "projet", null, { nombre: data?.length ?? 0 });
+  revalidatePath("/");
+  redirect("/?vide=1");
+}
