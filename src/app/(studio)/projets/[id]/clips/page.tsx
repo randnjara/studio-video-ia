@@ -2,7 +2,7 @@ import Link from "next/link";
 import { BoutonEnvoi } from "@/components/bouton-envoi";
 import { STATUTS_PLAN, couleurStatut } from "@/lib/libelles";
 import { signerLiens, suivreEssais } from "@/lib/production";
-import { PRIX_ESTIME_5S_USD } from "@/lib/runpod";
+import { MOTEURS, type Moteur, estMoteur, moteurParDefaut } from "@/lib/runpod";
 import { getClient } from "@/lib/session";
 import { refuserClips, regenerer, retirerValidation, supprimerClip, validerClip } from "./actions";
 import { SuiviEssais } from "./suivi-essais";
@@ -11,6 +11,7 @@ type Essai = {
   id: string;
   status: "en_attente" | "en_cours" | "terminee" | "echouee" | "annulee";
   runpod_job_id: string | null;
+  moteur: string;
   video_path: string | null;
   cost_usd: number | null;
   error: string | null;
@@ -44,7 +45,9 @@ const FILTRES = [
 ] as const;
 
 const SELECT =
-  "id, position, image_path, voiceover_text, status, validated_take_id, takes!takes_scene_id_fkey(id, status, runpod_job_id, video_path, cost_usd, error, created_at)";
+  "id, position, image_path, voiceover_text, status, validated_take_id, takes!takes_scene_id_fkey(id, status, runpod_job_id, moteur, video_path, cost_usd, error, created_at)";
+
+const moteurDe = (t: Essai): Moteur => (estMoteur(t.moteur) ? t.moteur : "qualite");
 
 export default async function PageClips({
   params,
@@ -71,7 +74,13 @@ export default async function PageClips({
   const enCoursAvant = plans.flatMap((p) =>
     p.takes
       .filter((t) => t.status === "en_cours")
-      .map((t) => ({ id: t.id, scene_id: p.id, runpod_job_id: t.runpod_job_id, sceneValidee: p.status === "validee" })),
+      .map((t) => ({
+        id: t.id,
+        scene_id: p.id,
+        runpod_job_id: t.runpod_job_id,
+        moteur: moteurDe(t),
+        sceneValidee: p.status === "validee",
+      })),
   );
   if (enCoursAvant.length > 0) {
     const restants = await suivreEssais(supabase, id, enCoursAvant);
@@ -150,6 +159,7 @@ export default async function PageClips({
           const n = plans.indexOf(plan) + 1;
           const photo = plan.image_path ? liens.get(plan.image_path) : undefined;
           const tourne = plan.takes.some((t) => t.status === "en_cours");
+          const prochainMoteur = plan.takes[0] ? moteurDe(plan.takes[0]) : moteurParDefaut();
           return (
             <section key={plan.id} id={`plan-${plan.id}`} className="carte flex scroll-mt-24 flex-col gap-4">
               <div className="flex flex-wrap items-center gap-3">
@@ -166,7 +176,7 @@ export default async function PageClips({
                       className="bouton-discret px-3 py-1.5 text-sm"
                       enCours="Lancement…"
                       disabled={tourne}
-                      confirmer={`Générer un nouveau clip pour environ ${PRIX_ESTIME_5S_USD.toFixed(2)} $ ?`}
+                      confirmer={`Générer un nouveau clip (${MOTEURS[prochainMoteur].libelle}) pour environ ${MOTEURS[prochainMoteur].prix5s.toFixed(2)} $ ?`}
                     >
                       ↻ Regénérer
                     </BoutonEnvoi>
@@ -193,6 +203,7 @@ export default async function PageClips({
                     <div key={t.id} className={`rounded-lg border p-3 ${choisi ? "border-succes bg-succes-doux" : "border-ligne"}`}>
                       <p className="mb-2 flex items-center gap-2 text-sm font-semibold">
                         Essai {plan.takes.length - k}
+                        <span className="font-normal text-sourdine">· {MOTEURS[moteurDe(t)].libelle}</span>
                         {choisi && <span className="pastille bg-succes text-surface">✓ Validé</span>}
                       </p>
                       {t.status === "en_cours" && (

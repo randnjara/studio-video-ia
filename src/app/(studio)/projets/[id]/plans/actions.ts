@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { journaliser } from "@/lib/journal";
 import { MOUVEMENT_PAR_DEFAUT } from "@/lib/libelles";
 import { lancerPlan, marquerEnProduction } from "@/lib/production";
+import { estMoteur, moteurParDefaut, moteursDisponibles } from "@/lib/runpod";
 import { requireProfile } from "@/lib/session";
 
 function retour(projectId: string, params = ""): never {
@@ -154,6 +155,8 @@ export async function envoyerALaGeneration(projectId: string, formData: FormData
   const { supabase, profile } = await requireProfile();
   const tous = formData.get("tous") === "1";
   const choisis = new Set(formData.getAll("plans").map(String));
+  const demande = formData.get("moteur");
+  const moteur = estMoteur(demande) && moteursDisponibles().includes(demande) ? demande : moteurParDefaut();
 
   const [{ data: projet }, { data: scenes }] = await Promise.all([
     supabase.from("projects").select("aspect_ratio").eq("id", projectId).single(),
@@ -176,7 +179,7 @@ export async function envoyerALaGeneration(projectId: string, formData: FormData
   if (aLancer.length === 0) retour(projectId, "?erreur=selection-vide");
 
   // Les générations partent en même temps : RunPod les traite en parallèle
-  const erreurs = await Promise.all(aLancer.map((s) => lancerPlan(supabase, profile.id, s, format)));
+  const erreurs = await Promise.all(aLancer.map((s) => lancerPlan(supabase, profile.id, s, format, moteur)));
   const lances = erreurs.filter((e) => e === null).length;
   const premiere = erreurs.find((e) => e !== null);
 

@@ -1,13 +1,39 @@
 import "server-only";
 
-// Modèle Wan 2.2 image → vidéo, hébergé par RunPod (« Public Endpoint ») :
-// rien à installer, on paie seulement les vidéos réussies.
-const BASE = "https://api.runpod.ai/v2/wan-2-2-i2v-720";
+// Deux façons de générer une vidéo avec le modèle Wan 2.2 (image → vidéo) :
+// - « qualite » : le service tout prêt de RunPod (Public Endpoint), 720p, environ 0,30 $ le clip de 5 s ;
+// - « eco-480 » / « eco-720 » : notre propre serveur RunPod (dossier worker/), même modèle en version
+//   rapide (4 étapes), facturé à la seconde de GPU. Disponible dès que RUNPOD_ENDPOINT_ID est renseigné.
+const PUBLIC = "https://api.runpod.ai/v2/wan-2-2-i2v-720";
 
-// Prix affiché par RunPod pour une vidéo de 5 s en 720p, utilisé tant que la facture réelle n'est pas connue
-export const PRIX_ESTIME_5S_USD = 0.3;
+export type Moteur = "qualite" | "eco-480" | "eco-720";
 
-export const TAILLES: Record<string, string> = {
+// Prix estimés d'un clip de 5 s, comptés tout de suite pour que le plafond du mois bloque à temps.
+// Pour notre serveur, le coût réel est recalculé ensuite à partir du temps de GPU.
+export const MOTEURS: Record<Moteur, { libelle: string; prix5s: number }> = {
+  "eco-480": { libelle: "Économique 480p", prix5s: 0.05 },
+  "eco-720": { libelle: "Économique 720p", prix5s: 0.12 },
+  qualite: { libelle: "Qualité max 720p", prix5s: 0.3 },
+};
+
+export const PRIX_ESTIME_5S_USD = MOTEURS.qualite.prix5s;
+
+// Prix d'une seconde de GPU sur notre serveur (80 Go, A100 par défaut), à ajuster si on change de carte
+const PRIX_SECONDE_GPU = Number(process.env.RUNPOD_PRIX_SECONDE ?? 0.00076);
+
+export function moteursDisponibles(): Moteur[] {
+  return process.env.RUNPOD_ENDPOINT_ID ? ["eco-480", "eco-720", "qualite"] : ["qualite"];
+}
+
+export function moteurParDefaut(): Moteur {
+  return moteursDisponibles()[0];
+}
+
+export function estMoteur(valeur: unknown): valeur is Moteur {
+  return typeof valeur === "string" && valeur in MOTEURS;
+}
+
+const TAILLES: Record<string, string> = {
   "16:9": "1280*720",
   "9:16": "720*1280",
   "1:1": "960*960",
@@ -23,8 +49,15 @@ function cle() {
   return k;
 }
 
-async function appel(chemin: string, init?: RequestInit) {
-  const res = await fetch(`${BASE}${chemin}`, {
+function base(moteur: Moteur) {
+  if (moteur === "qualite") return PUBLIC;
+  const id = process.env.RUNPOD_ENDPOINT_ID;
+  if (!id) throw new Error("Notre serveur RunPod n'est pas encore configuré (RUNPOD_ENDPOINT_ID).");
+  return `https://api.runpod.ai/v2/${encodeURIComponent(id)}`;
+}
+
+async function appel(moteur: Moteur, chemin: string, init?: RequestInit) {
+  const res = await fetch(`${base(moteur)}${chemin}`, {
     ...init,
     headers: { Authorization: `Bearer ${cle()}`, "Content-Type": "application/json" },
   });
@@ -34,51 +67,77 @@ async function appel(chemin: string, init?: RequestInit) {
 }
 
 export async function lancerGeneration(p: {
+  moteur: Moteur;
   prompt: string;
   imageUrl: string;
   format: string;
   duree: number;
   seed: number;
+  // Notre serveur dépose lui-même la vidéo dans le stockage, à ce chemin, grâce à ce lien d'envoi
+  videoPath: string;
+  uploadUrl: string;
 }): Promise<string> {
-  const data = await appel("/run", {
-    method: "POST",
-    body: JSON.stringify({
-      input: {
-        prompt: p.prompt,
-        image: p.imageUrl,
-        negative_prompt: PROMPT_NEGATIF,
-        size: TAILLES[p.format] ?? TAILLES["16:9"],
-        duration: p.duree,
-        num_inference_steps: 30,
-        guidance: 5,
-        flow_shift: 5,
-        seed: p.seed,
-        enable_prompt_optimization: false,
-        enable_safety_checker: true,
-      },
-    }),
-  });
+  const input =
+    p.moteur === "qualite"
+      ? {
+          prompt: p.prompt,
+          image: p.imageUrl,
+          negative_prompt: PROMPT_NEGATIF,
+          size: TAILLES[p.format] ?? TAILLES["16:9"],
+          duration: p.duree,
+          num_inference_steps: 30,
+          guidance: 5,
+          flow_shift: 5,
+          seed: p.seed,
+          enable_prompt_optimization: false,
+          enable_safety_checker: true,
+        }
+      : {
+          prompt: p.prompt,
+          image_url: p.imageUrl,
+          negative_prompt: PROMPT_NEGATIF,
+          resolution: p.moteur === "eco-720" ? "720p" : "480p",
+          format: p.format,
+          duration: p.duree,
+          seed: p.seed,
+          video_path: p.videoPath,
+          upload_url: p.uploadUrl,
+        };
+  const data = await appel(p.moteur, "/run", { method: "POST", body: JSON.stringify({ input }) });
   return String(data.id);
 }
 
 export type StatutRunPod =
   | { etat: "en_cours" }
-  | { etat: "terminee"; videoUrl: string; coutUsd: number | null; secondes: number | null }
+  | {
+      etat: "terminee";
+      // Service tout prêt : vidéo à télécharger. Notre serveur : vidéo déjà rangée dans le stockage.
+      videoUrl?: string;
+      videoPath?: string;
+      coutUsd: number | null;
+      secondes: number | null;
+    }
   | { etat: "echouee"; erreur: string };
 
-export async function lireStatut(jobId: string): Promise<StatutRunPod> {
-  const data = await appel(`/status/${encodeURIComponent(jobId)}`);
+export async function lireStatut(moteur: Moteur, jobId: string): Promise<StatutRunPod> {
+  const data = await appel(moteur, `/status/${encodeURIComponent(jobId)}`);
   switch (data.status) {
     case "COMPLETED": {
+      const secondes = typeof data.executionTime === "number" ? data.executionTime / 1000 : null;
+      if (data.output?.error) return { etat: "echouee", erreur: String(data.output.error).slice(0, 500) };
+      if (moteur !== "qualite") {
+        if (!data.output?.video_path) return { etat: "echouee", erreur: "Le serveur n'a pas renvoyé de vidéo." };
+        return {
+          etat: "terminee",
+          videoPath: String(data.output.video_path),
+          secondes,
+          coutUsd: secondes !== null ? Math.round(secondes * PRIX_SECONDE_GPU * 10000) / 10000 : null,
+        };
+      }
       const url = data.output?.video_url ?? data.output?.result ?? data.output?.url;
       if (!url) return { etat: "echouee", erreur: "RunPod n'a pas renvoyé de vidéo." };
       const cout = Number(data.output?.cost);
-      return {
-        etat: "terminee",
-        videoUrl: String(url),
-        coutUsd: Number.isFinite(cout) ? cout : null,
-        secondes: typeof data.executionTime === "number" ? data.executionTime / 1000 : null,
-      };
+      return { etat: "terminee", videoUrl: String(url), coutUsd: Number.isFinite(cout) ? cout : null, secondes };
     }
     case "FAILED":
     case "CANCELLED":
@@ -89,6 +148,6 @@ export async function lireStatut(jobId: string): Promise<StatutRunPod> {
   }
 }
 
-export async function annulerJob(jobId: string) {
-  await appel(`/cancel/${encodeURIComponent(jobId)}`, { method: "POST" }).catch(() => undefined);
+export async function annulerJob(moteur: Moteur, jobId: string) {
+  await appel(moteur, `/cancel/${encodeURIComponent(jobId)}`, { method: "POST" }).catch(() => undefined);
 }

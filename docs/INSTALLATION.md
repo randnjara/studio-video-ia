@@ -50,9 +50,32 @@ Ouvrez l'e-mail reçu et cliquez sur le lien : vous arrivez sur l'application. E
 2. Menu **Settings** → **API Keys** → **Create API Key**. Donnez-lui un nom (`studio`) et l'accès **All** (ou au minimum *Serverless : lecture et écriture*). Copiez la clé : elle ne s'affiche qu'une fois.
 3. Dans Cloudflare, ouvrez le Worker `studio-video-ia` → **Settings** → **Variables and Secrets** → **Add**. Type **Secret**, nom `RUNPOD_API_KEY`, valeur : la clé copiée. Enregistrez (**Deploy**).
 
-Le studio utilise le modèle Wan 2.2 image → vidéo déjà hébergé par RunPod : rien à installer, environ 0,30 $ par clip de 5 s en 720p, et les échecs ne sont pas facturés. Quand le volume augmentera, on pourra passer à notre propre machine RunPod, environ 5 fois moins chère par clip.
+Le studio utilise le modèle Wan 2.2 image → vidéo déjà hébergé par RunPod : rien à installer, environ 0,30 $ par clip de 5 s en 720p, et les échecs ne sont pas facturés. Pour des clips moins chers, créez notre propre serveur RunPod (partie 6).
 
 Photos et vidéos sont rangées dans le stockage Supabase (dossier privé `medias`, 1 Go gratuit, soit environ 200 clips). Cloudflare R2 prendra le relais plus tard pour les gros volumes.
+
+## 6. Serveur de génération économique (RunPod)
+
+Notre propre serveur fait tourner le même modèle Wan 2.2 en version rapide (4 étapes au lieu de 30). On paie seulement les secondes de GPU, autour de 0,05 $ par clip de 5 s en 480p au lieu de 0,30 $. Le code est dans le dossier `worker/` du dépôt.
+
+1. Sur [runpod.io](https://www.runpod.io), menu **Serverless** → **New Endpoint** → source **GitHub Repo**. Autorisez RunPod à lire le dépôt `randnjara/studio-video-ia`.
+2. Réglages de la construction :
+   - branche `main` ;
+   - **Dockerfile Path** `worker/Dockerfile` ;
+   - **Build Context** `worker`.
+3. Réglages du serveur :
+   - **GPU** : 80 GB (A100 ou H100) ;
+   - **Max Workers** : 2 ;
+   - **Active Workers** : 0, pour ne rien payer quand rien ne tourne ;
+   - **Idle Timeout** : 30 s, pour que les clips d'une même série profitent du serveur déjà démarré ;
+   - **Execution Timeout** : 900 s ;
+   - **Container Disk** : 150 GB, car le modèle pèse environ 70 Go.
+4. Lancez la création. La construction prend 10 à 20 minutes. Copiez ensuite l'**Endpoint ID**, une suite de lettres et de chiffres en haut de la page de l'endpoint. Ce n'est pas un secret : envoyez-le dans la discussion pour qu'il soit ajouté au site.
+5. La clé `RUNPOD_API_KEY` déjà enregistrée dans Cloudflare sert aussi pour ce serveur.
+
+Dans l'onglet « Plans », la barre d'envoi propose alors trois choix : **Économique 480p**, **Économique 720p** et **Qualité max 720p**, qui garde le service tout prêt à 0,30 $.
+
+Un démarrage « à froid » se produit au premier clip, puis après chaque pause. Le serveur télécharge alors le modèle, ce qui prend 2 à 5 minutes et ajoute environ 0,10 à 0,20 $ à ce clip. Il vaut donc mieux envoyer les plans par séries. Si les démarrages à froid deviennent fréquents, on peut ajouter un **Network Volume** de 100 Go (environ 7 $ par mois) : le modèle y reste stocké et le démarrage est plus rapide.
 
 ## Vérifications
 

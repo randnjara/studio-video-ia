@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { journaliser } from "@/lib/journal";
-import { PRIX_ESTIME_5S_USD, lancerGeneration, lireStatut } from "@/lib/runpod";
+import { MOTEURS, type Moteur, lancerGeneration, lireStatut } from "@/lib/runpod";
 
 // Outils côté serveur partagés par les pages Plans, Clips et Montage.
 
@@ -52,7 +52,13 @@ type Plan = {
 };
 
 // Lance une génération pour un plan déjà chargé. Renvoie un code d'erreur, ou null si c'est parti.
-export async function lancerPlan(supabase: SupabaseClient, auteurId: string, plan: Plan, format: string) {
+export async function lancerPlan(
+  supabase: SupabaseClient,
+  auteurId: string,
+  plan: Plan,
+  format: string,
+  moteur: Moteur,
+) {
   if (!plan.image_path) return "sans-photo";
   if (!plan.motion_prompt) return "sans-prompt";
   if (!plan.consent_confirmed) return "sans-accord";
@@ -67,7 +73,9 @@ export async function lancerPlan(supabase: SupabaseClient, auteurId: string, pla
       scene_id: plan.id,
       status: "en_cours",
       seed,
-      cost_usd: (PRIX_ESTIME_5S_USD * duree) / 5,
+      cost_usd: (MOTEURS[moteur].prix5s * duree) / 5,
+      moteur,
+      resolution: moteur === "eco-480" ? "480p" : "720p",
       created_by: auteurId,
     })
     .select("id")
@@ -80,7 +88,27 @@ export async function lancerPlan(supabase: SupabaseClient, auteurId: string, pla
       .createSignedUrl(plan.image_path, 60 * 60);
     if (errSigne || !signee) throw new Error("Photo introuvable dans le stockage.");
 
-    const jobId = await lancerGeneration({ prompt: plan.motion_prompt, imageUrl: signee.signedUrl, format, duree, seed });
+    // La vidéo sera rangée à côté des photos du projet ; notre serveur l'y dépose lui-même
+    const videoPath = `${plan.image_path.split("/")[0]}/essais/${essai.id}.mp4`;
+    let uploadUrl = "";
+    if (moteur !== "qualite") {
+      const { data: envoi, error: errEnvoi } = await supabase.storage
+        .from(BUCKET)
+        .createSignedUploadUrl(videoPath, { upsert: true });
+      if (errEnvoi || !envoi) throw new Error("Impossible de préparer l'envoi de la vidéo.");
+      uploadUrl = envoi.signedUrl;
+    }
+
+    const jobId = await lancerGeneration({
+      moteur,
+      prompt: plan.motion_prompt,
+      imageUrl: signee.signedUrl,
+      format,
+      duree,
+      seed,
+      videoPath,
+      uploadUrl,
+    });
     await Promise.all([
       supabase.from("takes").update({ runpod_job_id: jobId }).eq("id", essai.id),
       plan.status === "validee"
@@ -102,7 +130,13 @@ export async function lancerPlan(supabase: SupabaseClient, auteurId: string, pla
   return null;
 }
 
-type EssaiEnCours = { id: string; scene_id: string; runpod_job_id: string | null; sceneValidee: boolean };
+type EssaiEnCours = {
+  id: string;
+  scene_id: string;
+  runpod_job_id: string | null;
+  moteur: Moteur;
+  sceneValidee: boolean;
+};
 
 // Demande à RunPod où en sont les essais donnés et range les vidéos terminées dans le stockage.
 // Renvoie le nombre d'essais encore en cours.
@@ -112,7 +146,7 @@ export async function suivreEssais(supabase: SupabaseClient, projectId: string, 
       if (!essai.runpod_job_id) return 1;
       let statut;
       try {
-        statut = await lireStatut(essai.runpod_job_id);
+        statut = await lireStatut(essai.moteur, essai.runpod_job_id);
       } catch {
         return 1;
       }
@@ -140,13 +174,18 @@ export async function suivreEssais(supabase: SupabaseClient, projectId: string, 
         return 0;
       }
 
-      const video = await fetch(statut.videoUrl);
-      if (!video.ok) return 1;
       const chemin = `${projectId}/essais/${essai.id}.mp4`;
-      const { error } = await supabase.storage
-        .from(BUCKET)
-        .upload(chemin, await video.arrayBuffer(), { contentType: "video/mp4", upsert: true });
-      if (error) return 1;
+      if (statut.videoPath) {
+        // Notre serveur a déjà déposé la vidéo : on vérifie seulement que c'est bien le chemin prévu
+        if (statut.videoPath !== chemin) return 1;
+      } else if (statut.videoUrl) {
+        const video = await fetch(statut.videoUrl);
+        if (!video.ok) return 1;
+        const { error } = await supabase.storage
+          .from(BUCKET)
+          .upload(chemin, await video.arrayBuffer(), { contentType: "video/mp4", upsert: true });
+        if (error) return 1;
+      } else return 1;
       await supabase
         .from("takes")
         .update({

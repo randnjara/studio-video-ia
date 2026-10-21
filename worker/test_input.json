@@ -1,0 +1,12 @@
+{
+  "input": {
+    "image_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3f/Fronalpstock_big.jpg/1280px-Fronalpstock_big.jpg",
+    "prompt": "slow cinematic drone shot moving forward over the mountains, clouds drifting",
+    "resolution": "480p",
+    "format": "16:9",
+    "duration": 5,
+    "seed": 42,
+    "video_path": "test/essais/test.mp4",
+    "upload_url": "https://example.invalid/test"
+  }
+}
