@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { journaliser } from "@/lib/journal";
 import { MOUVEMENT_PAR_DEFAUT } from "@/lib/libelles";
 import { lancerPlan, marquerEnProduction } from "@/lib/production";
-import { estMoteur, moteurParDefaut, moteursDisponibles } from "@/lib/runpod";
+import { estMoteur, moteursDisponibles } from "@/lib/runpod";
 import { requireProfile } from "@/lib/session";
 
 function retour(projectId: string, params = ""): never {
@@ -156,7 +156,8 @@ export async function envoyerALaGeneration(projectId: string, formData: FormData
   const tous = formData.get("tous") === "1";
   const choisis = new Set(formData.getAll("plans").map(String));
   const demande = formData.get("moteur");
-  const moteur = estMoteur(demande) && moteursDisponibles().includes(demande) ? demande : moteurParDefaut();
+  const disponibles = await moteursDisponibles();
+  const moteur = estMoteur(demande) && disponibles.includes(demande) ? demande : disponibles[0];
 
   const [{ data: projet }, { data: scenes }] = await Promise.all([
     supabase.from("projects").select("aspect_ratio").eq("id", projectId).single(),

@@ -68,7 +68,8 @@ export default async function PageClips({
       .order("position")
       .order("created_at", { referencedTable: "takes", ascending: false });
 
-  let plans = ((await lire()).data ?? []) as Plan[];
+  const [premiere, defaut] = await Promise.all([lire(), moteurParDefaut()]);
+  let plans = (premiere.data ?? []) as Plan[];
 
   // Range d'abord les vidéos qui ont fini pendant que la page était fermée (seulement s'il y en a en cours)
   const enCoursAvant = plans.flatMap((p) =>
@@ -159,7 +160,7 @@ export default async function PageClips({
           const n = plans.indexOf(plan) + 1;
           const photo = plan.image_path ? liens.get(plan.image_path) : undefined;
           const tourne = plan.takes.some((t) => t.status === "en_cours");
-          const prochainMoteur = plan.takes[0] ? moteurDe(plan.takes[0]) : moteurParDefaut();
+          const prochainMoteur = plan.takes[0] ? moteurDe(plan.takes[0]) : defaut;
           return (
             <section key={plan.id} id={`plan-${plan.id}`} className="carte flex scroll-mt-24 flex-col gap-4">
               <div className="flex flex-wrap items-center gap-3">

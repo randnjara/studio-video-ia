@@ -48,7 +48,7 @@ export default async function PagePlans({
   const supabase = await getClient();
 
   // Le cadre du projet vérifie déjà la connexion et l'existence du projet : tout part en même temps
-  const [{ data: projet }, { data }, { data: versions }] = await Promise.all([
+  const [{ data: projet }, { data }, { data: versions }, moteurs] = await Promise.all([
     supabase.from("projects").select("scenario_text").eq("id", id).maybeSingle(),
     supabase
       .from("scenes")
@@ -64,6 +64,7 @@ export default async function PagePlans({
       .eq("kind", "scenario")
       .order("created_at", { ascending: false })
       .limit(8),
+    moteursDisponibles(),
   ]);
   const plans = (data ?? []) as Plan[];
   const liens = await signerLiens(
@@ -159,7 +160,7 @@ export default async function PagePlans({
         ) : (
           <>
             <form id="selection" action={envoyerALaGeneration.bind(null, id)} className="carte sticky top-2 z-[5]">
-              <BarreSelection moteurs={moteursDisponibles().map((m) => ({ id: m, ...MOTEURS[m] }))} prets={nouveaux} />
+              <BarreSelection moteurs={moteurs.map((m) => ({ id: m, ...MOTEURS[m] }))} prets={nouveaux} />
             </form>
             {/* Au-delà de 4 plans, le tableau se replie (menu déroulant) pour garder la page lisible */}
             <details className="group" open={plans.length <= 4 || ouvert}>
