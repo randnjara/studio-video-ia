@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { journaliser } from "@/lib/journal";
 import { lancerPlan, suivreEssais } from "@/lib/production";
+import { estMoteur, moteurParDefaut } from "@/lib/runpod";
 import { requireProfile } from "@/lib/session";
 
 function retour(projectId: string, params = ""): never {
@@ -16,13 +17,14 @@ export async function actualiserEssais(projectId: string): Promise<number> {
   const { supabase } = await requireProfile();
   const { data } = await supabase
     .from("takes")
-    .select("id, scene_id, runpod_job_id, scenes!takes_scene_id_fkey!inner(project_id, status)")
+    .select("id, scene_id, runpod_job_id, moteur, scenes!takes_scene_id_fkey!inner(project_id, status)")
     .eq("status", "en_cours")
     .eq("scenes.project_id", projectId);
   const essais = (data ?? []).map((t) => ({
     id: t.id,
     scene_id: t.scene_id,
     runpod_job_id: t.runpod_job_id,
+    moteur: estMoteur(t.moteur) ? t.moteur : ("qualite" as const),
     sceneValidee: (t.scenes as unknown as { status: string }).status === "validee",
   }));
   if (essais.length === 0) return 0;
@@ -86,7 +88,7 @@ export async function supprimerClip(projectId: string, sceneId: string, takeId: 
 
 export async function regenerer(projectId: string, sceneId: string) {
   const { supabase, profile } = await requireProfile();
-  const [{ data: projet }, { data: plan }] = await Promise.all([
+  const [{ data: projet }, { data: plan }, { data: dernier }] = await Promise.all([
     supabase.from("projects").select("aspect_ratio").eq("id", projectId).single(),
     supabase
       .from("scenes")
@@ -94,8 +96,17 @@ export async function regenerer(projectId: string, sceneId: string) {
       .eq("id", sceneId)
       .eq("project_id", projectId)
       .single(),
+    // Un nouvel essai part avec le même moteur que le précédent
+    supabase
+      .from("takes")
+      .select("moteur")
+      .eq("scene_id", sceneId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
   ]);
   if (!plan) retour(projectId, "?erreur=plan");
-  const erreur = await lancerPlan(supabase, profile.id, plan, projet?.aspect_ratio ?? "16:9");
+  const moteur = estMoteur(dernier?.moteur) ? dernier.moteur : moteurParDefaut();
+  const erreur = await lancerPlan(supabase, profile.id, plan, projet?.aspect_ratio ?? "16:9", moteur);
   retour(projectId, erreur ? `?erreur=${erreur}#plan-${sceneId}` : `?lances=1#plan-${sceneId}`);
 }

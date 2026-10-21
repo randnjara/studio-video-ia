@@ -2,7 +2,7 @@ import Link from "next/link";
 import { BoutonEnvoi } from "@/components/bouton-envoi";
 import { STATUTS_PLAN, couleurStatut, dureeLisible } from "@/lib/libelles";
 import { signerLiens } from "@/lib/production";
-import { PRIX_ESTIME_5S_USD } from "@/lib/runpod";
+import { MOTEURS, moteursDisponibles } from "@/lib/runpod";
 import { getClient } from "@/lib/session";
 import { deplacerPlan, envoyerALaGeneration, restaurerScript, supprimerPlan } from "./actions";
 import { FormulairePlan } from "./formulaire-plan";
@@ -159,7 +159,7 @@ export default async function PagePlans({
         ) : (
           <>
             <form id="selection" action={envoyerALaGeneration.bind(null, id)} className="carte sticky top-2 z-[5]">
-              <BarreSelection prixParPlan={PRIX_ESTIME_5S_USD} prets={nouveaux} />
+              <BarreSelection moteurs={moteursDisponibles().map((m) => ({ id: m, ...MOTEURS[m] }))} prets={nouveaux} />
             </form>
             {/* Au-delà de 4 plans, le tableau se replie (menu déroulant) pour garder la page lisible */}
             <details className="group" open={plans.length <= 4 || ouvert}>

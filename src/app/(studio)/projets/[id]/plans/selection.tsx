@@ -5,8 +5,12 @@ import { useFormStatus } from "react-dom";
 import { Roue } from "@/components/bouton-envoi";
 
 // Barre d'envoi à la génération : compte les plans cochés et donne le coût estimé avant d'envoyer.
-export function BarreSelection({ prixParPlan, prets }: { prixParPlan: number; prets: number }) {
+type ChoixMoteur = { id: string; libelle: string; prix5s: number };
+
+export function BarreSelection({ moteurs, prets }: { moteurs: ChoixMoteur[]; prets: number }) {
   const [coches, setCoches] = useState(0);
+  const [moteur, setMoteur] = useState(moteurs[0]);
+  const prixParPlan = moteur.prix5s;
   const { pending } = useFormStatus();
 
   useEffect(() => {
@@ -32,6 +36,23 @@ export function BarreSelection({ prixParPlan, prets }: { prixParPlan: number; pr
           Cochez les plans à transformer en clips, ou envoyez d'un coup tous ceux qui n'ont pas encore de vidéo.
         </p>
       </div>
+      {moteurs.length > 1 ? (
+        <select
+          name="moteur"
+          aria-label="Moteur de génération"
+          className="champ w-auto text-sm"
+          value={moteur.id}
+          onChange={(e) => setMoteur(moteurs.find((m) => m.id === e.target.value) ?? moteurs[0])}
+        >
+          {moteurs.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.libelle} · ≈ {m.prix5s.toFixed(2)} $ / clip
+            </option>
+          ))}
+        </select>
+      ) : (
+        <input type="hidden" name="moteur" value={moteur.id} />
+      )}
       <button type="button" className="bouton-discret px-3 py-1.5 text-sm" onClick={() => toutCocher(coches === 0)}>
         {coches === 0 ? "Tout cocher" : "Tout décocher"}
       </button>
