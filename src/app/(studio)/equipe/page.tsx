@@ -124,6 +124,16 @@ export default async function Equipe({
           </p>
         ) : (
           <>
+            <p className="text-sm">
+              Clé RunPod reçue par le site :{" "}
+              {process.env.RUNPOD_API_KEY ? (
+                <span className="pastille bg-succes-doux text-succes">Oui</span>
+              ) : (
+                <span className="pastille bg-alerte-doux text-alerte">
+                  Non, ajoutez le secret RUNPOD_API_KEY dans Cloudflare
+                </span>
+              )}
+            </p>
             <p className="text-sm text-sourdine">
               Notre propre serveur RunPod génère les clips environ 6 fois moins cher (≈ 0,05 $ le clip de 5 s en 480p) que le
               service tout prêt (0,30 $). Il ne coûte rien quand il ne tourne pas. Un clic le crée avec la clé RunPod déjà
