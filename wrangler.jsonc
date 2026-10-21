@@ -4,8 +4,9 @@
   "main": ".open-next/worker.js",
   "compatibility_date": "2026-09-01",
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
-  // Fait tourner le site près de la base Supabase (Irlande) : chaque requête à la base devient bien plus rapide
-  "placement": { "mode": "smart" },
+  // Fait tourner le site près de la base Supabase (Irlande, aws eu-west-1) : chaque requête à la base
+  // passe de ~400 ms (depuis Antananarivo) à quelques millisecondes
+  "placement": { "region": "aws:eu-west-1" },
   "assets": {
     "directory": ".open-next/assets",
     "binding": "ASSETS"

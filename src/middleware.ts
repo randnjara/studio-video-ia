@@ -24,9 +24,12 @@ export async function middleware(request: NextRequest) {
     },
   );
 
+  // Lecture locale de la session (pas d'appel réseau, sauf pour renouveler un jeton expiré).
+  // La base vérifie elle-même la signature du jeton à chaque requête.
   const {
-    data: { user },
-  } = await supabase.auth.getUser();
+    data: { session },
+  } = await supabase.auth.getSession();
+  const user = session?.user;
 
   const isPublic = PUBLIC_PATHS.some((p) => request.nextUrl.pathname.startsWith(p));
   if (!user && !isPublic) {

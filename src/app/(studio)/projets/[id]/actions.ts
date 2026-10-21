@@ -7,15 +7,8 @@ import { FORMATS } from "@/lib/libelles";
 import { requireProfile } from "@/lib/session";
 
 export async function enregistrerProjet(projectId: string, formData: FormData) {
-  const { supabase, profile } = await requireProfile();
+  const { supabase } = await requireProfile();
   const format = String(formData.get("aspect_ratio") ?? "9:16");
-  const scenario = String(formData.get("scenario_text") ?? "");
-
-  const { data: avant } = await supabase
-    .from("projects")
-    .select("scenario_text")
-    .eq("id", projectId)
-    .single();
 
   const { error } = await supabase
     .from("projects")
@@ -25,47 +18,13 @@ export async function enregistrerProjet(projectId: string, formData: FormData) {
       aspect_ratio: (FORMATS as readonly string[]).includes(format) ? format : "9:16",
       due_date: String(formData.get("due_date") ?? "") || null,
       workspace_id: String(formData.get("workspace_id") ?? ""),
-      scenario_text: scenario,
     })
     .eq("id", projectId);
 
   if (error) redirect(`/projets/${projectId}?erreur=enregistrement`);
-
-  // Historique : une version du scénario est gardée à chaque changement
-  if (avant && avant.scenario_text !== scenario) {
-    await supabase.from("project_versions").insert({
-      project_id: projectId,
-      kind: "scenario",
-      data: { scenario_text: scenario },
-      created_by: profile.id,
-    });
-  }
-
-  revalidatePath(`/projets/${projectId}`);
+  revalidatePath(`/projets/${projectId}`, "layout");
   revalidatePath("/");
   redirect(`/projets/${projectId}?enregistre=1`);
-}
-
-export async function restaurerScenario(projectId: string, versionId: number) {
-  const { supabase, profile } = await requireProfile();
-  const { data: version } = await supabase
-    .from("project_versions")
-    .select("data")
-    .eq("id", versionId)
-    .eq("project_id", projectId)
-    .single();
-  if (!version) redirect(`/projets/${projectId}?erreur=version`);
-
-  const texte = String((version.data as { scenario_text?: string }).scenario_text ?? "");
-  await supabase.from("projects").update({ scenario_text: texte }).eq("id", projectId);
-  await supabase.from("project_versions").insert({
-    project_id: projectId,
-    kind: "scenario",
-    data: { scenario_text: texte, restaure_depuis: versionId },
-    created_by: profile.id,
-  });
-  revalidatePath(`/projets/${projectId}`);
-  redirect(`/projets/${projectId}?restaure=1`);
 }
 
 export async function mettreALaCorbeille(projectId: string) {
@@ -74,20 +33,4 @@ export async function mettreALaCorbeille(projectId: string) {
   await journaliser(supabase, profile.id, "corbeille", "projet", projectId);
   revalidatePath("/");
   redirect("/?supprime=1");
-}
-
-// Le scénario est validé : on passe à la production des plans
-export async function validerScenario(projectId: string, valide: boolean) {
-  const { supabase, profile } = await requireProfile();
-  await supabase
-    .from("projects")
-    .update(
-      valide
-        ? { scenario_validated_at: new Date().toISOString(), status: "production" }
-        : { scenario_validated_at: null, status: "scenario" },
-    )
-    .eq("id", projectId);
-  await journaliser(supabase, profile.id, valide ? "validation-scenario" : "reouverture-scenario", "projet", projectId);
-  revalidatePath(`/projets/${projectId}`);
-  redirect(`/projets/${projectId}?${valide ? "scenario-valide" : "scenario-rouvert"}=1`);
 }

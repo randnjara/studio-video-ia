@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { BoutonEnvoi } from "@/components/bouton-envoi";
-import { requireProfile } from "@/lib/session";
+import { getClient, requireProfile } from "@/lib/session";
 import { FORMATS, LIBELLES_FORMAT, STATUTS_PROJET, couleurStatut, dateCourte } from "@/lib/libelles";
 import { creerProjet, restaurerProjet, supprimerProjet, viderCorbeille } from "./actions";
 
@@ -28,9 +28,10 @@ export default async function Accueil({
   searchParams: Promise<{ erreur?: string; corbeille?: string; supprime?: string; vide?: string }>;
 }) {
   const { erreur, corbeille, supprime, vide } = await searchParams;
-  const { supabase, profile } = await requireProfile();
+  const supabase = await getClient();
 
-  const [{ data: espacesBruts }, { data: projetsBruts }] = await Promise.all([
+  const [{ profile }, { data: espacesBruts }, { data: projetsBruts }] = await Promise.all([
+    requireProfile(),
     supabase.from("workspaces").select("id, name, kind, owner_id"),
     supabase
       .from("projects")
@@ -141,6 +142,12 @@ export default async function Accueil({
                       </Link>
                       <Link href={`/projets/${p.id}/plans`} className="lien">
                         Plans
+                      </Link>
+                      <Link href={`/projets/${p.id}/clips`} className="lien">
+                        Clips
+                      </Link>
+                      <Link href={`/projets/${p.id}/montage`} className="lien">
+                        Montage
                       </Link>
                       <form action={supprimerProjet.bind(null, p.id)} className="ml-auto">
                         <BoutonEnvoi

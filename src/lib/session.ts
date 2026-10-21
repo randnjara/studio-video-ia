@@ -9,11 +9,15 @@ export type Profile = {
   active: boolean;
 };
 
+// Un seul client Supabase par affichage, sans appel réseau : les pages peuvent lancer leurs requêtes
+// en même temps que la lecture du profil.
+export const getClient = cache(createClient);
+
 // Renvoie la personne connectée et son profil, ou renvoie vers la page de connexion.
-// Une seule fois par affichage (mise en commun entre le cadre et la page). L'identité a déjà été
-// vérifiée auprès de Supabase par le middleware, et la base revérifie le jeton à chaque requête.
+// Une seule fois par affichage (mise en commun entre le cadre et la page). La session est lue localement ;
+// la base revérifie la signature du jeton à chaque requête, donc un faux jeton ne donne accès à rien.
 export const requireProfile = cache(async () => {
-  const supabase = await createClient();
+  const supabase = await getClient();
   const {
     data: { session },
   } = await supabase.auth.getSession();
