@@ -69,3 +69,71 @@ export async function creerServeur(): Promise<string> {
   if (!endpoint?.id) throw new Error("RunPod n'a pas renvoyé d'identifiant de serveur.");
   return String(endpoint.id);
 }
+
+// Stockage du modèle chez RunPod (« network volume ») : le modèle reste sur ce disque entre deux pauses,
+// au lieu d'être retéléchargé à chaque démarrage. Le serveur ne tourne alors que dans le centre de ce disque.
+const NOM_VOLUME = "studio-video-modele";
+export const TAILLE_VOLUME_GO = 120; // Wan 2.2 14B + accélérateurs ≈ 80 Go, avec de la marge
+export const PRIX_VOLUME_MOIS_USD = Math.round(TAILLE_VOLUME_GO * 0.07 * 100) / 100;
+const NIVEAUX: Record<string, number> = { HIGH: 3, MEDIUM: 2, LOW: 1 };
+
+async function v2(chemin: string, init?: RequestInit) {
+  const res = await fetch(`https://api.runpod.io${chemin}`, {
+    ...init,
+    headers: { Authorization: `Bearer ${cle()}`, "Content-Type": "application/json" },
+  });
+  const texte = await res.text();
+  if (!res.ok) throw new Error(`RunPod ${chemin} : ${res.status} ${texte.slice(0, 300)}`);
+  return texte ? JSON.parse(texte) : null;
+}
+
+type Centre = {
+  id: string;
+  region: string;
+  networkVolumeTypes: string[];
+  gpuAvailability?: { id: string; availability: string }[];
+};
+
+// Choisit le centre qui a le plus de cartes de 80 Go disponibles, en préférant l'Europe à égalité
+async function meilleurCentre(): Promise<string> {
+  const cartes = new Set(await cartes80Go());
+  const { dataCenters = [] } = ((await v2("/v2/catalog/datacenters?include=GPU_AVAILABILITY")) ?? {}) as {
+    dataCenters?: Centre[];
+  };
+  const notes = dataCenters
+    .filter((c) => c.networkVolumeTypes.length > 0)
+    .map((c) => ({
+      id: c.id,
+      note:
+        (c.gpuAvailability ?? []).reduce((s, g) => s + (cartes.has(g.id) ? (NIVEAUX[g.availability] ?? 0) : 0), 0) +
+        (c.region === "EUROPE" ? 0.5 : 0),
+    }))
+    .filter((c) => c.note >= 1)
+    .sort((a, b) => b.note - a.note);
+  if (notes.length === 0) throw new Error("Aucun centre RunPod n'a de carte de 80 Go disponible en ce moment.");
+  return notes[0].id;
+}
+
+export async function ajouterStockage(endpointId: string): Promise<{ id: string; centre: string }> {
+  const { networkVolumes = [] } = ((await v2("/v2/network-volumes")) ?? {}) as {
+    networkVolumes?: { id: string; name: string; dataCenter: string }[];
+  };
+  let volume = networkVolumes.find((v) => v.name === NOM_VOLUME);
+  if (!volume) {
+    volume = await v2("/v2/network-volumes", {
+      method: "POST",
+      body: JSON.stringify({ name: NOM_VOLUME, size: TAILLE_VOLUME_GO, dataCenter: await meilleurCentre() }),
+    });
+  }
+  if (!volume?.id) throw new Error("RunPod n'a pas renvoyé de disque.");
+
+  await v2(`/v2/serverless/${endpointId}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      mounts: { network: [{ volumeId: volume.id }] },
+      dataCenterIds: [volume.dataCenter],
+      timeout: 1_800_000, // le tout premier clip copie le modèle sur le disque : on lui laisse 30 min
+    }),
+  });
+  return { id: volume.id, centre: volume.dataCenter };
+}

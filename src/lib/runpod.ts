@@ -25,6 +25,7 @@ export const PRIX_ESTIME_5S_USD = MOTEURS.qualite.prix5s;
 const PRIX_SECONDE_GPU = Number(process.env.RUNPOD_PRIX_SECONDE ?? 0.00076);
 
 export const CLE_ENDPOINT = "runpod_endpoint_id";
+export const CLE_VOLUME = "runpod_volume";
 
 // Identifiant de notre serveur RunPod (lu une fois par affichage)
 export const endpointEco = cache(async (): Promise<string | null> => {
