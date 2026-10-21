@@ -1,9 +1,12 @@
 import "server-only";
+import { cache } from "react";
+import { getClient } from "@/lib/session";
 
 // Deux façons de générer une vidéo avec le modèle Wan 2.2 (image → vidéo) :
 // - « qualite » : le service tout prêt de RunPod (Public Endpoint), 720p, environ 0,30 $ le clip de 5 s ;
 // - « eco-480 » / « eco-720 » : notre propre serveur RunPod (dossier worker/), même modèle en version
-//   rapide (4 étapes), facturé à la seconde de GPU. Disponible dès que RUNPOD_ENDPOINT_ID est renseigné.
+//   rapide (4 étapes), facturé à la seconde de GPU. Disponible dès que le serveur est créé
+//   (bouton dans « Équipe et budget », identifiant gardé dans la table reglages).
 const PUBLIC = "https://api.runpod.ai/v2/wan-2-2-i2v-720";
 
 export type Moteur = "qualite" | "eco-480" | "eco-720";
@@ -21,12 +24,22 @@ export const PRIX_ESTIME_5S_USD = MOTEURS.qualite.prix5s;
 // Prix d'une seconde de GPU sur notre serveur (80 Go, A100 par défaut), à ajuster si on change de carte
 const PRIX_SECONDE_GPU = Number(process.env.RUNPOD_PRIX_SECONDE ?? 0.00076);
 
-export function moteursDisponibles(): Moteur[] {
-  return process.env.RUNPOD_ENDPOINT_ID ? ["eco-480", "eco-720", "qualite"] : ["qualite"];
+export const CLE_ENDPOINT = "runpod_endpoint_id";
+
+// Identifiant de notre serveur RunPod (lu une fois par affichage)
+export const endpointEco = cache(async (): Promise<string | null> => {
+  if (process.env.RUNPOD_ENDPOINT_ID) return process.env.RUNPOD_ENDPOINT_ID;
+  const supabase = await getClient();
+  const { data } = await supabase.from("reglages").select("valeur").eq("cle", CLE_ENDPOINT).maybeSingle();
+  return data?.valeur || null;
+});
+
+export async function moteursDisponibles(): Promise<Moteur[]> {
+  return (await endpointEco()) ? ["eco-480", "eco-720", "qualite"] : ["qualite"];
 }
 
-export function moteurParDefaut(): Moteur {
-  return moteursDisponibles()[0];
+export async function moteurParDefaut(): Promise<Moteur> {
+  return (await moteursDisponibles())[0];
 }
 
 export function estMoteur(valeur: unknown): valeur is Moteur {
@@ -43,21 +56,21 @@ const TAILLES: Record<string, string> = {
 export const PROMPT_NEGATIF =
   "blurry, distorted, text, watermark, deformed face, deformed hands, extra fingers, static frame, oversaturated, low quality";
 
-function cle() {
+export function cle() {
   const k = process.env.RUNPOD_API_KEY;
   if (!k) throw new Error("La clé RunPod n'est pas encore configurée (RUNPOD_API_KEY dans Cloudflare).");
   return k;
 }
 
-function base(moteur: Moteur) {
+async function base(moteur: Moteur) {
   if (moteur === "qualite") return PUBLIC;
-  const id = process.env.RUNPOD_ENDPOINT_ID;
-  if (!id) throw new Error("Notre serveur RunPod n'est pas encore configuré (RUNPOD_ENDPOINT_ID).");
+  const id = await endpointEco();
+  if (!id) throw new Error("Notre serveur RunPod n'est pas encore créé (voir « Équipe et budget »).");
   return `https://api.runpod.ai/v2/${encodeURIComponent(id)}`;
 }
 
 async function appel(moteur: Moteur, chemin: string, init?: RequestInit) {
-  const res = await fetch(`${base(moteur)}${chemin}`, {
+  const res = await fetch(`${await base(moteur)}${chemin}`, {
     ...init,
     headers: { Authorization: `Bearer ${cle()}`, "Content-Type": "application/json" },
   });

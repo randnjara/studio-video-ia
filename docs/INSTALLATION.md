@@ -58,20 +58,10 @@ Photos et vidéos sont rangées dans le stockage Supabase (dossier privé `media
 
 Notre propre serveur fait tourner le même modèle Wan 2.2 en version rapide (4 étapes au lieu de 30). On paie seulement les secondes de GPU, autour de 0,05 $ par clip de 5 s en 480p au lieu de 0,30 $. Le code est dans le dossier `worker/` du dépôt.
 
-1. Sur [runpod.io](https://www.runpod.io), menu **Serverless** → **New Endpoint** → source **GitHub Repo**. Autorisez RunPod à lire le dépôt `randnjara/studio-video-ia`.
-2. Réglages de la construction :
-   - branche `main` ;
-   - **Dockerfile Path** `worker/Dockerfile` ;
-   - **Build Context** `worker`.
-3. Réglages du serveur :
-   - **GPU** : 80 GB (A100 ou H100) ;
-   - **Max Workers** : 2 ;
-   - **Active Workers** : 0, pour ne rien payer quand rien ne tourne ;
-   - **Idle Timeout** : 30 s, pour que les clips d'une même série profitent du serveur déjà démarré ;
-   - **Execution Timeout** : 900 s ;
-   - **Container Disk** : 150 GB, car le modèle pèse environ 70 Go.
-4. Lancez la création. La construction prend 10 à 20 minutes. Copiez ensuite l'**Endpoint ID**, une suite de lettres et de chiffres en haut de la page de l'endpoint. Ce n'est pas un secret : envoyez-le dans la discussion pour qu'il soit ajouté au site.
-5. La clé `RUNPOD_API_KEY` déjà enregistrée dans Cloudflare sert aussi pour ce serveur.
+Tout se fait depuis le studio, avec la clé `RUNPOD_API_KEY` déjà enregistrée dans Cloudflare :
+
+1. GitHub construit l'image du serveur à chaque changement du dossier `worker/` (`.github/workflows/serveur-video.yml`) et la publie sur `ghcr.io/randnjara/studio-video-ia-worker`. Ce paquet doit être **public** pour que RunPod puisse le télécharger : GitHub → profil → **Packages** → `studio-video-ia-worker` → **Package settings** → **Change visibility** → **Public**.
+2. Dans le studio, page **Équipe et budget** → **Créer le serveur économique**. Le serveur est créé chez RunPod avec des cartes de 80 Go (A100 ou H100), 0 machine allumée au repos, 2 au maximum, 30 s de maintien entre deux clips, et 150 Go de disque. Son identifiant est gardé dans la table `reglages`.
 
 Dans l'onglet « Plans », la barre d'envoi propose alors trois choix : **Économique 480p**, **Économique 720p** et **Qualité max 720p**, qui garde le service tout prêt à 0,30 $.
 

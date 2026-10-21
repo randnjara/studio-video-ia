@@ -1,13 +1,15 @@
 import { redirect } from "next/navigation";
 import { requireProfile, type Profile } from "@/lib/session";
 import { BoutonEnvoi } from "@/components/bouton-envoi";
-import { changerAcces, changerRole, fixerBudget, inviterMembre } from "./actions";
+import { endpointEco } from "@/lib/runpod";
+import { changerAcces, changerRole, creerServeurEco, fixerBudget, inviterMembre } from "./actions";
 
 const ERREURS: Record<string, string> = {
   "email-vide": "Saisissez l'adresse e-mail de la personne à inviter.",
   invitation: "L'invitation n'a pas pu être envoyée.",
   "soi-meme": "Vous ne pouvez pas changer votre propre accès ni votre propre rôle.",
   budget: "Saisissez un montant en dollars, par exemple 25.",
+  serveur: "Le serveur RunPod n'a pas pu être créé.",
 };
 
 const ACTIONS: Record<string, string> = {
@@ -24,21 +26,23 @@ const ACTIONS: Record<string, string> = {
   generation: "a lancé une génération",
   validation: "a validé une vidéo",
   "validation-scenario": "a validé un scénario",
+  "creation-serveur": "a créé le serveur de génération économique",
+  refus: "a refusé les clips d'un plan",
 };
 
 export default async function Equipe({
   searchParams,
 }: {
-  searchParams: Promise<{ erreur?: string; detail?: string; invite?: string; budget?: string }>;
+  searchParams: Promise<{ erreur?: string; detail?: string; invite?: string; budget?: string; serveur?: string }>;
 }) {
-  const { erreur, detail, invite, budget } = await searchParams;
+  const { erreur, detail, invite, budget, serveur } = await searchParams;
   const { supabase, profile } = await requireProfile();
   if (profile.role !== "responsable") redirect("/");
 
   const now = new Date();
   const mois = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-01`;
 
-  const [{ data: membres }, { data: budgetMois }, { data: depense }, { data: journal }] = await Promise.all([
+  const [{ data: membres }, { data: budgetMois }, { data: depense }, { data: journal }, endpoint] = await Promise.all([
     supabase.from("profiles").select("id, display_name, role, active").order("created_at"),
     supabase.from("monthly_budgets").select("limit_usd").eq("month", mois).maybeSingle(),
     supabase.rpc("month_spend_usd"),
@@ -47,6 +51,7 @@ export default async function Equipe({
       .select("id, action, details, created_at, actor_id")
       .order("created_at", { ascending: false })
       .limit(15),
+    endpointEco(),
   ]);
 
   const noms = new Map((membres ?? []).map((m) => [m.id, m.display_name]));
@@ -60,6 +65,12 @@ export default async function Equipe({
 
       {invite && <p className="message-ok">Invitation envoyée à {invite}.</p>}
       {budget && <p className="message-ok">Budget du mois enregistré.</p>}
+      {serveur && (
+        <p className="message-ok">
+          Serveur économique créé. Le premier clip prendra quelques minutes de plus, le temps que le serveur télécharge le
+          modèle.
+        </p>
+      )}
       {erreur && ERREURS[erreur] && (
         <p className="message-erreur">
           {ERREURS[erreur]} {detail}
@@ -102,6 +113,27 @@ export default async function Equipe({
           </div>
           <BoutonEnvoi enCours="Enregistrement…">Enregistrer la limite</BoutonEnvoi>
         </form>
+      </section>
+
+      <section className="carte flex flex-col gap-3">
+        <h2 className="text-lg font-bold">Serveur de génération économique</h2>
+        {endpoint ? (
+          <p className="text-sm">
+            <span className="pastille bg-succes-doux text-succes">Actif</span> Identifiant RunPod <code>{endpoint}</code>. Les
+            choix « Économique 480p » et « Économique 720p » sont proposés dans l'onglet Plans de chaque projet.
+          </p>
+        ) : (
+          <>
+            <p className="text-sm text-sourdine">
+              Notre propre serveur RunPod génère les clips environ 6 fois moins cher (≈ 0,05 $ le clip de 5 s en 480p) que le
+              service tout prêt (0,30 $). Il ne coûte rien quand il ne tourne pas. Un clic le crée avec la clé RunPod déjà
+              enregistrée.
+            </p>
+            <form action={creerServeurEco}>
+              <BoutonEnvoi enCours="Création chez RunPod…">Créer le serveur économique</BoutonEnvoi>
+            </form>
+          </>
+        )}
       </section>
 
       <section className="carte flex flex-col gap-4">

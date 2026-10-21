@@ -106,7 +106,7 @@ export async function regenerer(projectId: string, sceneId: string) {
       .maybeSingle(),
   ]);
   if (!plan) retour(projectId, "?erreur=plan");
-  const moteur = estMoteur(dernier?.moteur) ? dernier.moteur : moteurParDefaut();
+  const moteur = estMoteur(dernier?.moteur) ? dernier.moteur : await moteurParDefaut();
   const erreur = await lancerPlan(supabase, profile.id, plan, projet?.aspect_ratio ?? "16:9", moteur);
   retour(projectId, erreur ? `?erreur=${erreur}#plan-${sceneId}` : `?lances=1#plan-${sceneId}`);
 }
