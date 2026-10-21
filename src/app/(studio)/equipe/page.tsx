@@ -1,8 +1,9 @@
 import { redirect } from "next/navigation";
 import { requireProfile, type Profile } from "@/lib/session";
 import { BoutonEnvoi } from "@/components/bouton-envoi";
-import { endpointEco } from "@/lib/runpod";
-import { changerAcces, changerRole, creerServeurEco, fixerBudget, inviterMembre } from "./actions";
+import { CLE_VOLUME, endpointEco } from "@/lib/runpod";
+import { PRIX_VOLUME_MOIS_USD } from "@/lib/runpod-admin";
+import { ajouterStockageEco, changerAcces, changerRole, creerServeurEco, fixerBudget, inviterMembre } from "./actions";
 
 const ERREURS: Record<string, string> = {
   "email-vide": "Saisissez l'adresse e-mail de la personne à inviter.",
@@ -10,6 +11,7 @@ const ERREURS: Record<string, string> = {
   "soi-meme": "Vous ne pouvez pas changer votre propre accès ni votre propre rôle.",
   budget: "Saisissez un montant en dollars, par exemple 25.",
   serveur: "Le serveur RunPod n'a pas pu être créé.",
+  stockage: "Le stockage du modèle n'a pas pu être ajouté.",
 };
 
 const ACTIONS: Record<string, string> = {
@@ -27,22 +29,24 @@ const ACTIONS: Record<string, string> = {
   validation: "a validé une vidéo",
   "validation-scenario": "a validé un scénario",
   "creation-serveur": "a créé le serveur de génération économique",
+  "creation-stockage": "a ajouté le stockage du modèle chez RunPod",
   refus: "a refusé les clips d'un plan",
 };
 
 export default async function Equipe({
   searchParams,
 }: {
-  searchParams: Promise<{ erreur?: string; detail?: string; invite?: string; budget?: string; serveur?: string }>;
+  searchParams: Promise<{ erreur?: string; detail?: string; invite?: string; budget?: string; serveur?: string; stockage?: string }>;
 }) {
-  const { erreur, detail, invite, budget, serveur } = await searchParams;
+  const { erreur, detail, invite, budget, serveur, stockage } = await searchParams;
   const { supabase, profile } = await requireProfile();
   if (profile.role !== "responsable") redirect("/");
 
   const now = new Date();
   const mois = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-01`;
 
-  const [{ data: membres }, { data: budgetMois }, { data: depense }, { data: journal }, endpoint] = await Promise.all([
+  const [{ data: membres }, { data: budgetMois }, { data: depense }, { data: journal }, endpoint, { data: volume }] =
+    await Promise.all([
     supabase.from("profiles").select("id, display_name, role, active").order("created_at"),
     supabase.from("monthly_budgets").select("limit_usd").eq("month", mois).maybeSingle(),
     supabase.rpc("month_spend_usd"),
@@ -52,6 +56,7 @@ export default async function Equipe({
       .order("created_at", { ascending: false })
       .limit(15),
     endpointEco(),
+    supabase.from("reglages").select("valeur").eq("cle", CLE_VOLUME).maybeSingle(),
   ]);
 
   const noms = new Map((membres ?? []).map((m) => [m.id, m.display_name]));
@@ -69,6 +74,12 @@ export default async function Equipe({
         <p className="message-ok">
           Serveur économique créé. Le premier clip prendra quelques minutes de plus, le temps que le serveur télécharge le
           modèle.
+        </p>
+      )}
+      {stockage && (
+        <p className="message-ok">
+          Stockage du modèle ajouté. Le prochain clip remplit ce disque (un peu plus long), ensuite les démarrages sont
+          plus rapides.
         </p>
       )}
       {erreur && ERREURS[erreur] && (
@@ -118,10 +129,29 @@ export default async function Equipe({
       <section className="carte flex flex-col gap-3">
         <h2 className="text-lg font-bold">Serveur de génération économique</h2>
         {endpoint ? (
-          <p className="text-sm">
-            <span className="pastille bg-succes-doux text-succes">Actif</span> Identifiant RunPod <code>{endpoint}</code>. Les
-            choix « Économique 480p » et « Économique 720p » sont proposés dans l'onglet Plans de chaque projet.
-          </p>
+          <>
+            <p className="text-sm">
+              <span className="pastille bg-succes-doux text-succes">Actif</span> Identifiant RunPod <code>{endpoint}</code>.
+              Les choix « Économique 480p » et « Économique 720p » sont proposés dans l'onglet Plans de chaque projet.
+            </p>
+            {volume ? (
+              <p className="text-sm">
+                <span className="pastille bg-succes-doux text-succes">Modèle stocké</span> Disque RunPod{" "}
+                <code>{volume.valeur}</code>, environ {PRIX_VOLUME_MOIS_USD.toFixed(2)} $ par mois.
+              </p>
+            ) : (
+              <>
+                <p className="text-sm text-sourdine">
+                  Sans stockage, le serveur retélécharge le modèle après chaque pause (plusieurs minutes et environ 0,30 $
+                  de plus sur le premier clip). Garder le modèle chez RunPod coûte environ {PRIX_VOLUME_MOIS_USD.toFixed(2)}{" "}
+                  $ par mois.
+                </p>
+                <form action={ajouterStockageEco}>
+                  <BoutonEnvoi enCours="Création du disque chez RunPod…">Garder le modèle chez RunPod</BoutonEnvoi>
+                </form>
+              </>
+            )}
+          </>
         ) : (
           <>
             <p className="text-sm">

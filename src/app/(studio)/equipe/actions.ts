@@ -3,8 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { journaliser } from "@/lib/journal";
-import { CLE_ENDPOINT } from "@/lib/runpod";
-import { creerServeur } from "@/lib/runpod-admin";
+import { CLE_ENDPOINT, CLE_VOLUME, endpointEco } from "@/lib/runpod";
+import { ajouterStockage, creerServeur } from "@/lib/runpod-admin";
 import { requireProfile } from "@/lib/session";
 import { siteUrl } from "@/lib/site-url";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -81,4 +81,23 @@ export async function creerServeurEco() {
   await journaliser(supabase, profile.id, "creation-serveur", "reglage", null, { endpoint_id: id });
   revalidatePath("/", "layout");
   redirect("/equipe?serveur=1");
+}
+
+export async function ajouterStockageEco() {
+  const { supabase, profile } = await requireResponsable();
+  const endpoint = await endpointEco();
+  if (!endpoint) redirect("/equipe?erreur=stockage&detail=" + encodeURIComponent("Créez d'abord le serveur économique."));
+  let volume: { id: string; centre: string };
+  try {
+    volume = await ajouterStockage(endpoint);
+  } catch (e) {
+    redirect(`/equipe?erreur=stockage&detail=${encodeURIComponent(e instanceof Error ? e.message : String(e))}`);
+  }
+  const { error } = await supabase
+    .from("reglages")
+    .upsert({ cle: CLE_VOLUME, valeur: `${volume.id} (${volume.centre})`, updated_at: new Date().toISOString() });
+  if (error) redirect(`/equipe?erreur=stockage&detail=${encodeURIComponent(error.message)}`);
+  await journaliser(supabase, profile.id, "creation-stockage", "reglage", null, volume);
+  revalidatePath("/equipe");
+  redirect("/equipe?stockage=1");
 }

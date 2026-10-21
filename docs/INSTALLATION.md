@@ -65,7 +65,7 @@ Tout se fait depuis le studio, avec la clé `RUNPOD_API_KEY` déjà enregistrée
 
 Dans l'onglet « Plans », la barre d'envoi propose alors trois choix : **Économique 480p**, **Économique 720p** et **Qualité max 720p**, qui garde le service tout prêt à 0,30 $.
 
-Un démarrage « à froid » se produit au premier clip, puis après chaque pause. Le serveur télécharge alors le modèle, ce qui prend 2 à 5 minutes et ajoute environ 0,10 à 0,20 $ à ce clip. Il vaut donc mieux envoyer les plans par séries. Si les démarrages à froid deviennent fréquents, on peut ajouter un **Network Volume** de 100 Go (environ 7 $ par mois) : le modèle y reste stocké et le démarrage est plus rapide.
+Un démarrage « à froid » se produit au premier clip, puis après chaque pause. Le serveur télécharge alors le modèle, ce qui prend 2 à 5 minutes et ajoute environ 0,10 à 0,20 $ à ce clip. Il vaut donc mieux envoyer les plans par séries. Pour éviter de retélécharger le modèle à chaque démarrage, le bouton **Garder le modèle chez RunPod** (page Équipe et budget) crée un disque RunPod (« network volume ») de 120 Go, environ 8,40 $ par mois, dans le centre qui a le plus de cartes de 80 Go libres, et le relie au serveur. Le serveur ne tourne ensuite que dans ce centre. Pour arrêter ce coût, supprimez le disque dans RunPod → **Storage**.
 
 ## Vérifications
 
