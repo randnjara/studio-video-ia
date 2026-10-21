@@ -6,7 +6,9 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Le Python de l'image est « géré par le système » : on installe à côté de PyTorch, sans environnement séparé
+RUN python -m pip install --no-cache-dir --break-system-packages -r requirements.txt \
+ && python -c "import torch, diffusers, runpod; print('torch', torch.__version__, 'diffusers', diffusers.__version__)"
 COPY handler.py .
 
 CMD ["python", "-u", "handler.py"]
