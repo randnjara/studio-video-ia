@@ -8,6 +8,7 @@ import { envoyerPhoto } from "@/lib/envoi-photo";
 import { importerPlans } from "./actions";
 
 // Ajout en une fois : toutes les photos + le script découpé en scènes. Photo n°1 → scène 1, etc.
+// On peut le refaire autant de fois qu'il faut : les nouveaux plans s'ajoutent à la suite.
 export function ImportGroupe({ projectId, scenario }: { projectId: string; scenario: string }) {
   const [script, setScript] = useState(scenario);
   const [photos, setPhotos] = useState<File[]>([]);
@@ -32,6 +33,7 @@ export function ImportGroupe({ projectId, scenario }: { projectId: string; scena
         setAvancement("Création des plans…");
         await importerPlans(
           projectId,
+          script,
           Array.from({ length: total }, (_, i) => ({
             voix: scenes[i]?.voix ?? "",
             mouvement: scenes[i]?.mouvement ?? "",

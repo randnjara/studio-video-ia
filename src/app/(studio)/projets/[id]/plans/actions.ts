@@ -4,13 +4,11 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { journaliser } from "@/lib/journal";
 import { MOUVEMENT_PAR_DEFAUT } from "@/lib/libelles";
-import { PRIX_ESTIME_5S_USD, lancerGeneration, lireStatut } from "@/lib/runpod";
+import { lancerPlan, marquerEnProduction } from "@/lib/production";
 import { requireProfile } from "@/lib/session";
 
-const BUCKET = "medias";
-
 function retour(projectId: string, params = ""): never {
-  revalidatePath(`/projets/${projectId}/plans`);
+  revalidatePath(`/projets/${projectId}`, "layout");
   redirect(`/projets/${projectId}/plans${params}`);
 }
 
@@ -21,7 +19,9 @@ function cheminPhoto(projectId: string, valeur: FormDataEntryValue | string | nu
   return chemin.startsWith(`${projectId}/photos/`) && !chemin.includes("..") ? chemin : null;
 }
 
-async function prochainePosition(supabase: Awaited<ReturnType<typeof requireProfile>>["supabase"], projectId: string) {
+type Supabase = Awaited<ReturnType<typeof requireProfile>>["supabase"];
+
+async function prochainePosition(supabase: Supabase, projectId: string) {
   const { data: dernier } = await supabase
     .from("scenes")
     .select("position")
@@ -49,20 +49,28 @@ export async function ajouterPlan(projectId: string, formData: FormData) {
     .single();
   if (error || !scene) retour(projectId, "?erreur=plan");
 
-  await journaliser(supabase, profile.id, "ajout", "plan", scene.id);
+  await Promise.all([
+    journaliser(supabase, profile.id, "ajout", "plan", scene.id, { project_id: projectId }),
+    marquerEnProduction(supabase, projectId),
+  ]);
   retour(projectId, `?ajoute=1#plan-${scene.id}`);
 }
 
-// Crée d'un coup un plan par scène du script, avec les photos dans l'ordre
+// Crée d'un coup un plan par scène du script, avec les photos dans l'ordre.
+// Le script est gardé dans le projet, avec une copie dans l'historique s'il a changé.
 export async function importerPlans(
   projectId: string,
+  script: string,
   plans: { voix: string; mouvement: string; image_path: string | null }[],
   accord: boolean,
 ) {
   const { supabase, profile } = await requireProfile();
   if (plans.length === 0) retour(projectId, "?erreur=import-vide");
 
-  const debut = await prochainePosition(supabase, projectId);
+  const [debut, { data: projet }] = await Promise.all([
+    prochainePosition(supabase, projectId),
+    supabase.from("projects").select("scenario_text").eq("id", projectId).single(),
+  ]);
   const { error } = await supabase.from("scenes").insert(
     plans.slice(0, 200).map((p, i) => ({
       project_id: projectId,
@@ -75,7 +83,18 @@ export async function importerPlans(
   );
   if (error) retour(projectId, "?erreur=import");
 
-  await journaliser(supabase, profile.id, "import", "plan", null, { nombre: plans.length });
+  await Promise.all([
+    script.trim() && projet && projet.scenario_text !== script
+      ? Promise.all([
+          supabase.from("projects").update({ scenario_text: script }).eq("id", projectId),
+          supabase
+            .from("project_versions")
+            .insert({ project_id: projectId, kind: "scenario", data: { scenario_text: script }, created_by: profile.id }),
+        ])
+      : null,
+    journaliser(supabase, profile.id, "import", "plan", null, { project_id: projectId, nombre: plans.length }),
+    marquerEnProduction(supabase, projectId),
+  ]);
   retour(projectId, `?importe=${plans.length}`);
 }
 
@@ -83,25 +102,31 @@ export async function modifierPlan(projectId: string, sceneId: string, formData:
   const { supabase } = await requireProfile();
   const photo = cheminPhoto(projectId, formData.get("image_path"));
 
-  const { error } = await supabase
-    .from("scenes")
-    .update({
-      motion_prompt: String(formData.get("motion_prompt") ?? "").trim(),
-      voiceover_text: String(formData.get("voiceover_text") ?? "").trim(),
-      consent_confirmed: formData.get("consent_confirmed") === "on",
-      ...(photo ? { image_path: photo } : {}),
-    })
-    .eq("id", sceneId)
-    .eq("project_id", projectId);
+  const [{ error }] = await Promise.all([
+    supabase
+      .from("scenes")
+      .update({
+        motion_prompt: String(formData.get("motion_prompt") ?? "").trim(),
+        voiceover_text: String(formData.get("voiceover_text") ?? "").trim(),
+        consent_confirmed: formData.get("consent_confirmed") === "on",
+        ...(photo ? { image_path: photo } : {}),
+      })
+      .eq("id", sceneId)
+      .eq("project_id", projectId),
+    // Un plan refusé que l'on corrige redevient prêt à générer
+    supabase.from("scenes").update({ status: "brouillon" }).eq("id", sceneId).eq("status", "refusee"),
+  ]);
   if (error) retour(projectId, "?erreur=plan");
   retour(projectId, `?enregistre=1#plan-${sceneId}`);
 }
 
 export async function supprimerPlan(projectId: string, sceneId: string) {
   const { supabase, profile } = await requireProfile();
-  await supabase.from("scenes").delete().eq("id", sceneId).eq("project_id", projectId);
-  await journaliser(supabase, profile.id, "suppression", "plan", sceneId);
-  retour(projectId);
+  await Promise.all([
+    supabase.from("scenes").delete().eq("id", sceneId).eq("project_id", projectId),
+    journaliser(supabase, profile.id, "suppression", "plan", sceneId, { project_id: projectId }),
+  ]);
+  retour(projectId, "?supprime=1");
 }
 
 export async function deplacerPlan(projectId: string, sceneId: string, sens: -1 | 1) {
@@ -124,192 +149,52 @@ export async function deplacerPlan(projectId: string, sceneId: string, sens: -1 
   retour(projectId, `#plan-${sceneId}`);
 }
 
-type Ctx = Awaited<ReturnType<typeof requireProfile>>;
-
-// Lance une génération pour un plan. Renvoie un code d'erreur, ou null si c'est parti.
-async function lancerPlan({ supabase, profile }: Ctx, projectId: string, sceneId: string, format: string) {
-  const { data: scene } = await supabase
-    .from("scenes")
-    .select("id, motion_prompt, image_path, consent_confirmed, duration_s, status")
-    .eq("id", sceneId)
-    .eq("project_id", projectId)
-    .single();
-  if (!scene) return "plan";
-  if (!scene.image_path) return "sans-photo";
-  if (!scene.motion_prompt) return "sans-prompt";
-  if (!scene.consent_confirmed) return "sans-accord";
-
-  const duree = Number(scene.duration_s) || 5;
-  const seed = Math.floor(Math.random() * 2_000_000_000);
-
-  // Le coût estimé est compté tout de suite, pour que le plafond du mois bloque à temps
-  const { data: essai, error } = await supabase
-    .from("takes")
-    .insert({
-      scene_id: sceneId,
-      status: "en_cours",
-      seed,
-      cost_usd: (PRIX_ESTIME_5S_USD * duree) / 5,
-      created_by: profile.id,
-    })
-    .select("id")
-    .single();
-  if (error || !essai) return error?.code === "P0001" ? "budget" : "essai";
-
-  try {
-    const { data: signee, error: errSigne } = await supabase.storage
-      .from(BUCKET)
-      .createSignedUrl(scene.image_path, 60 * 60);
-    if (errSigne || !signee) throw new Error("Photo introuvable dans le stockage.");
-
-    const jobId = await lancerGeneration({
-      prompt: scene.motion_prompt,
-      imageUrl: signee.signedUrl,
-      format,
-      duree,
-      seed,
-    });
-    await supabase.from("takes").update({ runpod_job_id: jobId }).eq("id", essai.id);
-    if (scene.status !== "validee") {
-      await supabase.from("scenes").update({ status: "en_generation" }).eq("id", sceneId);
-    }
-  } catch (e) {
-    await supabase
-      .from("takes")
-      .update({
-        status: "echouee",
-        cost_usd: 0,
-        error: e instanceof Error ? e.message : String(e),
-        finished_at: new Date().toISOString(),
-      })
-      .eq("id", essai.id);
-  }
-  await journaliser(supabase, profile.id, "generation", "essai", essai.id, { scene_id: sceneId });
-  return null;
-}
-
-async function formatProjet(supabase: Ctx["supabase"], projectId: string) {
-  const { data } = await supabase.from("projects").select("aspect_ratio").eq("id", projectId).single();
-  return data?.aspect_ratio ?? "16:9";
-}
-
-export async function genererEssai(projectId: string, sceneId: string) {
-  const ctx = await requireProfile();
-  const erreur = await lancerPlan(ctx, projectId, sceneId, await formatProjet(ctx.supabase, projectId));
-  retour(projectId, erreur ? `?erreur=${erreur}#plan-${sceneId}` : `#plan-${sceneId}`);
-}
-
-// Lance la génération de tous les plans prêts qui n'ont encore aucune vidéo
-export async function genererTout(projectId: string) {
-  const ctx = await requireProfile();
-  const format = await formatProjet(ctx.supabase, projectId);
-  const { data: scenes } = await ctx.supabase
-    .from("scenes")
-    .select("id, image_path, motion_prompt, consent_confirmed, takes(status)")
-    .eq("project_id", projectId)
-    .order("position");
-
-  const aLancer = (scenes ?? []).filter(
-    (s) =>
-      s.image_path &&
-      s.motion_prompt &&
-      s.consent_confirmed &&
-      !(s.takes as { status: string }[]).some((t) => t.status === "en_cours" || t.status === "terminee"),
-  );
-  let lances = 0;
-  for (const s of aLancer) {
-    const erreur = await lancerPlan(ctx, projectId, s.id, format);
-    if (erreur === "budget") retour(projectId, `?erreur=budget&lances=${lances}`);
-    if (!erreur) lances++;
-  }
-  retour(projectId, `?lances=${lances}`);
-}
-
-// Interroge RunPod pour les essais en cours du projet et range les vidéos terminées.
-// Appelée régulièrement par la page tant qu'un essai tourne. Renvoie le nombre d'essais encore en cours.
-export async function actualiserEssais(projectId: string): Promise<number> {
-  const { supabase } = await requireProfile();
-  const { data: essais } = await supabase
-    .from("takes")
-    .select("id, scene_id, runpod_job_id, scenes!inner(project_id, status)")
-    .eq("status", "en_cours")
-    .eq("scenes.project_id", projectId);
-
-  let restants = 0;
-  for (const essai of essais ?? []) {
-    if (!essai.runpod_job_id) {
-      restants++;
-      continue;
-    }
-    let statut;
-    try {
-      statut = await lireStatut(essai.runpod_job_id);
-    } catch {
-      restants++;
-      continue;
-    }
-
-    if (statut.etat === "en_cours") {
-      restants++;
-    } else if (statut.etat === "echouee") {
-      // RunPod ne facture pas les générations ratées
-      await supabase
-        .from("takes")
-        .update({ status: "echouee", cost_usd: 0, error: statut.erreur, finished_at: new Date().toISOString() })
-        .eq("id", essai.id)
-        .eq("status", "en_cours");
-    } else {
-      const video = await fetch(statut.videoUrl);
-      if (!video.ok) {
-        restants++;
-        continue;
-      }
-      const chemin = `${projectId}/essais/${essai.id}.mp4`;
-      const { error } = await supabase.storage
-        .from(BUCKET)
-        .upload(chemin, await video.arrayBuffer(), { contentType: "video/mp4", upsert: true });
-      if (error) {
-        restants++;
-        continue;
-      }
-      await supabase
-        .from("takes")
-        .update({
-          status: "terminee",
-          video_path: chemin,
-          gpu_seconds: statut.secondes,
-          ...(statut.coutUsd !== null ? { cost_usd: statut.coutUsd } : {}),
-          finished_at: new Date().toISOString(),
-        })
-        .eq("id", essai.id)
-        .eq("status", "en_cours");
-      const scene = essai.scenes as unknown as { status: string };
-      if (scene.status !== "validee") {
-        await supabase.from("scenes").update({ status: "a_valider" }).eq("id", essai.scene_id);
-      }
-    }
-  }
-  return restants;
-}
-
-export async function validerEssai(projectId: string, sceneId: string, takeId: string) {
+// Envoie à la génération les plans cochés (ou tous les plans prêts si « tous » est demandé)
+export async function envoyerALaGeneration(projectId: string, formData: FormData) {
   const { supabase, profile } = await requireProfile();
-  await supabase
-    .from("scenes")
-    .update({ validated_take_id: takeId, status: "validee" })
-    .eq("id", sceneId)
-    .eq("project_id", projectId);
-  await journaliser(supabase, profile.id, "validation", "essai", takeId, { scene_id: sceneId });
-  revalidatePath(`/projets/${projectId}`);
-  retour(projectId, `?valide=1#plan-${sceneId}`);
+  const tous = formData.get("tous") === "1";
+  const choisis = new Set(formData.getAll("plans").map(String));
+
+  const [{ data: projet }, { data: scenes }] = await Promise.all([
+    supabase.from("projects").select("aspect_ratio").eq("id", projectId).single(),
+    supabase
+      .from("scenes")
+      .select("id, motion_prompt, image_path, consent_confirmed, duration_s, status, takes!takes_scene_id_fkey(status)")
+      .eq("project_id", projectId)
+      .order("position"),
+  ]);
+  const format = projet?.aspect_ratio ?? "16:9";
+
+  const aLancer = (scenes ?? []).filter((s) => {
+    const essais = s.takes as { status: string }[];
+    if (essais.some((t) => t.status === "en_cours")) return false;
+    // « Tous » : seulement les plans prêts qui n'ont encore aucune vidéo réussie
+    return tous
+      ? s.image_path && s.motion_prompt && s.consent_confirmed && !essais.some((t) => t.status === "terminee")
+      : choisis.has(s.id);
+  });
+  if (aLancer.length === 0) retour(projectId, "?erreur=selection-vide");
+
+  // Les générations partent en même temps : RunPod les traite en parallèle
+  const erreurs = await Promise.all(aLancer.map((s) => lancerPlan(supabase, profile.id, s, format)));
+  const lances = erreurs.filter((e) => e === null).length;
+  const premiere = erreurs.find((e) => e !== null);
+
+  revalidatePath(`/projets/${projectId}`, "layout");
+  if (lances === 0) retour(projectId, `?erreur=${premiere ?? "essai"}`);
+  redirect(`/projets/${projectId}/clips?lances=${lances}${premiere ? `&ignores=${aLancer.length - lances}` : ""}`);
 }
 
-export async function annulerValidation(projectId: string, sceneId: string) {
+export async function restaurerScript(projectId: string, versionId: number) {
   const { supabase } = await requireProfile();
-  await supabase
-    .from("scenes")
-    .update({ validated_take_id: null, status: "a_valider" })
-    .eq("id", sceneId)
-    .eq("project_id", projectId);
-  retour(projectId, `#plan-${sceneId}`);
+  const { data: version } = await supabase
+    .from("project_versions")
+    .select("data")
+    .eq("id", versionId)
+    .eq("project_id", projectId)
+    .single();
+  if (!version) retour(projectId);
+  const texte = String((version.data as { scenario_text?: string }).scenario_text ?? "");
+  await supabase.from("projects").update({ scenario_text: texte }).eq("id", projectId);
+  retour(projectId, "?script-restaure=1#script");
 }

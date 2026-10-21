@@ -60,7 +60,7 @@ Photos et vidéos sont rangées dans le stockage Supabase (dossier privé `media
 - [ ] Je crée un projet dans « Mon espace » et un autre dans « Équipe ».
 - [ ] J'invite un membre. Il voit le projet d'équipe, mais pas mon projet personnel.
 - [ ] Je fixe un budget du mois sur la page Équipe et budget.
-- [ ] Dans un projet, « Plans et vidéos » : j'ajoute un plan avec une photo et un mouvement, je clique « Générer la vidéo », la vidéo apparaît en 1 à 4 minutes.
+- [ ] Dans un projet, onglet « Plans » : j'ajoute un plan avec une photo et un mouvement, je le coche et clique « Envoyer la sélection ». Dans « Clips », la vidéo apparaît en 1 à 4 minutes.
 
 ## Limites à connaître
 

@@ -1,5 +1,5 @@
 export const STATUTS_PROJET: Record<string, string> = {
-  scenario: "Scénario",
+  scenario: "Nouveau",
   production: "Production des plans",
   montage: "Montage",
   a_valider: "À valider",
@@ -34,6 +34,7 @@ export function couleurStatut(statut: string) {
   if (statut === "validee" || statut === "valide" || statut === "livre") return "bg-succes-doux text-succes";
   if (statut === "en_generation" || statut === "production" || statut === "montage") return "bg-accent-doux text-accent";
   if (statut === "a_valider") return "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300";
+  if (statut === "refusee" || statut === "a_corriger") return "bg-alerte-doux text-alerte";
   return "bg-surface-2 text-sourdine";
 }
 
@@ -46,3 +47,10 @@ export function dureeLisible(secondes: number) {
 
 // Mouvement proposé quand le script n'en précise pas (le modèle comprend surtout l'anglais)
 export const MOUVEMENT_PAR_DEFAUT = "subtle natural movement, gentle slow camera push-in, soft cinematic lighting";
+
+export const STATUTS_MONTAGE: Record<string, string> = {
+  brouillon: "Brouillon",
+  a_valider: "À valider",
+  valide: "Validé",
+  a_corriger: "À corriger",
+};
