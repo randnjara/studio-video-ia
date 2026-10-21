@@ -76,6 +76,12 @@ export default async function PagePlans({
   const nouveaux = plans.filter((p) => pret(p) && !enCours(p) && !p.takes.some((t) => t.status === "terminee")).length;
   const duree = plans.reduce((n, p) => n + Number(p.duration_s || 5), 0);
   const refuses = plans.filter((p) => p.status === "refusee").length;
+  // Résumé affiché quand le tableau est replié, et ouverture automatique après une action sur un plan
+  const parStatut = Object.entries(
+    plans.reduce<Record<string, number>>((acc, p) => ({ ...acc, [p.status]: (acc[p.status] ?? 0) + 1 }), {}),
+  );
+  const apercu = parStatut.map(([st, n]) => `${n} ${(STATUTS_PLAN[st] ?? st).toLowerCase()}`).join(" · ");
+  const ouvert = Boolean(sp.ajoute || sp.enregistre || sp.importe || sp.refuse || sp.ouvert);
 
   return (
     <div className="flex flex-col gap-6">
@@ -155,7 +161,17 @@ export default async function PagePlans({
             <form id="selection" action={envoyerALaGeneration.bind(null, id)} className="carte sticky top-2 z-[5]">
               <BarreSelection prixParPlan={PRIX_ESTIME_5S_USD} prets={nouveaux} />
             </form>
-            <ol className="grid gap-4 lg:grid-cols-2">
+            {/* Au-delà de 4 plans, le tableau se replie (menu déroulant) pour garder la page lisible */}
+            <details className="group" open={plans.length <= 4 || ouvert}>
+              <summary className="carte flex cursor-pointer list-none items-center gap-3 py-3 text-sm font-semibold [&::-webkit-details-marker]:hidden">
+                <span className="transition group-open:rotate-90">▶</span>
+                <span className="flex-1">
+                  {plans.length} plans : {apercu}
+                </span>
+                <span className="text-accent group-open:hidden">Afficher</span>
+                <span className="hidden text-accent group-open:inline">Replier</span>
+              </summary>
+            <ol className="mt-4 grid gap-4 lg:grid-cols-2">
               {plans.map((plan, i) => {
                 const photo = plan.image_path ? liens.get(plan.image_path) : undefined;
                 const nbClips = plan.takes.filter((t) => t.status === "terminee").length;
@@ -168,7 +184,7 @@ export default async function PagePlans({
                       plan.status === "refusee" ? "border-alerte/50" : plan.status === "validee" ? "border-succes/50" : ""
                     }`}
                   >
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <input
                         type="checkbox"
                         name="plans"
@@ -178,7 +194,7 @@ export default async function PagePlans({
                         aria-label={`Envoyer le plan ${i + 1} à la génération`}
                         className="size-4 accent-[var(--accent)]"
                       />
-                      <h3 className="font-bold">Plan {i + 1}</h3>
+                      <h3 className="font-bold whitespace-nowrap">Plan {i + 1}</h3>
                       <span className={`pastille ${couleurStatut(plan.status)}`}>{STATUTS_PLAN[plan.status] ?? plan.status}</span>
                       <div className="ml-auto flex items-center gap-1 text-sm">
                         {i > 0 && (
@@ -239,6 +255,7 @@ export default async function PagePlans({
                 );
               })}
             </ol>
+            </details>
           </>
         )}
       </section>

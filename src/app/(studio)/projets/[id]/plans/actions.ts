@@ -126,7 +126,7 @@ export async function supprimerPlan(projectId: string, sceneId: string) {
     supabase.from("scenes").delete().eq("id", sceneId).eq("project_id", projectId),
     journaliser(supabase, profile.id, "suppression", "plan", sceneId, { project_id: projectId }),
   ]);
-  retour(projectId, "?supprime=1");
+  retour(projectId, "?supprime=1&ouvert=1");
 }
 
 export async function deplacerPlan(projectId: string, sceneId: string, sens: -1 | 1) {
@@ -146,7 +146,7 @@ export async function deplacerPlan(projectId: string, sceneId: string, sens: -1 
   await supabase.from("scenes").update({ position: -1 }).eq("id", a.id);
   await supabase.from("scenes").update({ position: a.position }).eq("id", voisin.id);
   await supabase.from("scenes").update({ position: voisin.position }).eq("id", a.id);
-  retour(projectId, `#plan-${sceneId}`);
+  retour(projectId, `?ouvert=1#plan-${sceneId}`);
 }
 
 // Envoie à la génération les plans cochés (ou tous les plans prêts si « tous » est demandé)
