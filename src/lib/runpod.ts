@@ -22,7 +22,8 @@ export const MOTEURS: Record<Moteur, { libelle: string; prix5s: number }> = {
 export const PRIX_ESTIME_5S_USD = MOTEURS.qualite.prix5s;
 
 // Prix d'une seconde de GPU sur notre serveur (80 Go, A100 par défaut), à ajuster si on change de carte
-const PRIX_SECONDE_GPU = Number(process.env.RUNPOD_PRIX_SECONDE ?? 0.00076);
+// Tarif d'une H100 80 Go (la plus chère des cartes autorisées) : l'estimation par clip reste prudente
+const PRIX_SECONDE_GPU = Number(process.env.RUNPOD_PRIX_SECONDE ?? 0.00116);
 
 export const CLE_ENDPOINT = "runpod_endpoint_id";
 export const CLE_VOLUME = "runpod_volume";

@@ -137,3 +137,25 @@ export async function ajouterStockage(endpointId: string): Promise<{ id: string;
   });
   return { id: volume.id, centre: volume.dataCenter };
 }
+
+// Dépense réelle facturée par RunPod depuis le début du mois (serveur, démarrages, attente et disque compris)
+export async function depenseRunPodMois(): Promise<{ total: number; serveur: number; disque: number } | null> {
+  if (!process.env.RUNPOD_API_KEY) return null;
+  const now = new Date();
+  const debut = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
+  try {
+    const data = (await v2(`/v2/billing?bucketSize=day&startTime=${encodeURIComponent(debut)}`)) as {
+      metadata?: { totals?: Record<string, number> };
+    } | null;
+    const t = data?.metadata?.totals;
+    if (!t) return null;
+    const n = (k: string) => Number(t[k] ?? 0);
+    return {
+      total: n("totalAmount"),
+      serveur: n("serverlessGpuAmount") + n("serverlessCpuAmount") + n("serverlessDiskAmount") + n("serverlessFeeAmount"),
+      disque: n("storageStandardAmount") + n("storageHighPerformanceAmount"),
+    };
+  } catch {
+    return null;
+  }
+}

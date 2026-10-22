@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { requireProfile, type Profile } from "@/lib/session";
 import { BoutonEnvoi } from "@/components/bouton-envoi";
 import { CLE_VOLUME, endpointEco } from "@/lib/runpod";
-import { PRIX_VOLUME_MOIS_USD } from "@/lib/runpod-admin";
+import { depenseRunPodMois, PRIX_VOLUME_MOIS_USD } from "@/lib/runpod-admin";
 import { ajouterStockageEco, changerAcces, changerRole, creerServeurEco, fixerBudget, inviterMembre } from "./actions";
 
 const ERREURS: Record<string, string> = {
@@ -45,7 +45,7 @@ export default async function Equipe({
   const now = new Date();
   const mois = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-01`;
 
-  const [{ data: membres }, { data: budgetMois }, { data: depense }, { data: journal }, endpoint, { data: volume }] =
+  const [{ data: membres }, { data: budgetMois }, { data: depense }, { data: journal }, endpoint, { data: volume }, runpod] =
     await Promise.all([
     supabase.from("profiles").select("id, display_name, role, active").order("created_at"),
     supabase.from("monthly_budgets").select("limit_usd").eq("month", mois).maybeSingle(),
@@ -57,6 +57,7 @@ export default async function Equipe({
       .limit(15),
     endpointEco(),
     supabase.from("reglages").select("valeur").eq("cle", CLE_VOLUME).maybeSingle(),
+    depenseRunPodMois(),
   ]);
 
   const noms = new Map((membres ?? []).map((m) => [m.id, m.display_name]));
@@ -104,6 +105,14 @@ export default async function Equipe({
                 style={{ width: `${part}%` }}
               />
             </div>
+          )}
+          {runpod && (
+            <p className="mt-2 text-sm">
+              Facturé réellement par RunPod ce mois : <b>{runpod.total.toFixed(2)} $</b>{" "}
+              <span className="text-sourdine">
+                (serveur {runpod.serveur.toFixed(2)} $, stockage {runpod.disque.toFixed(2)} $, avec une heure de retard)
+              </span>
+            </p>
           )}
           <p className="mt-2 text-sm text-sourdine">
             Quand la limite est atteinte, plus aucune vidéo ne peut être générée ce mois-ci, jusqu'à ce que vous l'augmentiez.
