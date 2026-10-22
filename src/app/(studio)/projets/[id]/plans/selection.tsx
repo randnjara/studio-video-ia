@@ -7,15 +7,28 @@ import { Roue } from "@/components/bouton-envoi";
 // Barre d'envoi à la génération : compte les plans cochés et donne le coût estimé avant d'envoyer.
 type ChoixMoteur = { id: string; libelle: string; prix5s: number };
 
-export function BarreSelection({ moteurs, prets }: { moteurs: ChoixMoteur[]; prets: number }) {
+export function BarreSelection({
+  moteurs,
+  prets,
+  supprimer,
+}: {
+  moteurs: ChoixMoteur[];
+  prets: number;
+  supprimer: (formData: FormData) => void | Promise<void>;
+}) {
   const [coches, setCoches] = useState(0);
+  const [pretsCoches, setPretsCoches] = useState(0);
   const [moteur, setMoteur] = useState(moteurs[0]);
   const prixParPlan = moteur.prix5s;
   const { pending } = useFormStatus();
 
   useEffect(() => {
     const cases = () => Array.from(document.querySelectorAll<HTMLInputElement>('input[form="selection"][name="plans"]'));
-    const compter = () => setCoches(cases().filter((c) => c.checked).length);
+    const compter = () => {
+      const cochees = cases().filter((c) => c.checked);
+      setCoches(cochees.length);
+      setPretsCoches(cochees.filter((c) => c.dataset.pret === "1").length);
+    };
     document.addEventListener("change", compter);
     compter();
     return () => document.removeEventListener("change", compter);
@@ -59,14 +72,35 @@ export function BarreSelection({ moteurs, prets }: { moteurs: ChoixMoteur[]; pre
       <button
         type="submit"
         className="bouton"
-        disabled={pending || coches === 0}
+        disabled={pending || pretsCoches === 0}
+        title={coches > pretsCoches ? "Les plans sans photo, mouvement ou accord ne partent pas" : undefined}
         onClick={(e) => {
-          if (!window.confirm(`Générer ${coches} clip${coches > 1 ? "s" : ""} pour environ ${(coches * prixParPlan).toFixed(2)} $ ?`))
+          if (
+            !window.confirm(
+              `Générer ${pretsCoches} clip${pretsCoches > 1 ? "s" : ""} pour environ ${(pretsCoches * prixParPlan).toFixed(2)} $ ?`,
+            )
+          )
             e.preventDefault();
         }}
       >
         {pending && <Roue />}
-        {pending ? "Envoi…" : `▶ Envoyer la sélection (${coches}) ≈ ${(coches * prixParPlan).toFixed(2)} $`}
+        {pending ? "Envoi…" : `▶ Envoyer la sélection (${pretsCoches}) ≈ ${(pretsCoches * prixParPlan).toFixed(2)} $`}
+      </button>
+      <button
+        type="submit"
+        formAction={supprimer}
+        className="bouton-danger"
+        disabled={pending || coches === 0}
+        onClick={(e) => {
+          if (
+            !window.confirm(
+              `Supprimer ${coches} plan${coches > 1 ? "s" : ""} et leurs clips ? Cette action est définitive.`,
+            )
+          )
+            e.preventDefault();
+        }}
+      >
+        Supprimer la sélection ({coches})
       </button>
       {prets > 0 && (
         <button
