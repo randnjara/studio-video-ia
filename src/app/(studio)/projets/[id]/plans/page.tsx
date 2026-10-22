@@ -4,7 +4,7 @@ import { STATUTS_PLAN, couleurStatut, dureeLisible } from "@/lib/libelles";
 import { signerLiens } from "@/lib/production";
 import { MOTEURS, moteursDisponibles } from "@/lib/runpod";
 import { getClient } from "@/lib/session";
-import { deplacerPlan, envoyerALaGeneration, restaurerScript, supprimerPlan } from "./actions";
+import { deplacerPlan, envoyerALaGeneration, restaurerScript, supprimerPlan, supprimerPlans } from "./actions";
 import { FormulairePlan } from "./formulaire-plan";
 import { ImportGroupe } from "./import-groupe";
 import { BarreSelection } from "./selection";
@@ -89,7 +89,9 @@ export default async function PagePlans({
       {sp.erreur && ERREURS[sp.erreur] && <p className="message-erreur">{ERREURS[sp.erreur]}</p>}
       {sp.ajoute && <p className="message-ok">Plan ajouté en bas du tableau.</p>}
       {sp.enregistre && <p className="message-ok">Plan enregistré.</p>}
-      {sp.supprime && <p className="message-ok">Plan supprimé.</p>}
+      {sp.supprime && (
+        <p className="message-ok">{Number(sp.supprime) > 1 ? `${sp.supprime} plans supprimés.` : "Plan supprimé."}</p>
+      )}
       {sp["script-restaure"] && <p className="message-ok">Ancien script remis dans la zone de texte.</p>}
       {sp.importe && (
         <p className="message-ok">
@@ -160,7 +162,11 @@ export default async function PagePlans({
         ) : (
           <>
             <form id="selection" action={envoyerALaGeneration.bind(null, id)} className="carte sticky top-2 z-[5]">
-              <BarreSelection moteurs={moteurs.map((m) => ({ id: m, ...MOTEURS[m] }))} prets={nouveaux} />
+              <BarreSelection
+                moteurs={moteurs.map((m) => ({ id: m, ...MOTEURS[m] }))}
+                prets={nouveaux}
+                supprimer={supprimerPlans.bind(null, id)}
+              />
             </form>
             {/* Au-delà de 4 plans, le tableau se replie (menu déroulant) pour garder la page lisible */}
             <details className="group" open={plans.length <= 4 || ouvert}>
@@ -191,8 +197,9 @@ export default async function PagePlans({
                         name="plans"
                         value={plan.id}
                         form="selection"
-                        disabled={!pret(plan) || enCours(plan)}
-                        aria-label={`Envoyer le plan ${i + 1} à la génération`}
+                        disabled={enCours(plan)}
+                        data-pret={pret(plan) ? "1" : undefined}
+                        aria-label={`Sélectionner le plan ${i + 1}`}
                         className="size-4 accent-[var(--accent)]"
                       />
                       <h3 className="font-bold whitespace-nowrap">Plan {i + 1}</h3>

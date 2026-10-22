@@ -130,6 +130,17 @@ export async function supprimerPlan(projectId: string, sceneId: string) {
   retour(projectId, "?supprime=1&ouvert=1");
 }
 
+export async function supprimerPlans(projectId: string, formData: FormData) {
+  const { supabase, profile } = await requireProfile();
+  const ids = formData.getAll("plans").map(String).filter(Boolean);
+  if (ids.length === 0) retour(projectId, "?ouvert=1");
+  await Promise.all([
+    supabase.from("scenes").delete().in("id", ids).eq("project_id", projectId),
+    journaliser(supabase, profile.id, "suppression", "plan", null, { project_id: projectId, nombre: ids.length }),
+  ]);
+  retour(projectId, `?supprime=${ids.length}&ouvert=1`);
+}
+
 export async function deplacerPlan(projectId: string, sceneId: string, sens: -1 | 1) {
   const { supabase } = await requireProfile();
   const { data: scenes } = await supabase
@@ -173,9 +184,9 @@ export async function envoyerALaGeneration(projectId: string, formData: FormData
     const essais = s.takes as { status: string }[];
     if (essais.some((t) => t.status === "en_cours")) return false;
     // « Tous » : seulement les plans prêts qui n'ont encore aucune vidéo réussie
-    return tous
-      ? s.image_path && s.motion_prompt && s.consent_confirmed && !essais.some((t) => t.status === "terminee")
-      : choisis.has(s.id);
+    // Un plan sans photo, sans mouvement ou sans accord ne peut pas partir
+    if (!s.image_path || !s.motion_prompt || !s.consent_confirmed) return false;
+    return tous ? !essais.some((t) => t.status === "terminee") : choisis.has(s.id);
   });
   if (aLancer.length === 0) retour(projectId, "?erreur=selection-vide");
 
