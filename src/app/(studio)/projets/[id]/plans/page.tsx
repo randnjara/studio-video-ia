@@ -4,10 +4,12 @@ import { STATUTS_PLAN, couleurStatut, dureeLisible } from "@/lib/libelles";
 import { signerLiens } from "@/lib/production";
 import { MOTEURS, moteursDisponibles } from "@/lib/runpod";
 import { getClient } from "@/lib/session";
+import { promptVerification } from "@/lib/verification";
 import { deplacerPlan, envoyerALaGeneration, restaurerScript, supprimerPlan, supprimerPlans } from "./actions";
 import { FormulairePlan } from "./formulaire-plan";
 import { ImportGroupe } from "./import-groupe";
 import { BarreSelection } from "./selection";
+import { CopierVerification } from "./copier-verification";
 
 type Plan = {
   id: string;
@@ -49,7 +51,7 @@ export default async function PagePlans({
 
   // Le cadre du projet vérifie déjà la connexion et l'existence du projet : tout part en même temps
   const [{ data: projet }, { data }, { data: versions }, moteurs] = await Promise.all([
-    supabase.from("projects").select("scenario_text").eq("id", id).maybeSingle(),
+    supabase.from("projects").select("title, aspect_ratio, scenario_text").eq("id", id).maybeSingle(),
     supabase
       .from("scenes")
       .select(
@@ -156,6 +158,8 @@ export default async function PagePlans({
             {plans.length} plan{plans.length > 1 ? "s" : ""} · {dureeLisible(duree)} de vidéo au total
           </span>
         </div>
+
+        {plans.length > 0 && projet && <CopierVerification texte={promptVerification(projet, plans)} />}
 
         {plans.length === 0 ? (
           <p className="carte text-sm text-sourdine">Aucun plan pour l'instant. Créez-les ci-dessus.</p>
