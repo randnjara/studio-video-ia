@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { journaliser } from "@/lib/journal";
 import { MOUVEMENT_PAR_DEFAUT } from "@/lib/libelles";
 import { lancerPlan, marquerEnProduction } from "@/lib/production";
-import { lancerPhoto, suivrePhotos } from "@/lib/photos";
+import { demanderPhotos, suivrePhotos } from "@/lib/photos";
 import { agrandirStockage, mettreAJourServeur } from "@/lib/runpod-admin";
 import { endpointEco, endpointPhoto, estMoteur, moteursDisponibles } from "@/lib/runpod";
 import { requireProfile } from "@/lib/session";
@@ -308,17 +308,15 @@ export async function creerPhotos(projectId: string, formData: FormData) {
     .filter((s) => choisis.has(s.id) && s.image_description.trim() && !(s.photos as { status: string }[]).some((p) => p.status === "en_cours"));
   if (aLancer.length === 0) retour(projectId, "?erreur=selection-vide");
 
-  // Envoi une par une : dix envois en même temps dépassent les connexions permises à Cloudflare et la requête
-  // était coupée (photos restées « en création » sans numéro RunPod). Le serveur les enchaîne ensuite sans recharger le modèle.
-  const codes: (string | null)[] = [];
-  for (const s of aLancer)
-    codes.push(await lancerPhoto(supabase, profile.id, projet, { ...s, numero: s.numero }, tous.length, refs ?? []));
-  const lancees = codes.filter((c) => c === null).length;
-  const sansRef = codes.filter((c) => c === "sans-reference").length;
-  if (lancees > 0) await journaliser(supabase, profile.id, "photos", "projet", projectId, { nombre: lancees });
-  const erreur =
-    codes.find((c) => c === "budget") ?? (lancees === 0 ? (codes.includes("photo") ? "photo" : "sans-reference") : null);
-  retour(projectId, `?photos=${lancees}${sansRef ? `&sansref=${sansRef}` : ""}${erreur ? `&erreur=${erreur}` : ""}&ouvert=1`);
+  // Les photos sont inscrites dans la file ; la page les envoie quelques-unes à la fois à chaque actualisation
+  // (voir suivrePhotos), car Cloudflare limite le nombre d'appels par requête. Le serveur les enchaîne sans recharger le modèle.
+  const { inscrites, sansReference, erreur } = await demanderPhotos(supabase, profile.id, aLancer, refs ?? []);
+  if (inscrites > 0) await journaliser(supabase, profile.id, "photos", "projet", projectId, { nombre: inscrites });
+  const code = erreur ?? (inscrites === 0 ? "sans-reference" : null);
+  retour(
+    projectId,
+    `?photos=${inscrites}${sansReference ? `&sansref=${sansReference}` : ""}${code ? `&erreur=${code}` : ""}&ouvert=1`,
+  );
 }
 
 // Appelée toutes les 10 s par la page tant que des photos sont en cours ; renvoie le nombre restant

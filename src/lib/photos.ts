@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { GENRES } from "@/lib/libelles";
 import { BUCKET } from "@/lib/production";
-import { PRIX_PHOTO_ESTIME_USD, lancerPhotoRunPod, lireStatut } from "@/lib/runpod";
+import { CLE_ENDPOINT, CLE_ENDPOINT_PHOTO, PRIX_PHOTO_ESTIME_USD, lancerPhotoRunPod, lireStatut } from "@/lib/runpod";
 
 // Photos de départ créées par Qwen-Image-Edit à partir des « références du film » (personnages, lieux, objets, style).
 // Une référence est utilisée quand son nom est cité dans la description de la photo du plan.
@@ -129,100 +129,146 @@ export function promptsPhotos(...args: Parameters<typeof lotsPromptsPhotos>) {
     .join("\n\n");
 }
 
-// Lance la création de la photo d'un plan. Renvoie un code d'erreur, ou null si c'est parti.
-export async function lancerPhoto(
+// Les photos partent par une file d'attente : Cloudflare limite le nombre d'appels extérieurs par requête (50),
+// et un lot de 10 photos lancé d'un coup le dépassait (photos coupées au départ). La demande ne fait qu'inscrire
+// les photos (sans numéro RunPod) ; chaque actualisation de la page en envoie quelques-unes et suit les autres.
+const ENVOIS_PAR_APPEL = 4;
+const SUIVIS_PAR_APPEL = 6;
+// Numéro provisoire pendant l'envoi : une seule requête peut prendre une photo en attente
+const ENVOI = "envoi";
+const ENVOI_MAX_MS = 3 * 60 * 1000;
+const ATTENTE_MAX_MS = 60 * 60 * 1000;
+
+// Inscrit les photos des plans dans la file, en un seul appel. Renvoie le nombre inscrit et ceux sans référence.
+export async function demanderPhotos(
   supabase: SupabaseClient,
   auteurId: string,
-  projet: { id: string; aspect_ratio: string; style_text: string },
-  plan: { id: string; image_description: string; numero: number; cadrage?: string; angle?: string; lieu?: string; intention?: string; pose_debut?: string },
-  total: number,
+  plans: { id: string; image_description: string; lieu?: string | null }[],
   refs: Reference[],
-) {
-  if (!plan.image_description.trim()) return "sans-description";
-  // Le lieu de la fiche compte comme une citation : la référence du lieu part avec la photo
-  const choisies = referencesCitees(`${plan.image_description} ${plan.lieu ?? ""}`, refs);
-  if (choisies.length === 0) return "sans-reference";
+): Promise<{ inscrites: number; sansReference: number; erreur: "budget" | "photo" | null }> {
+  const lignes = plans.flatMap((plan) => {
+    if (!plan.image_description.trim()) return [];
+    // Le lieu de la fiche compte comme une citation : la référence du lieu part avec la photo
+    const choisies = referencesCitees(`${plan.image_description} ${plan.lieu ?? ""}`, refs);
+    if (choisies.length === 0) return [];
+    return [
+      {
+        scene_id: plan.id,
+        status: "en_cours",
+        seed: Math.floor(Math.random() * 2_000_000_000),
+        ref_ids: choisies.map((r) => r.id),
+        cost_usd: PRIX_PHOTO_ESTIME_USD,
+        created_by: auteurId,
+      },
+    ];
+  });
+  const sansReference = plans.filter((p) => p.image_description.trim()).length - lignes.length;
+  if (lignes.length === 0) return { inscrites: 0, sansReference, erreur: null };
+  const { error } = await supabase.from("photos").insert(lignes);
+  if (error) return { inscrites: 0, sansReference, erreur: error.code === "P0001" ? "budget" : "photo" };
+  return { inscrites: lignes.length, sansReference, erreur: null };
+}
 
-  const seed = Math.floor(Math.random() * 2_000_000_000);
-  const { data: photo, error } = await supabase
+type PhotoSuivie = { id: string; scene_id: string; runpod_job_id: string | null; created_at: string };
+
+const echec = (supabase: SupabaseClient, id: string, erreur: string) =>
+  supabase
     .from("photos")
-    .insert({
-      scene_id: plan.id,
-      status: "en_cours",
-      seed,
-      ref_ids: choisies.map((r) => r.id),
-      cost_usd: PRIX_PHOTO_ESTIME_USD,
-      created_by: auteurId,
-    })
-    .select("id")
-    .single();
-  if (error || !photo) return error?.code === "P0001" ? "budget" : "photo";
+    .update({ status: "echouee", error: erreur, cost_usd: 0, finished_at: new Date().toISOString() })
+    .eq("id", id);
 
-  try {
-    const imagePath = `${projet.id}/photos/genere-${photo.id}.jpg`;
-    const [{ data: envoi, error: errEnvoi }, { data: liens }] = await Promise.all([
-      supabase.storage.from(BUCKET).createSignedUploadUrl(imagePath, { upsert: true }),
-      supabase.storage.from(BUCKET).createSignedUrls(
-        choisies.map((r) => r.image_path),
-        60 * 60,
-      ),
-    ]);
-    if (errEnvoi || !envoi) throw new Error(errEnvoi?.message ?? "lien d'envoi");
-    const referenceUrls = choisies.map((r) => liens?.find((l) => l.path === r.image_path)?.signedUrl).filter(Boolean) as string[];
-    if (referenceUrls.length === 0) throw new Error("Les images de référence sont introuvables.");
-
-    const jobId = await lancerPhotoRunPod({
-      prompt: promptPhoto({
-        description: plan.image_description,
-        cadrage: plan.cadrage,
-        angle: plan.angle,
-        lieu: plan.lieu,
-        intention: plan.intention,
-        pose_debut: plan.pose_debut,
-        numero: plan.numero,
-        total,
-        format: projet.aspect_ratio,
-        style: projet.style_text,
-        refs: choisies,
-      }),
-      referenceUrls,
-      format: projet.aspect_ratio,
-      seed,
-      imagePath,
-      uploadUrl: envoi.signedUrl,
-    });
-    const { error: errJob } = await supabase.from("photos").update({ runpod_job_id: jobId }).eq("id", photo.id);
-    if (errJob) throw new Error(errJob.message);
-    return null;
-  } catch (e) {
-    await supabase
+// Envoie à RunPod les photos en attente du projet (quelques-unes par appel)
+async function envoyerPhotos(supabase: SupabaseClient, projectId: string, enAttente: PhotoSuivie[], serveur: string) {
+  const [{ data: projet }, { data: scenes }, { data: refs }] = await Promise.all([
+    supabase.from("projects").select("id, aspect_ratio, style_text").eq("id", projectId).single(),
+    supabase
+      .from("scenes")
+      .select("id, image_description, cadrage, angle, lieu, intention, pose_debut")
+      .eq("project_id", projectId)
+      .order("position"),
+    supabase.from("film_refs").select("id, nom, genre, description, image_path").eq("project_id", projectId).order("created_at"),
+  ]);
+  if (!projet || !scenes) return;
+  for (const photo of enAttente.slice(0, ENVOIS_PAR_APPEL)) {
+    const { data: prise } = await supabase
       .from("photos")
-      .update({ status: "echouee", error: (e instanceof Error ? e.message : String(e)).slice(0, 500), cost_usd: 0 })
-      .eq("id", photo.id);
-    return "photo";
+      .update({ runpod_job_id: ENVOI })
+      .eq("id", photo.id)
+      .is("runpod_job_id", null)
+      .select("id, seed, ref_ids")
+      .maybeSingle();
+    if (!prise) continue; // déjà prise par une autre actualisation
+    const numero = scenes.findIndex((s) => s.id === photo.scene_id) + 1;
+    const plan = scenes[numero - 1];
+    const choisies = (refs ?? []).filter((r) => (prise.ref_ids as string[]).includes(r.id));
+    try {
+      if (!plan || choisies.length === 0) throw new Error("Le plan ou ses photos de référence ont été supprimés.");
+      const imagePath = `${projectId}/photos/genere-${photo.id}.jpg`;
+      const [{ data: envoi, error: errEnvoi }, { data: liens }] = await Promise.all([
+        supabase.storage.from(BUCKET).createSignedUploadUrl(imagePath, { upsert: true }),
+        supabase.storage.from(BUCKET).createSignedUrls(
+          choisies.map((r) => r.image_path),
+          60 * 60,
+        ),
+      ]);
+      if (errEnvoi || !envoi) throw new Error(errEnvoi?.message ?? "lien d'envoi");
+      const referenceUrls = choisies.map((r) => liens?.find((l) => l.path === r.image_path)?.signedUrl).filter(Boolean) as string[];
+      if (referenceUrls.length === 0) throw new Error("Les images de référence sont introuvables.");
+      const jobId = await lancerPhotoRunPod({
+        prompt: promptPhoto({
+          description: plan.image_description,
+          cadrage: plan.cadrage ?? undefined,
+          angle: plan.angle ?? undefined,
+          lieu: plan.lieu ?? undefined,
+          intention: plan.intention ?? undefined,
+          pose_debut: plan.pose_debut ?? undefined,
+          numero,
+          total: scenes.length,
+          format: projet.aspect_ratio,
+          style: projet.style_text,
+          refs: choisies,
+        }),
+        referenceUrls,
+        format: projet.aspect_ratio,
+        seed: Number(prise.seed),
+        imagePath,
+        uploadUrl: envoi.signedUrl,
+        serveur,
+      });
+      const { error: errJob } = await supabase.from("photos").update({ runpod_job_id: jobId }).eq("id", photo.id);
+      if (errJob) throw new Error(errJob.message);
+    } catch (e) {
+      await echec(supabase, photo.id, (e instanceof Error ? e.message : String(e)).slice(0, 500));
+    }
   }
 }
 
-const LANCEMENT_MAX_MS = 3 * 60 * 1000;
-
-// Met à jour les photos en cours ; une photo réussie devient la photo de départ du plan
-export async function suivrePhotos(
-  supabase: SupabaseClient,
-  projectId: string,
-  photos: { id: string; scene_id: string; runpod_job_id: string | null; created_at: string }[],
-) {
+// Envoie les photos en attente puis met à jour celles en cours ; une photo réussie devient la photo de départ du plan.
+// « envoyer » est faux pendant l'affichage de la page (déjà beaucoup d'appels) : l'envoi se fait par l'actualisation.
+export async function suivrePhotos(supabase: SupabaseClient, projectId: string, photos: PhotoSuivie[], envoyer = true) {
+  if (photos.length === 0) return;
+  // Serveur photo, sinon le serveur vidéo (lu une seule fois, en un appel)
+  const { data: reglages } = await supabase.from("reglages").select("cle, valeur").in("cle", [CLE_ENDPOINT_PHOTO, CLE_ENDPOINT]);
+  const lire = (cle: string) => reglages?.find((r) => r.cle === cle)?.valeur || null;
+  const serveur = lire(CLE_ENDPOINT_PHOTO) ?? process.env.RUNPOD_ENDPOINT_ID ?? lire(CLE_ENDPOINT);
+  if (!serveur) return;
+  const age = (p: PhotoSuivie) => Date.now() - new Date(p.created_at).getTime();
+  const enAttente = photos.filter((p) => !p.runpod_job_id).sort((a, b) => a.created_at.localeCompare(b.created_at));
+  const parties = photos.filter((p) => p.runpod_job_id && p.runpod_job_id !== ENVOI);
+  // Coupée pendant l'envoi : on ne sait pas si RunPod l'a reçue, elle passe en échec pour être relancée
   await Promise.all(
-    photos.map(async (p) => {
-      if (!p.runpod_job_id) {
-        // Lancement coupé avant d'avoir reçu le numéro de RunPod : la photo ne reviendra jamais
-        if (Date.now() - new Date(p.created_at).getTime() > LANCEMENT_MAX_MS)
-          await supabase
-            .from("photos")
-            .update({ status: "echouee", error: "Le lancement a été interrompu. Relancez cette photo.", cost_usd: 0, finished_at: new Date().toISOString() })
-            .eq("id", p.id);
-        return;
-      }
-      const statut = await lireStatut("photo", p.runpod_job_id).catch(() => null);
+    photos
+      .filter((p) => p.runpod_job_id === ENVOI && age(p) > ENVOI_MAX_MS)
+      .map((p) => echec(supabase, p.id, "Le lancement a été interrompu. Relancez cette photo.")),
+  );
+  await Promise.all(
+    enAttente.filter((p) => age(p) > ATTENTE_MAX_MS).map((p) => echec(supabase, p.id, "Photo jamais envoyée (page fermée). Relancez-la.")),
+  );
+  if (envoyer) await envoyerPhotos(supabase, projectId, enAttente.filter((p) => age(p) <= ATTENTE_MAX_MS), serveur);
+
+  await Promise.all(
+    parties.slice(0, SUIVIS_PAR_APPEL).map(async (p) => {
+      const statut = await lireStatut("photo", p.runpod_job_id!, serveur).catch(() => null);
       if (!statut || statut.etat === "en_cours") return;
       const fin = new Date().toISOString();
       if (statut.etat === "echouee" || !statut.imagePath?.startsWith(`${projectId}/photos/`)) {

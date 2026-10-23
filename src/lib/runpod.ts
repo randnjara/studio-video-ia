@@ -75,15 +75,17 @@ export function cle() {
 // « photo » : notre serveur des photos de départ
 type Cible = Moteur | "photo";
 
-async function base(moteur: Cible) {
+// « serveur » : identifiant déjà lu, pour ne pas relire la base à chaque appel (Cloudflare limite le nombre
+// d'appels extérieurs par requête)
+async function base(moteur: Cible, serveur?: string) {
   if (moteur === "qualite") return PUBLIC;
-  const id = moteur === "photo" ? await endpointPhoto() : await endpointEco();
+  const id = serveur ?? (moteur === "photo" ? await endpointPhoto() : await endpointEco());
   if (!id) throw new Error("Notre serveur RunPod n'est pas encore créé (voir « Équipe et budget »).");
   return `https://api.runpod.ai/v2/${encodeURIComponent(id)}`;
 }
 
-async function appel(moteur: Cible, chemin: string, init?: RequestInit) {
-  const res = await fetch(`${await base(moteur)}${chemin}`, {
+async function appel(moteur: Cible, chemin: string, init?: RequestInit, serveur?: string) {
+  const res = await fetch(`${await base(moteur, serveur)}${chemin}`, {
     ...init,
     headers: { Authorization: `Bearer ${cle()}`, "Content-Type": "application/json" },
   });
@@ -144,6 +146,7 @@ export async function lancerPhotoRunPod(p: {
   seed: number;
   imagePath: string;
   uploadUrl: string;
+  serveur?: string;
 }): Promise<string> {
   const input = {
     mode: "image",
@@ -154,7 +157,7 @@ export async function lancerPhotoRunPod(p: {
     image_path: p.imagePath,
     upload_url: p.uploadUrl,
   };
-  const data = await appel("photo", "/run", { method: "POST", body: JSON.stringify({ input }) });
+  const data = await appel("photo", "/run", { method: "POST", body: JSON.stringify({ input }) }, p.serveur);
   return String(data.id);
 }
 
@@ -171,8 +174,8 @@ export type StatutRunPod =
     }
   | { etat: "echouee"; erreur: string };
 
-export async function lireStatut(moteur: Cible, jobId: string): Promise<StatutRunPod> {
-  const data = await appel(moteur, `/status/${encodeURIComponent(jobId)}`);
+export async function lireStatut(moteur: Cible, jobId: string, serveur?: string): Promise<StatutRunPod> {
+  const data = await appel(moteur, `/status/${encodeURIComponent(jobId)}`, undefined, serveur);
   switch (data.status) {
     case "COMPLETED": {
       const secondes = typeof data.executionTime === "number" ? data.executionTime / 1000 : null;

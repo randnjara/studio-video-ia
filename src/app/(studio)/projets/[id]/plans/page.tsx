@@ -110,7 +110,7 @@ export default async function PagePlans({
     p.photos.filter((ph) => ph.status === "en_cours").map((ph) => ({ ...ph, scene_id: p.id })),
   );
   if (photosEnCours.length > 0) {
-    await suivrePhotos(supabase, id, photosEnCours);
+    await suivrePhotos(supabase, id, photosEnCours, false);
     const { data: maj } = await supabase
       .from("scenes")
       .select("id, image_path, photos(id, status, error, runpod_job_id, created_at)")
