@@ -1,6 +1,6 @@
 import { ANGLES, CADRAGES } from "@/lib/libelles";
 
-// Prompt de préparation : à coller dans un assistant gratuit (ChatGPT, Claude, Gemini…) avec la photo principale.
+// Prompt de préparation : à coller dans un assistant (ChatGPT, Claude, Gemini…) avec la photo principale.
 // Il découpe la voix off en plans et remplit le fichier vide du studio (format standard, CSV), qui se réimporte tel quel.
 // Les règles reprennent les erreurs vues sur le Projet Mama, sans rien de propre à ce projet : gestes en boucle, poses de fin
 // toutes identiques, texte répété dans chaque prompt, lieux qui changent d'un fichier à l'autre, consignes vidéo pas en anglais.
@@ -27,9 +27,33 @@ export const COLONNES_STANDARD = [
 
 type Ref = { nom: string; genre: string; description: string };
 
-// Fichier à remplir par ChatGPT : seulement la ligne des colonnes. Même format que l'import, il se réimporte tel quel.
+// Une ligne d'exemple, avec des noms inventés, montre à l'assistant le format et le niveau de détail attendus.
+// Son numéro « EXEMPLE » la fait ignorer à l'import si elle reste dans le fichier.
+export const LIGNE_EXEMPLE: Record<(typeof COLONNES_STANDARD)[number], string> = {
+  numero: "EXEMPLE",
+  debut: "00:00",
+  fin: "00:05",
+  voix: "Tonga soa daholo, ry namana!",
+  duree: "5",
+  intention: "accueil chaleureux, un peu ému",
+  geste: "main droite levée pour saluer",
+  cadrage: "plan taille",
+  angle: "3/4 gauche",
+  lieu: "Jardin",
+  raccord: "début de séquence",
+  pose_debut: "debout près du portail, mains jointes devant la taille, regard vers la caméra",
+  pose_fin: "main droite levée à hauteur d'épaule, large sourire, regard caméra",
+  prompt_image:
+    "Rova stands at the gate of the Jardin, waist shot, three-quarter left angle. Hands loosely joined in front of her waist, warm expectant smile, eyes toward the camera. Soft late-afternoon light from the left, flowering bushes behind her slightly out of focus.",
+  prompt_video:
+    "Static camera. 0-1s: Rova takes a small breath and her smile widens. 1-3s: she raises her right hand to shoulder height in a gentle greeting and speaks warmly. 3-4s: she nods slightly, eyes on the camera. 4-5s: she holds the raised hand still, smiling, mouth relaxed.",
+};
+const cellule = (v: string) => `"${v.replace(/"/g, '""')}"`;
+const ligneExemple = () => COLONNES_STANDARD.map((c) => cellule(LIGNE_EXEMPLE[c])).join(";");
+
+// Fichier à remplir par l'assistant : la ligne des colonnes et la ligne d'exemple. Même format que l'import.
 export const FICHIER_A_REMPLIR = "tableau_a_remplir.csv";
-export const tableauARemplir = () => COLONNES_STANDARD.join(";") + "\n";
+export const tableauARemplir = () => `${COLONNES_STANDARD.join(";")}\n${ligneExemple()}\n`;
 
 export function promptPreparation(p: {
   titre: string;
@@ -60,6 +84,12 @@ OBJETS : ${parGenre("objet")}
 
 === VOIX OFF ===
 ${p.script.trim() || "Je te la donne juste après cette consigne (ou en fichier joint), telle quelle."}
+
+=== LIGNE D'EXEMPLE (déjà dans le fichier) ===
+Le fichier contient une ligne numérotée « EXEMPLE », avec des noms inventés (Rova, Jardin). Elle montre le format exact et le niveau de détail attendu pour CHAQUE ligne, prompts compris :
+${COLONNES_STANDARD.join(";")}
+${ligneExemple()}
+N'en recopie pas le contenu (ni la voix, ni le geste, ni les noms) : chaque plan vient de la voix off du film. Supprime cette ligne dans le fichier que tu me rends.
 
 === COMMENT MON STUDIO UTILISE TON FICHIER ===
 - Chaque ligne = un plan. Le studio crée d'abord la photo de départ (Qwen-Image-Edit) à partir de « prompt_image » et des photos de référence, puis l'anime avec « prompt_video » (Wan 2.2, image vers vidéo), sur la durée « duree ».

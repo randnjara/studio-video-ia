@@ -28,19 +28,19 @@ export default async function PageChatGPT({
   // Rappel de l'étape 1 : ce que ChatGPT recevra
   const rappel = [
     { ok: personnages.length > 0, texte: personnages.length ? `Personnage : ${personnages.join(", ")}` : "Photo du personnage principal manquante", requis: true },
-    { ok: mots > 0, texte: mots ? `Voix off : ${mots} mots` : "Voix off pas encore collée (vous pourrez la joindre dans ChatGPT)" },
-    { ok: Boolean(projet.resume.trim()), texte: projet.resume.trim() ? "Résumé donné" : "Pas de résumé (ChatGPT le déduira de la voix off)" },
-    { ok: lieux.length > 0, texte: lieux.length ? `Lieux : ${lieux.join(", ")}` : "Pas de lieu (ChatGPT en choisira 2 à 5)" },
-    { ok: Boolean(projet.style_text.trim()), texte: projet.style_text.trim() ? "Style donné" : "Pas de style (ChatGPT en proposera un)" },
+    { ok: mots > 0, texte: mots ? `Voix off : ${mots} mots` : "Voix off pas encore collée (vous pourrez la joindre dans l'assistant)" },
+    { ok: Boolean(projet.resume.trim()), texte: projet.resume.trim() ? "Résumé donné" : "Pas de résumé (l'assistant le déduira de la voix off)" },
+    { ok: lieux.length > 0, texte: lieux.length ? `Lieux : ${lieux.join(", ")}` : "Pas de lieu (l'assistant en choisira 2 à 5)" },
+    { ok: Boolean(projet.style_text.trim()), texte: projet.style_text.trim() ? "Style donné" : "Pas de style (l'assistant en proposera un)" },
   ];
 
   return (
     <div className="flex flex-col gap-6">
-      {sp.infos && <p className="message-ok">Informations enregistrées. Étape 2 : préparez le tableau des plans avec ChatGPT.</p>}
+      {sp.infos && <p className="message-ok">Informations enregistrées. Étape 2 : préparez le tableau des plans avec ChatGPT ou Claude.</p>}
 
       <section className="carte flex flex-col gap-3">
         <div className="flex flex-wrap items-baseline gap-2">
-          <h2 className="text-lg font-bold">Ce que ChatGPT recevra</h2>
+          <h2 className="text-lg font-bold">Ce que l'assistant recevra</h2>
           <Link href={`/projets/${id}`} className="lien text-sm">
             Modifier à l'étape 1
           </Link>
@@ -56,9 +56,9 @@ export default async function PageChatGPT({
 
       <section className="carte flex flex-col gap-4">
         <div>
-          <h2 className="text-lg font-bold">1. Préparer le tableau dans ChatGPT</h2>
+          <h2 className="text-lg font-bold">1. Préparer le tableau dans ChatGPT ou Claude</h2>
           <p className="text-sm text-sourdine">
-            ChatGPT découpe la voix off en plans et remplit le fichier : texte de chaque plan, durée, cadrage, lieu, poses, prompt
+            L'assistant découpe la voix off en plans et remplit le fichier : texte de chaque plan, durée, cadrage, lieu, poses, prompt
             de la photo et prompt de la vidéo. Tout ce dont le studio a besoin, en une seule fois.
           </p>
         </div>
@@ -76,7 +76,7 @@ export default async function PageChatGPT({
         <div>
           <h2 className="text-lg font-bold">2. Importer le fichier rempli</h2>
           <p className="text-sm text-sourdine">
-            Téléchargez le fichier rempli par ChatGPT et choisissez-le ici, sans le modifier. Les plans sont créés et vous passez à
+            Téléchargez le fichier rempli par l'assistant et choisissez-le ici, sans le modifier. Les plans sont créés et vous passez à
             l'étape 3.
             {plans ? ` Ce projet a déjà ${plans} plan${plans > 1 ? "s" : ""} : les nouveaux s'ajoutent à la suite.` : ""}
           </p>

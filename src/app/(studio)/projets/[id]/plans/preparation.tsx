@@ -50,14 +50,14 @@ export function PreparationTableau(p: {
       <div className="flex flex-wrap items-center gap-3">
         <span className="font-semibold">a.</span>
         <button type="button" className="bouton-discret" onClick={telecharger}>
-          ⬇ Télécharger le fichier vide (.csv)
+          ⬇ Télécharger le fichier à remplir (.csv)
         </button>
         {telecharge && <span className="text-succes">Téléchargé : {FICHIER_A_REMPLIR}</span>}
       </div>
       <div className="flex flex-wrap items-center gap-3">
         <span className="font-semibold">b.</span>
         <button type="button" className="bouton" onClick={copier}>
-          📋 Copier la consigne pour ChatGPT
+          📋 Copier la consigne
         </button>
         {etat === "copie" && <span className="text-succes">Copiée.</span>}
       </div>
@@ -65,8 +65,8 @@ export function PreparationTableau(p: {
         <textarea readOnly className="champ h-48 font-mono text-xs" value={texte} onFocus={(e) => e.target.select()} />
       )}
       <p className="text-sourdine">
-        <span className="font-semibold text-encre">c.</span> Dans ChatGPT, ouvrez une nouvelle conversation : collez la consigne,
-        puis joignez la photo du personnage principal et le fichier vide.
+        <span className="font-semibold text-encre">c.</span> Dans ChatGPT ou Claude (claude.ai), ouvrez une nouvelle conversation : collez la consigne,
+        puis joignez la photo du personnage principal et le fichier à remplir (il contient une ligne d'exemple, que l'assistant supprimera).
         {p.script.trim() ? "" : " Joignez aussi votre voix off (texte ou fichier), puisqu'elle n'est pas dans l'étape 1."}
       </p>
     </div>

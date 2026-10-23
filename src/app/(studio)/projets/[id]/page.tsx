@@ -84,7 +84,7 @@ export default async function PageProjet({
     plans.length === 0 && sansPersonnage
       ? { texte: "Remplissez les informations ci-dessous et ajoutez la photo du personnage principal.", lien: "#references", bouton: "Ajouter la photo" }
       : plans.length === 0
-        ? { texte: "Préparez le tableau des plans avec ChatGPT, puis importez-le.", lien: `${base}/chatgpt`, bouton: "Étape 2 : ChatGPT" }
+        ? { texte: "Préparez le tableau des plans avec ChatGPT ou Claude, puis importez-le.", lien: `${base}/chatgpt`, bouton: "Étape 2 : ChatGPT / Claude" }
         : sansPhoto > 0
         ? { texte: `${sansPhoto} plan(s) sans photo à compléter.`, lien: `${base}/plans`, bouton: "Compléter les plans" }
         : aValider > 0
@@ -213,7 +213,7 @@ export default async function PageProjet({
               name="scenario_text"
               rows={8}
               defaultValue={projet.scenario_text}
-              placeholder="Collez ici tout le texte dit dans le film. ChatGPT le découpera en plans à l'étape 2."
+              placeholder="Collez ici tout le texte dit dans le film. ChatGPT ou Claude le découpera en plans à l'étape 2."
               className="champ text-sm"
             />
           </div>
@@ -282,7 +282,7 @@ export default async function PageProjet({
         {/* Le bouton enregistre le formulaire des informations (plus haut) puis ouvre l'étape 2 */}
         <div className="flex flex-wrap items-center gap-3">
           <button type="submit" form="infos-projet" className="bouton">
-            ✓ Valider les informations → Étape 2 : ChatGPT
+            ✓ Valider les informations → Étape 2 : ChatGPT / Claude
           </button>
           {sansPersonnage && <span className="text-sm text-sourdine">Pensez d'abord à la photo du personnage principal.</span>}
         </div>
