@@ -175,7 +175,7 @@ export async function suivrePhotos(
   await Promise.all(
     photos.map(async (p) => {
       if (!p.runpod_job_id) return;
-      const statut = await lireStatut("eco-480", p.runpod_job_id).catch(() => null);
+      const statut = await lireStatut("photo", p.runpod_job_id).catch(() => null);
       if (!statut || statut.etat === "en_cours") return;
       const fin = new Date().toISOString();
       if (statut.etat === "echouee" || !statut.imagePath?.startsWith(`${projectId}/photos/`)) {

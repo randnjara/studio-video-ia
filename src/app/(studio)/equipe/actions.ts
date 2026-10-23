@@ -4,8 +4,15 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { journaliser } from "@/lib/journal";
 import { noterConnexion } from "@/lib/journal-connexion";
-import { CLE_ENDPOINT, CLE_VOLUME, endpointEco } from "@/lib/runpod";
-import { ajouterStockage, creerServeur } from "@/lib/runpod-admin";
+import { CLE_ENDPOINT, CLE_ENDPOINT_PHOTO, CLE_VOLUME, endpointEco } from "@/lib/runpod";
+import {
+  CLE_CACHE_PHOTO,
+  CLE_CACHE_VIDEO,
+  ajouterStockage,
+  creerServeur,
+  creerServeursCache,
+  supprimerAncienServeurEtDisque,
+} from "@/lib/runpod-admin";
 import { requireProfile } from "@/lib/session";
 import { siteUrl } from "@/lib/site-url";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -168,4 +175,50 @@ export async function supprimerMembre(userId: string, formData: FormData) {
   await journaliser(supabase, profile.id, "suppression", "membre", null, { email: user.email });
   revalidatePath("/equipe");
   redirect(`/equipe?supprime=${encodeURIComponent(user.email ?? "")}`);
+}
+
+// Cache gratuit de RunPod, étape 1 : deux nouveaux serveurs (vidéo, photo), sans disque payant
+export async function creerServeursCacheAction() {
+  const { supabase, profile } = await requireResponsable();
+  let ids: { video: string; photo: string };
+  try {
+    ids = await creerServeursCache();
+  } catch (e) {
+    redirect(`/equipe?erreur=serveur&detail=${encodeURIComponent(e instanceof Error ? e.message : String(e))}`);
+  }
+  const maintenant = new Date().toISOString();
+  await supabase.from("reglages").upsert([
+    { cle: CLE_CACHE_VIDEO, valeur: ids.video, updated_at: maintenant },
+    { cle: CLE_CACHE_PHOTO, valeur: ids.photo, updated_at: maintenant },
+  ]);
+  await journaliser(supabase, profile.id, "creation-serveurs-cache", "reglage", null, ids);
+  redirect("/equipe?cache=1#cache");
+}
+
+// Étape 3 : le studio utilise les nouveaux serveurs ; l'ancien serveur et le disque payant sont supprimés
+export async function passerAuCache(formData: FormData) {
+  const { supabase, profile } = await requireResponsable();
+  if (formData.get("confirmer") !== "oui") redirect("/equipe?erreur=confirmer-cache#cache");
+  const { data } = await supabase.from("reglages").select("cle, valeur").in("cle", [CLE_CACHE_VIDEO, CLE_CACHE_PHOTO]);
+  const video = data?.find((r) => r.cle === CLE_CACHE_VIDEO)?.valeur;
+  const photo = data?.find((r) => r.cle === CLE_CACHE_PHOTO)?.valeur;
+  if (!video || !photo) redirect("/equipe?erreur=cache-absent#cache");
+  const ancien = await endpointEco();
+
+  const maintenant = new Date().toISOString();
+  await supabase.from("reglages").upsert([
+    { cle: CLE_ENDPOINT, valeur: video, updated_at: maintenant },
+    { cle: CLE_ENDPOINT_PHOTO, valeur: photo, updated_at: maintenant },
+  ]);
+  await supabase.from("reglages").delete().in("cle", [CLE_CACHE_VIDEO, CLE_CACHE_PHOTO]);
+  await journaliser(supabase, profile.id, "passage-cache", "reglage", null, { video, photo, ancien });
+  revalidatePath("/", "layout");
+
+  try {
+    await supprimerAncienServeurEtDisque(ancien && ancien !== video ? ancien : null);
+  } catch (e) {
+    redirect(`/equipe?erreur=suppression-disque&detail=${encodeURIComponent(e instanceof Error ? e.message : String(e))}#cache`);
+  }
+  await supabase.from("reglages").delete().eq("cle", CLE_VOLUME);
+  redirect("/equipe?passe-cache=1");
 }

@@ -7,7 +7,7 @@ import { MOUVEMENT_PAR_DEFAUT } from "@/lib/libelles";
 import { lancerPlan, marquerEnProduction } from "@/lib/production";
 import { lancerPhoto, suivrePhotos } from "@/lib/photos";
 import { agrandirStockage, mettreAJourServeur } from "@/lib/runpod-admin";
-import { endpointEco, estMoteur, moteursDisponibles } from "@/lib/runpod";
+import { endpointEco, endpointPhoto, estMoteur, moteursDisponibles } from "@/lib/runpod";
 import { requireProfile } from "@/lib/session";
 
 // Les références du film se gèrent à l'étape 1 (Infos)
@@ -278,9 +278,9 @@ export async function supprimerReference(projectId: string, refId: string) {
 
 export async function creerPhotos(projectId: string, formData: FormData) {
   const { supabase, profile } = await requireProfile();
-  const serveur = await endpointEco();
+  const serveur = await endpointPhoto();
   if (!serveur) retour(projectId, "?erreur=sans-serveur");
-  // Le disque du serveur doit tenir les deux modèles (vidéo et photo), et le serveur doit avoir la dernière image
+  // Ancien fonctionnement avec disque : il doit tenir les deux modèles. Le serveur doit avoir la dernière image.
   await Promise.all([
     agrandirStockage().catch(() => undefined),
     mettreAJourServeur(supabase, serveur).catch(() => undefined),

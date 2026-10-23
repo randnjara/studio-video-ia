@@ -27,6 +27,8 @@ const PRIX_SECONDE_GPU = Number(process.env.RUNPOD_PRIX_SECONDE ?? 0.00116);
 
 export const CLE_ENDPOINT = "runpod_endpoint_id";
 export const CLE_VOLUME = "runpod_volume";
+// Serveur dédié aux photos de départ (Qwen-Image-Edit en cache). Sans lui, les photos passent par le serveur vidéo.
+export const CLE_ENDPOINT_PHOTO = "runpod_endpoint_photo";
 
 // Identifiant de notre serveur RunPod (lu une fois par affichage)
 export const endpointEco = cache(async (): Promise<string | null> => {
@@ -34,6 +36,12 @@ export const endpointEco = cache(async (): Promise<string | null> => {
   const supabase = await getClient();
   const { data } = await supabase.from("reglages").select("valeur").eq("cle", CLE_ENDPOINT).maybeSingle();
   return data?.valeur || null;
+});
+
+export const endpointPhoto = cache(async (): Promise<string | null> => {
+  const supabase = await getClient();
+  const { data } = await supabase.from("reglages").select("valeur").eq("cle", CLE_ENDPOINT_PHOTO).maybeSingle();
+  return data?.valeur || (await endpointEco());
 });
 
 export async function moteursDisponibles(): Promise<Moteur[]> {
@@ -64,14 +72,17 @@ export function cle() {
   return k;
 }
 
-async function base(moteur: Moteur) {
+// « photo » : notre serveur des photos de départ
+type Cible = Moteur | "photo";
+
+async function base(moteur: Cible) {
   if (moteur === "qualite") return PUBLIC;
-  const id = await endpointEco();
+  const id = moteur === "photo" ? await endpointPhoto() : await endpointEco();
   if (!id) throw new Error("Notre serveur RunPod n'est pas encore créé (voir « Équipe et budget »).");
   return `https://api.runpod.ai/v2/${encodeURIComponent(id)}`;
 }
 
-async function appel(moteur: Moteur, chemin: string, init?: RequestInit) {
+async function appel(moteur: Cible, chemin: string, init?: RequestInit) {
   const res = await fetch(`${await base(moteur)}${chemin}`, {
     ...init,
     headers: { Authorization: `Bearer ${cle()}`, "Content-Type": "application/json" },
@@ -143,7 +154,7 @@ export async function lancerPhotoRunPod(p: {
     image_path: p.imagePath,
     upload_url: p.uploadUrl,
   };
-  const data = await appel("eco-480", "/run", { method: "POST", body: JSON.stringify({ input }) });
+  const data = await appel("photo", "/run", { method: "POST", body: JSON.stringify({ input }) });
   return String(data.id);
 }
 
@@ -160,7 +171,7 @@ export type StatutRunPod =
     }
   | { etat: "echouee"; erreur: string };
 
-export async function lireStatut(moteur: Moteur, jobId: string): Promise<StatutRunPod> {
+export async function lireStatut(moteur: Cible, jobId: string): Promise<StatutRunPod> {
   const data = await appel(moteur, `/status/${encodeURIComponent(jobId)}`);
   switch (data.status) {
     case "COMPLETED": {

@@ -1,12 +1,21 @@
 import { redirect } from "next/navigation";
 import { requireProfile, type Profile } from "@/lib/session";
 import { BoutonEnvoi } from "@/components/bouton-envoi";
-import { CLE_VOLUME, endpointEco } from "@/lib/runpod";
-import { depenseRunPodMois, PRIX_VOLUME_MOIS_USD, TAILLE_VOLUME_GO } from "@/lib/runpod-admin";
+import { CLE_ENDPOINT_PHOTO, CLE_VOLUME, endpointEco } from "@/lib/runpod";
+import {
+  CLE_CACHE_PHOTO,
+  CLE_CACHE_VIDEO,
+  depenseRunPodMois,
+  PRIX_VOLUME_MOIS_USD,
+  SERVEURS_CACHE,
+  TAILLE_VOLUME_GO,
+} from "@/lib/runpod-admin";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   ajouterStockageEco,
   changerAcces,
+  creerServeursCacheAction,
+  passerAuCache,
   changerRole,
   creerServeurEco,
   fixerBudget,
@@ -31,6 +40,10 @@ const ERREURS: Record<string, string> = {
   reinitialisation: "La connexion n'a pas pu être réinitialisée.",
   confirmer: "Cochez la case de confirmation avant de supprimer.",
   suppression: "Le compte n'a pas pu être supprimé.",
+  "confirmer-cache": "Cochez la case de confirmation.",
+  "cache-absent": "Créez d'abord les deux serveurs (étape 1).",
+  "suppression-disque":
+    "Le studio utilise bien les nouveaux serveurs, mais l'ancien serveur ou le disque n'a pas pu être supprimé chez RunPod. Supprimez-les dans la console RunPod (Serverless et Storage).",
 };
 
 const EVENEMENTS: Record<string, string> = {
@@ -89,9 +102,12 @@ export default async function Equipe({
     renvoye?: string;
     reinitialise?: string;
     supprime?: string;
+    cache?: string;
+    "passe-cache"?: string;
   }>;
 }) {
-  const { erreur, detail, invite, budget, serveur, stockage, renvoye, reinitialise, supprime } = await searchParams;
+  const sp = await searchParams;
+  const { erreur, detail, invite, budget, serveur, stockage, renvoye, reinitialise, supprime } = sp;
   const { supabase, profile } = await requireProfile();
   if (profile.role !== "responsable") redirect("/");
 
@@ -123,6 +139,15 @@ export default async function Equipe({
       .order("created_at", { ascending: false })
       .limit(100),
   ]);
+  const { data: reglagesCache } = await supabase
+    .from("reglages")
+    .select("cle, valeur")
+    .in("cle", [CLE_CACHE_VIDEO, CLE_CACHE_PHOTO, CLE_ENDPOINT_PHOTO]);
+  const reglage = (c: string) => reglagesCache?.find((x) => x.cle === c)?.valeur ?? null;
+  const cacheVideo = reglage(CLE_CACHE_VIDEO);
+  const cachePhoto = reglage(CLE_CACHE_PHOTO);
+  const serveurPhoto = reglage(CLE_ENDPOINT_PHOTO);
+
   const compte = new Map(comptes.map((u) => [u.id, u]));
   const session = new Map(
     ((sessions ?? []) as { user_id: string; sessions: number; derniere_activite: string }[]).map((x) => [x.user_id, x]),
@@ -154,6 +179,12 @@ export default async function Equipe({
         <p className="message-ok">
           Stockage du modèle ajouté. Le prochain clip remplit ce disque (un peu plus long), ensuite les démarrages sont
           plus rapides.
+        </p>
+      )}
+      {sp["passe-cache"] && (
+        <p className="message-ok">
+          Le studio utilise maintenant les deux serveurs avec cache gratuit. L'ancien serveur et le disque payant sont
+          supprimés.
         </p>
       )}
       {erreur && ERREURS[erreur] && (
@@ -216,7 +247,12 @@ export default async function Equipe({
               <span className="pastille bg-succes-doux text-succes">Actif</span> Identifiant RunPod <code>{endpoint}</code>.
               Les choix « Économique 480p » et « Économique 720p » sont proposés dans l'onglet Plans de chaque projet.
             </p>
-            {volume ? (
+            {serveurPhoto ? (
+              <p className="text-sm">
+                <span className="pastille bg-succes-doux text-succes">Cache gratuit</span> Vidéo et photos sur deux
+                serveurs, modèles gardés par RunPod sans frais de stockage. Serveur photo <code>{serveurPhoto}</code>.
+              </p>
+            ) : volume ? (
               <p className="text-sm">
                 <span className="pastille bg-succes-doux text-succes">Modèles stockés</span> Disque RunPod{" "}
                 <code>{volume.valeur}</code> de {TAILLE_VOLUME_GO} Go (vidéo Wan 2.2 et photos Qwen-Image-Edit), environ{" "}
@@ -258,6 +294,71 @@ export default async function Equipe({
           </>
         )}
       </section>
+
+      {endpoint && !serveurPhoto && (
+        <section id="cache" className="carte flex flex-col gap-3">
+          <h2 className="text-lg font-bold">Passer au cache gratuit de RunPod</h2>
+          <p className="text-sm text-sourdine">
+            Au lieu du disque payant (≈ {PRIX_VOLUME_MOIS_USD.toFixed(2)} $ par mois), RunPod garde lui-même chaque modèle sur
+            ses machines, sans frais de stockage. Il faut un serveur par modèle : un pour la vidéo, un pour les photos. Ils
+            ne coûtent rien quand ils ne tournent pas.
+          </p>
+          {sp.cache && <p className="message-ok">Les deux serveurs sont créés. Passez à l'étape 2.</p>}
+          <ol className="flex list-decimal flex-col gap-3 pl-5 text-sm">
+            <li>
+              {cacheVideo && cachePhoto ? (
+                <span>
+                  Serveurs créés : vidéo <code>{cacheVideo}</code>, photo <code>{cachePhoto}</code>.
+                </span>
+              ) : (
+                <form action={creerServeursCacheAction}>
+                  <BoutonEnvoi enCours="Création chez RunPod…">Créer les deux serveurs</BoutonEnvoi>
+                </form>
+              )}
+            </li>
+            <li>
+              Dans la console RunPod, indiquez le modèle de chaque serveur : ouvrez le serveur, « Manage » puis « Edit
+              Endpoint », champ <b>Model</b>, puis « Save ».
+              <ul className="mt-1 list-disc pl-5">
+                {(["video", "photo"] as const).map((k) => {
+                  const id = k === "video" ? cacheVideo : cachePhoto;
+                  return (
+                    <li key={k}>
+                      {id ? (
+                        <a
+                          className="lien"
+                          href={`https://console.runpod.io/serverless/user/endpoint/${id}`}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          {SERVEURS_CACHE[k].nom}
+                        </a>
+                      ) : (
+                        SERVEURS_CACHE[k].nom
+                      )}{" "}
+                      → Model : <code className="select-all">{SERVEURS_CACHE[k].modele}</code>
+                    </li>
+                  );
+                })}
+              </ul>
+            </li>
+            <li>
+              <form action={passerAuCache} className="flex flex-col gap-2">
+                <label className="flex items-start gap-2">
+                  <input type="checkbox" name="confirmer" value="oui" className="mt-1" />
+                  J'ai rempli le champ Model des deux serveurs. Le studio peut utiliser les nouveaux serveurs et supprimer
+                  l'ancien serveur et le disque payant (définitif).
+                </label>
+                <div>
+                  <BoutonEnvoi className="bouton" enCours="Passage en cours…">
+                    Utiliser les nouveaux serveurs
+                  </BoutonEnvoi>
+                </div>
+              </form>
+            </li>
+          </ol>
+        </section>
+      )}
 
       <section className="carte flex flex-col gap-4">
         <h2 className="text-lg font-bold">Membres</h2>
