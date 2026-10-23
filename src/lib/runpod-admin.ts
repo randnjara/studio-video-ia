@@ -6,7 +6,7 @@ import { cle } from "@/lib/runpod";
 // L'image est construite par GitHub à chaque changement du dossier worker/ (.github/workflows/serveur-video.yml).
 export const IMAGE_SERVEUR = "ghcr.io/randnjara/studio-video-ia-worker:latest";
 // À augmenter avec worker/VERSION : le studio fait passer notre serveur sur cette image au prochain envoi
-export const VERSION_SERVEUR = "2";
+export const VERSION_SERVEUR = "3";
 const CLE_IMAGE = "runpod_image";
 const NOM = "studio-video-eco";
 
@@ -32,16 +32,16 @@ async function cartes80Go(): Promise<string[]> {
   return ids.length > 0 ? ids : ["NVIDIA A100 80GB PCIe", "NVIDIA A100-SXM4-80GB", "NVIDIA H100 80GB HBM3", "NVIDIA H100 PCIe"];
 }
 
-export async function creerServeur(): Promise<string> {
+export async function creerServeur(nom = NOM, nomModele = NOM, image = IMAGE_SERVEUR): Promise<string> {
   // Réutilise le modèle de serveur s'il existe déjà (par exemple après un premier essai interrompu)
   const modeles = ((await rest("/templates").catch(() => [])) ?? []) as { id: string; name: string }[];
-  let modele = modeles.find((m) => m.name === NOM);
+  let modele = modeles.find((m) => m.name === nomModele);
   if (!modele) {
     modele = await rest("/templates", {
       method: "POST",
       body: JSON.stringify({
-        name: NOM,
-        imageName: IMAGE_SERVEUR,
+        name: nomModele,
+        imageName: image,
         isServerless: true,
         containerDiskInGb: 150,
         env: {},
@@ -51,13 +51,13 @@ export async function creerServeur(): Promise<string> {
   if (!modele?.id) throw new Error("RunPod n'a pas renvoyé de modèle de serveur.");
 
   const existants = ((await rest("/endpoints").catch(() => [])) ?? []) as { id: string; name: string }[];
-  const existant = existants.find((e) => e.name === NOM);
+  const existant = existants.find((e) => e.name === nom);
   if (existant) return existant.id;
 
   const endpoint = await rest("/endpoints", {
     method: "POST",
     body: JSON.stringify({
-      name: NOM,
+      name: nom,
       templateId: modele.id,
       gpuTypeIds: await cartes80Go(),
       gpuCount: 1,
@@ -179,11 +179,41 @@ export async function depenseRunPodMois(): Promise<{ total: number; serveur: num
   }
 }
 
+const IMAGE_VERSION = `ghcr.io/randnjara/studio-video-ia-worker:v${VERSION_SERVEUR}`;
+
 // RunPod garde l'image en cache : on lui indique la version exacte quand le dossier worker/ a changé
 export async function mettreAJourServeur(supabase: SupabaseClient, endpointId: string) {
-  const image = `ghcr.io/randnjara/studio-video-ia-worker:v${VERSION_SERVEUR}`;
-  const { data } = await supabase.from("reglages").select("valeur").eq("cle", CLE_IMAGE).maybeSingle();
-  if (data?.valeur === image) return;
-  await v2(`/v2/serverless/${encodeURIComponent(endpointId)}`, { method: "PATCH", body: JSON.stringify({ image }) });
-  await supabase.from("reglages").upsert({ cle: CLE_IMAGE, valeur: image });
+  const cleImage = `${CLE_IMAGE}:${endpointId}`;
+  const { data } = await supabase.from("reglages").select("valeur").eq("cle", cleImage).maybeSingle();
+  if (data?.valeur === IMAGE_VERSION) return;
+  await v2(`/v2/serverless/${encodeURIComponent(endpointId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ image: IMAGE_VERSION }),
+  });
+  await supabase.from("reglages").upsert({ cle: cleImage, valeur: IMAGE_VERSION });
+}
+
+// Cache gratuit de RunPod : un serveur par modèle (champ « Model » du serveur, réglé dans la console RunPod).
+// Le modèle reste sur les machines de RunPod sans frais de stockage, et son téléchargement n'est pas facturé.
+export const SERVEURS_CACHE = {
+  video: { nom: "studio-video-cache", modele: "Wan-AI/Wan2.2-I2V-A14B-Diffusers" },
+  photo: { nom: "studio-photo-cache", modele: "Qwen/Qwen-Image-Edit-2511" },
+} as const;
+const MODELE_CACHE = "studio-serveur-cache";
+// Serveurs créés mais pas encore utilisés (en attente du réglage « Model » dans la console RunPod)
+export const CLE_CACHE_VIDEO = "runpod_cache_video";
+export const CLE_CACHE_PHOTO = "runpod_cache_photo";
+
+export async function creerServeursCache(): Promise<{ video: string; photo: string }> {
+  const video = await creerServeur(SERVEURS_CACHE.video.nom, MODELE_CACHE, IMAGE_VERSION);
+  const photo = await creerServeur(SERVEURS_CACHE.photo.nom, MODELE_CACHE, IMAGE_VERSION);
+  return { video, photo };
+}
+
+// Supprime l'ancien serveur (attaché au disque) puis le disque payant
+export async function supprimerAncienServeurEtDisque(ancienEndpoint: string | null) {
+  if (ancienEndpoint) await rest(`/endpoints/${encodeURIComponent(ancienEndpoint)}`, { method: "DELETE" });
+  const volumes = ((await rest("/networkvolumes")) ?? []) as { id: string; name: string }[];
+  for (const v of volumes.filter((x) => x.name === NOM_VOLUME))
+    await rest(`/networkvolumes/${encodeURIComponent(v.id)}`, { method: "DELETE" });
 }

@@ -1,4 +1,4 @@
-"""Serveur RunPod du studio, deux métiers sur la même machine :
+"""Serveur RunPod du studio, deux métiers (un serveur RunPod par métier, chacun avec son modèle en cache) :
 
 - « video » (par défaut) : transforme une photo en clip avec Wan 2.2 (image → vidéo), en 4 étapes ;
 - « image » : crée une photo de départ avec Qwen-Image-Edit-2511 à partir de 1 à 3 images de référence
@@ -18,9 +18,11 @@ import time
 import traceback
 from io import BytesIO
 
-# Les poids des modèles sont gardés sur le volume réseau s'il existe, pour ne les télécharger qu'une fois
+# Cache gratuit de RunPod (« Model » réglé sur le serveur) : le modèle est déjà sur la machine, en lecture seule
+CACHE_RUNPOD = "/runpod-volume/huggingface-cache/hub"
+# Sinon, ancien fonctionnement : les poids sont gardés sur le volume réseau s'il existe (payant au mois)
 _DOSSIER_VOLUME = os.environ.get("VOLUME_DIR", "/runpod-volume")
-VOLUME = _DOSSIER_VOLUME if os.path.isdir(_DOSSIER_VOLUME) else None
+VOLUME = _DOSSIER_VOLUME if os.path.isdir(_DOSSIER_VOLUME) and not os.path.isdir(CACHE_RUNPOD) else None
 if VOLUME:
     os.environ.setdefault("HF_HOME", f"{VOLUME}/huggingface")
 
@@ -90,9 +92,30 @@ def fichier_lora(fichiers, bruit):
     return candidats[-1]
 
 
+def dans_cache(depot):
+    """Dossier du modèle dans le cache RunPod, ou None s'il n'y est pas."""
+    racine = os.path.join(CACHE_RUNPOD, "models--" + depot.replace("/", "--"))
+    instantanes = os.path.join(racine, "snapshots")
+    ref = os.path.join(racine, "refs", "main")
+    if os.path.isfile(ref):
+        with open(ref) as f:
+            dossier = os.path.join(instantanes, f.read().strip())
+        if os.path.isdir(dossier):
+            return dossier
+    if os.path.isdir(instantanes):
+        versions = sorted(os.listdir(instantanes))
+        if versions:
+            return os.path.join(instantanes, versions[0])
+    return None
+
+
 def charger_wan():
     debut = time.time()
-    if WAN_LOCAL and os.path.isfile(f"{WAN_LOCAL}/model_index.json"):
+    cache = dans_cache(MODELE)
+    if cache:
+        print(f"Wan 2.2 lu dans le cache RunPod : {cache}")
+        pipe = WanImageToVideoPipeline.from_pretrained(cache, torch_dtype=torch.bfloat16)
+    elif WAN_LOCAL and os.path.isfile(f"{WAN_LOCAL}/model_index.json"):
         pipe = WanImageToVideoPipeline.from_pretrained(WAN_LOCAL, torch_dtype=torch.bfloat16)
     else:
         # Premier démarrage : téléchargement sur le disque de la machine, puis copie allégée sur le volume
@@ -119,7 +142,9 @@ def charger_wan():
 def charger_qwen():
     debut = time.time()
     planificateur = FlowMatchEulerDiscreteScheduler.from_config(PLANIFICATEUR_RAPIDE)
-    pipe = QwenImageEditPlusPipeline.from_pretrained(QWEN_MODELE, scheduler=planificateur, torch_dtype=torch.bfloat16)
+    source = dans_cache(QWEN_MODELE) or QWEN_MODELE
+    print(f"Qwen-Image-Edit lu depuis {source}")
+    pipe = QwenImageEditPlusPipeline.from_pretrained(source, scheduler=planificateur, torch_dtype=torch.bfloat16)
     pipe.load_lora_weights(hf_hub_download(QWEN_LORA_REPO, QWEN_LORA))
     pipe.to("cuda")
     print(f"Qwen-Image-Edit prêt en {time.time() - debut:.0f} s (LoRA {QWEN_LORA})")
