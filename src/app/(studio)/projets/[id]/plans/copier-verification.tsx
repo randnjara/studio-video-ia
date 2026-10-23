@@ -3,7 +3,20 @@
 import { useState } from "react";
 
 // Copie le prompt de vérification : la personne le colle dans un assistant gratuit (ChatGPT, Claude, Gemini…)
-export function CopierVerification({ texte }: { texte: string }) {
+// Sert aussi pour le prompt de préparation du tableau des plans (titre, explication et bouton différents)
+export function CopierVerification({
+  texte,
+  titre = "Vérifier le script et la continuité (gratuit)",
+  explication = "Le bouton copie une consigne complète avec votre script et tous les plans. Collez-la dans un assistant gratuit (ChatGPT, Claude, Gemini…) et joignez les photos de départ dans l'ordre si possible. Il répond avec un tableau des plans à corriger et les consignes corrigées, prêtes à recopier ici.",
+  bouton = "📋 Copier le prompt de vérification",
+  carte = true,
+}: {
+  texte: string;
+  titre?: string;
+  explication?: string;
+  bouton?: string;
+  carte?: boolean;
+}) {
   const [etat, setEtat] = useState<"" | "copie" | "manuel">("");
 
   async function copier() {
@@ -16,17 +29,13 @@ export function CopierVerification({ texte }: { texte: string }) {
   }
 
   return (
-    <details className="carte text-sm">
-      <summary className="cursor-pointer font-semibold">Vérifier le script et la continuité (gratuit)</summary>
+    <details className={carte ? "carte text-sm" : "rounded-lg border border-ligne p-4 text-sm"}>
+      <summary className="cursor-pointer font-semibold">{titre}</summary>
       <div className="mt-3 flex flex-col gap-3">
-        <p className="text-sourdine">
-          Le bouton copie une consigne complète avec votre script et tous les plans. Collez-la dans un assistant gratuit
-          (ChatGPT, Claude, Gemini…) et joignez les photos de départ dans l'ordre si possible. Il répond avec un tableau des
-          plans à corriger et les consignes corrigées, prêtes à recopier ici.
-        </p>
+        <p className="text-sourdine">{explication}</p>
         <div className="flex flex-wrap items-center gap-3">
           <button type="button" className="bouton" onClick={copier}>
-            📋 Copier le prompt de vérification
+            {bouton}
           </button>
           {etat === "copie" && <span className="text-succes">Copié. Collez-le dans votre assistant.</span>}
         </div>

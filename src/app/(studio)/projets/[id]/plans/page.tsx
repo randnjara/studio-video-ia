@@ -6,6 +6,7 @@ import { suivrePhotos } from "@/lib/photos";
 import { signerLiens } from "@/lib/production";
 import { MOTEURS, PRIX_PHOTO_ESTIME_USD, endpointEco, moteursDisponibles } from "@/lib/runpod";
 import { getClient } from "@/lib/session";
+import { promptPreparation } from "@/lib/preparation";
 import { promptVerification } from "@/lib/verification";
 import {
   creerPhotos,
@@ -204,8 +205,21 @@ export default async function PagePlans({
             )}
           </div>
         </details>
+        <CopierVerification
+          carte={false}
+          titre="🤖 Préparer le tableau des plans avec ChatGPT (gratuit)"
+          explication="Ajoutez d'abord les références du film (personnage principal, lieux) et le style, plus bas. Le bouton copie une consigne complète avec votre voix off (le script ci-dessus) : collez-la dans ChatGPT avec la photo du personnage. Il répond avec un tableau au format du studio ; enregistrez le bloc CSV dans un fichier .csv et importez-le juste en dessous."
+          bouton="📋 Copier le prompt de préparation"
+          texte={promptPreparation({
+            titre: projet?.title ?? "",
+            format: projet?.aspect_ratio ?? "16:9",
+            style: projet?.style_text ?? "",
+            script: projet?.scenario_text ?? "",
+            refs,
+          })}
+        />
         <details className="rounded-lg border border-ligne p-4">
-          <summary className="cursor-pointer font-semibold">📋 Importer un tableau de scènes (CSV)</summary>
+          <summary className="cursor-pointer font-semibold">📋 Importer un tableau de scènes (CSV ou scénario Markdown)</summary>
           <div className="mt-4">
             <ImportTableau projectId={id} />
           </div>
@@ -299,7 +313,7 @@ export default async function PagePlans({
 
         {nbAlertes > 0 && (
           <p className="rounded-lg bg-alerte/10 px-4 py-3 text-sm text-alerte">
-            ⚠ {nbAlertes} alerte{nbAlertes > 1 ? "s" : ""} sur les plans (répétitions, voix off trop longue, consigne pas en
+            ⚠ {nbAlertes} alerte{nbAlertes > 1 ? "s" : ""} sur les plans (gestes ou poses de fin répétés, voix off trop longue, consigne pas en
             anglais) : voyez le détail sous chaque plan avant de créer les photos ou les vidéos.
           </p>
         )}
