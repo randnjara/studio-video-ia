@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { journaliser } from "@/lib/journal";
 import { MOUVEMENT_PAR_DEFAUT } from "@/lib/libelles";
-import { lancerPlan, marquerEnProduction } from "@/lib/production";
+import { demanderEssais, marquerEnProduction } from "@/lib/production";
 import { demanderPhotos, suivrePhotos } from "@/lib/photos";
 import { agrandirStockage, mettreAJourServeur } from "@/lib/runpod-admin";
 import { endpointEco, endpointPhoto, estMoteur, moteursDisponibles } from "@/lib/runpod";
@@ -206,15 +206,11 @@ export async function envoyerALaGeneration(projectId: string, formData: FormData
   const serveur = moteur === "qualite" ? null : await endpointEco();
   if (serveur) await mettreAJourServeur(supabase, serveur).catch(() => undefined);
 
-  const [{ data: projet }, { data: scenes }] = await Promise.all([
-    supabase.from("projects").select("aspect_ratio").eq("id", projectId).single(),
-    supabase
-      .from("scenes")
-      .select("id, motion_prompt, image_path, consent_confirmed, duration_s, status, takes!takes_scene_id_fkey(status)")
-      .eq("project_id", projectId)
-      .order("position"),
-  ]);
-  const format = projet?.aspect_ratio ?? "16:9";
+  const { data: scenes } = await supabase
+    .from("scenes")
+    .select("id, motion_prompt, image_path, consent_confirmed, duration_s, status, takes!takes_scene_id_fkey(status)")
+    .eq("project_id", projectId)
+    .order("position");
 
   const aLancer = (scenes ?? []).filter((s) => {
     const essais = s.takes as { status: string }[];
@@ -226,14 +222,13 @@ export async function envoyerALaGeneration(projectId: string, formData: FormData
   });
   if (aLancer.length === 0) retour(projectId, "?erreur=selection-vide");
 
-  // Les générations partent en même temps : RunPod les traite en parallèle
-  const erreurs = await Promise.all(aLancer.map((s) => lancerPlan(supabase, profile.id, s, format, moteur)));
-  const lances = erreurs.filter((e) => e === null).length;
-  const premiere = erreurs.find((e) => e !== null);
+  // Les essais sont inscrits dans la file ; la page Clips les envoie quelques-uns à la fois (limite d'appels de
+  // Cloudflare) et RunPod les traite en parallèle
+  const { inscrits, erreur } = await demanderEssais(supabase, profile.id, projectId, aLancer, moteur);
 
   revalidatePath(`/projets/${projectId}`, "layout");
-  if (lances === 0) retour(projectId, `?erreur=${premiere ?? "essai"}`);
-  redirect(`/projets/${projectId}/clips?lances=${lances}${premiere ? `&ignores=${aLancer.length - lances}` : ""}`);
+  if (inscrits === 0) retour(projectId, `?erreur=${erreur ?? "essai"}`);
+  redirect(`/projets/${projectId}/clips?lances=${inscrits}`);
 }
 
 export async function restaurerScript(projectId: string, versionId: number) {

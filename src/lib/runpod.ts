@@ -104,6 +104,7 @@ export async function lancerGeneration(p: {
   // Notre serveur dépose lui-même la vidéo dans le stockage, à ce chemin, grâce à ce lien d'envoi
   videoPath: string;
   uploadUrl: string;
+  serveur?: string;
 }): Promise<string> {
   const input =
     p.moteur === "qualite"
@@ -131,7 +132,7 @@ export async function lancerGeneration(p: {
           video_path: p.videoPath,
           upload_url: p.uploadUrl,
         };
-  const data = await appel(p.moteur, "/run", { method: "POST", body: JSON.stringify({ input }) });
+  const data = await appel(p.moteur, "/run", { method: "POST", body: JSON.stringify({ input }) }, p.serveur);
   return String(data.id);
 }
 

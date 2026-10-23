@@ -82,10 +82,11 @@ export default async function PageClips({
         runpod_job_id: t.runpod_job_id,
         moteur: moteurDe(t),
         sceneValidee: p.status === "validee",
+        created_at: t.created_at,
       })),
   );
   if (enCoursAvant.length > 0) {
-    const restants = await suivreEssais(supabase, id, enCoursAvant);
+    const restants = await suivreEssais(supabase, id, enCoursAvant, false);
     if (restants < enCoursAvant.length) plans = ((await lire()).data ?? []) as Plan[];
   }
 

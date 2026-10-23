@@ -254,7 +254,10 @@ export async function suivrePhotos(supabase: SupabaseClient, projectId: string, 
   if (!serveur) return;
   const age = (p: PhotoSuivie) => Date.now() - new Date(p.created_at).getTime();
   const enAttente = photos.filter((p) => !p.runpod_job_id).sort((a, b) => a.created_at.localeCompare(b.created_at));
-  const parties = photos.filter((p) => p.runpod_job_id && p.runpod_job_id !== ENVOI);
+  // Les plus anciennes d'abord : RunPod traite sa file dans l'ordre, ce sont elles qui finissent en premier
+  const parties = photos
+    .filter((p) => p.runpod_job_id && p.runpod_job_id !== ENVOI)
+    .sort((a, b) => a.created_at.localeCompare(b.created_at));
   // Coupée pendant l'envoi : on ne sait pas si RunPod l'a reçue, elle passe en échec pour être relancée
   await Promise.all(
     photos
