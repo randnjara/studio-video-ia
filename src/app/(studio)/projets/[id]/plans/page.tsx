@@ -20,6 +20,7 @@ import { ImportPhotos } from "./import-photos";
 import { ImportGroupe } from "./import-groupe";
 import { BarreSelection } from "./selection";
 import { CopierLots } from "./copier-lots";
+import { ImportCorrection } from "./import-correction";
 import { CopierVerification } from "./copier-verification";
 import { SuiviPhotos } from "./suivi-photos";
 
@@ -64,6 +65,7 @@ const ERREURS: Record<string, string> = {
   "sans-serveur": "Créez d'abord notre serveur RunPod dans « Équipe et budget ».",
   photo: "La création des photos n'a pas pu démarrer. Réessayez.",
   "photos-importees": "Les photos n'ont pas pu être rattachées aux plans. Réessayez.",
+  correction: "Les plans n'ont pas pu être mis à jour avec le tableau corrigé. Réessayez.",
 };
 
 export default async function PagePlans({
@@ -148,6 +150,13 @@ export default async function PagePlans({
         </p>
       )}
       {sp.enregistre && <p className="message-ok">Plan enregistré.</p>}
+      {sp.corriges && (
+        <p className="message-ok">
+          {Number(sp.corriges) > 1 ? `${sp.corriges} plans mis à jour` : `${sp.corriges} plan mis à jour`} avec le tableau
+          corrigé.
+          {sp.refaire ? ` Photos de départ à refaire : plans ${sp.refaire.split(",").join(", ")}.` : ""}
+        </p>
+      )}
       {sp.supprime && (
         <p className="message-ok">{Number(sp.supprime) > 1 ? `${sp.supprime} plans supprimés.` : "Plan supprimé."}</p>
       )}
@@ -290,7 +299,13 @@ export default async function PagePlans({
             anglais) : voyez le détail sous chaque plan avant de créer les photos ou les vidéos.
           </p>
         )}
-        {plans.length > 0 && projet && <CopierVerification texte={promptVerification(projet, plans)} />}
+        {plans.length > 0 && projet && (
+          <CopierVerification
+            texte={promptVerification(projet, plans)}
+            explication="Le bouton copie une consigne complète avec votre script et le tableau de tous les plans. Collez-la dans ChatGPT ou Claude (joignez les photos de départ dans l'ordre si possible). L'assistant rend un fichier tableau_corrige.csv : importez-le juste en dessous pour mettre à jour les plans."
+          />
+        )}
+        {plans.length > 0 && <ImportCorrection projectId={id} nbPlans={plans.length} />}
 
         {plans.length === 0 ? (
           <p className="carte text-sm text-sourdine">Aucun plan pour l'instant. Créez-les ci-dessus.</p>

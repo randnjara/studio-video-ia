@@ -14,51 +14,85 @@ type PlanVerif = {
   pose_fin?: string;
 };
 
+// Colonnes du fichier corrigé rendu par l'assistant, réimporté dans l'onglet Plans (mise à jour des plans existants)
+export const COLONNES_CORRECTION = [
+  "numero",
+  "verdict",
+  "probleme",
+  "photo_a_refaire",
+  "voix",
+  "duree",
+  "intention",
+  "cadrage",
+  "angle",
+  "lieu",
+  "pose_debut",
+  "pose_fin",
+  "prompt_image",
+  "prompt_video",
+] as const;
+export const FICHIER_CORRIGE = "tableau_corrige.csv";
+
+const cellule = (v: string) => `"${String(v ?? "").replace(/"/g, '""').replace(/\r?\n/g, " ")}"`;
+
 export function promptVerification(projet: { title: string; aspect_ratio: string; scenario_text: string }, plans: PlanVerif[]) {
-  const liste = plans
-    .map(
-      (p, i) =>
-        `PLAN ${i + 1} (${Number(p.duration_s || 5)} s)\n` +
-        (p.image_description?.trim() ? `- Photo de départ : ${p.image_description.trim()}\n` : "") +
-        ([p.cadrage, p.angle, p.lieu, p.intention].some(Boolean)
-          ? `- Fiche : ${[p.cadrage, p.angle, p.lieu, p.intention].filter(Boolean).join(" · ")}\n`
-          : "") +
-        (p.pose_debut || p.pose_fin ? `- Pose début → fin : ${p.pose_debut || "?"} → ${p.pose_fin || "?"}\n` : "") +
-        `- Mouvement / consigne vidéo : ${p.motion_prompt.trim() || "(vide)"}\n` +
-        `- Voix off : ${p.voiceover_text.trim() || "(aucune)"}`,
-    )
-    .join("\n\n");
+  const tableau = [
+    COLONNES_CORRECTION.join(";"),
+    ...plans.map((p, i) =>
+      [
+        String(i + 1),
+        "",
+        "",
+        "",
+        p.voiceover_text,
+        String(Number(p.duration_s || 5)),
+        p.intention ?? "",
+        p.cadrage ?? "",
+        p.angle ?? "",
+        p.lieu ?? "",
+        p.pose_debut ?? "",
+        p.pose_fin ?? "",
+        p.image_description ?? "",
+        p.motion_prompt,
+      ]
+        .map(cellule)
+        .join(";"),
+    ),
+  ].join("\n");
 
   return `Tu es scripte (responsable de la continuité) et réalisateur sur un film tourné entièrement en vidéo générée par IA.
-Chaque plan est un clip de quelques secondes créé par le modèle Wan 2.2 « image vers vidéo » : il part d'une PHOTO DE DÉPART et l'anime selon la consigne de mouvement. Le modèle ne connaît ni les autres plans ni le script : toute la continuité dépend donc des photos de départ et des consignes.
+Chaque plan est un clip de 5 s au plus, créé par le modèle Wan 2.2 « image vers vidéo » : il part d'une PHOTO DE DÉPART (créée à partir de « prompt_image » et des photos de référence) et l'anime selon « prompt_video ». Le modèle ne connaît ni les autres plans ni le script : toute la continuité dépend des photos de départ et des consignes.
 
-FILM : « ${projet.title} » — format ${projet.aspect_ratio}
+FILM : « ${projet.title} » — format ${projet.aspect_ratio} — ${plans.length} plans
 
 === SCRIPT COMPLET ===
 ${projet.scenario_text.trim() || "(aucun script enregistré)"}
 
-=== PLANS, DANS L'ORDRE DU MONTAGE ===
-${liste || "(aucun plan)"}
+=== TABLEAU ACTUEL DES PLANS (CSV, séparateur point-virgule, dans l'ordre du montage) ===
+${tableau}
 
 === CE QUE TU DOIS VÉRIFIER ===
-1. Respect du script : chaque moment important du script a-t-il son plan ? Y a-t-il des plans hors script, en double ou dans le mauvais ordre ?
-2. Continuité entre plans voisins : personnages (visage, âge, coiffure, vêtements, accessoires), objets, lieu, moment de la journée, météo, lumière, couleurs, direction du regard et du déplacement à l'écran (règle des 180°), position de fin d'un plan et position de début du suivant.
-3. Qualité de chaque consigne de mouvement pour Wan 2.2 :
-   - une seule action principale, réalisable dans la durée indiquée du plan, sans changement de plan ni coupe à l'intérieur ;
-   - mouvement de caméra précis (fixe, travelling avant, panoramique lent…) ;
-   - sujet, action, ambiance et lumière décrits en mots simples et concrets ;
-   - rien qui contredise ce que montre la photo de départ (personne absente, décor différent) ;
-   - pas de texte à afficher à l'écran, pas de visage qui change, pas de foule détaillée inutile.
-4. Variété : aucun geste, cadrage ou angle ne doit revenir en boucle (comparer chaque plan aux 10 précédents et aux 10 suivants) ; chaque geste doit correspondre au sens de la réplique, pas à un cycle répété.
-5. Raccords : la pose de fin d'un plan doit pouvoir enchaîner avec la pose de début du suivant (regard, tête, mains, côté du corps) ; sinon proposer une coupe motivée (changement net de cadrage).
-6. Langue : les consignes de mouvement doivent être en anglais ; les répliques restent dans leur langue d'origine, sans modification.
-7. Voix off : longueur compatible avec la durée du plan (environ 2,5 mots par seconde), ton cohérent d'un plan à l'autre.
-8. Si je te joins les photos de départ (dans l'ordre des plans), compare-les entre elles et avec les consignes : signale tout ce qui casse la continuité.
+1. Respect du script : chaque moment important a son plan, dans le bon ordre, sans plan en double.
+2. Continuité entre plans voisins : visage, âge, coiffure, tenue, accessoires, objets, lieu, moment de la journée, lumière, direction du regard (règle des 180°) ; la pose_fin d'un plan doit enchaîner avec la pose_debut du suivant dans le même lieu, sinon coupe franche motivée (changement net de cadrage).
+3. Chaque prompt_video : une seule action principale réalisable dans la durée, découpée en temps (0-1s, 1-3s…), caméra précise, rien qui contredise la photo de départ, pas de texte à l'écran, mains visibles si un geste les montre (sinon adapter le cadrage ou remplacer le geste par une expression), lèvres libres pendant la parole.
+4. Variété : aucun geste, cadrage ou angle répété en boucle (comparer aux 10 plans voisins) ; chaque geste vient du sens de la réplique ; pas la même phrase recopiée au début ou à la fin de chaque prompt.
+5. Langue : prompt_image et prompt_video en anglais ; les répliques (« voix ») restent EXACTEMENT telles quelles.
+6. Si je te joins les photos de départ (dans l'ordre des plans), compare-les entre elles et avec les prompts.
 
-=== RÉPONSE ATTENDUE (en français simple) ===
-A. Un tableau : Plan | Verdict (OK / À corriger) | Problème en une phrase | Consigne de mouvement corrigée en anglais, découpée 0–1 s / 1–3 s / 3–4 s / 4–5 s, prête à copier.
-B. La liste des problèmes de continuité entre plans voisins, du plus grave au moins grave, avec la correction proposée (consigne à changer, ou photo de départ à refaire et ce qu'elle doit montrer).
-C. Les moments du script qui manquent, et les plans à ajouter (consigne + voix off).
-D. Une « fiche de continuité » courte à garder pour tout le film : personnages, tenues, lieux, palette de couleurs, lumière et style de caméra à répéter dans chaque consigne.
-Ne réécris pas les plans qui sont déjà bons.`;
+=== RÉPONSE ATTENDUE ===
+1. D'abord le FICHIER CORRIGÉ, à télécharger, nommé ${FICHIER_CORRIGE}, en CSV UTF-8, séparateur point-virgule, chaque cellule entre guillemets, avec exactement ces colonnes dans cet ordre :
+${COLONNES_CORRECTION.join(";")}
+   - Une ligne par plan, TOUS les ${plans.length} plans, dans l'ordre, avec le même « numero » (1 à ${plans.length}). N'ajoute, ne supprime et ne renumérote aucun plan.
+   - « verdict » : OK ou CORRIGÉ. « probleme » : le problème en une phrase en français (vide si OK).
+   - « photo_a_refaire » : oui si la photo de départ doit être recréée (pose, cadrage, angle, lieu ou tenue changés), sinon non.
+   - Plan OK : recopie ses valeurs actuelles à l'identique. Plan corrigé : remplis toutes les colonnes avec la version corrigée.
+   - « voix » : jamais modifiée. « duree » : 5 au plus.
+   - « prompt_image » en anglais, 30 à 70 mots : l'instant figé au début du plan (qui, où, pose_debut, expression, cadrage, angle, lumière), sans mouvement.
+   - « prompt_video » en anglais, 40 à 80 mots, découpé en temps jusqu'à la durée, qui finit exactement sur la pose_fin.
+   - Si tu ne peux pas créer de fichier, donne exactement le même contenu dans un seul bloc \`\`\`csv.
+2. Ensuite, en français simple et en quelques lignes seulement :
+   A. Les problèmes de continuité les plus graves (plans concernés et correction faite dans le fichier).
+   B. Les plans qu'il faudrait ajouter (après quel plan, voix, prompt_video) : je les ajouterai moi-même.
+   C. Une fiche de continuité courte : personnages et tenues, lieux et lumière, palette, style de caméra.
+Pas de long tableau dans la discussion : tout ce qui concerne les plans va dans le fichier.`;
 }

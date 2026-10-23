@@ -9,7 +9,7 @@ import { importerTableau, type LigneTableau } from "./actions";
 // Les colonnes sont reconnues par leur titre ; une ligne = un plan, dans l'ordre du fichier.
 
 // Découpe un CSV (séparateur virgule ou point-virgule, guillemets doubles)
-function lireCsv(texte: string): string[][] {
+export function lireCsv(texte: string): string[][] {
   const premiere = texte.split(/\r?\n/, 1)[0] ?? "";
   const sep = (premiere.match(/;/g)?.length ?? 0) > (premiere.match(/,/g)?.length ?? 0) ? ";" : ",";
   const lignes: string[][] = [];
