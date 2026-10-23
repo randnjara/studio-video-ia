@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { lireEtatFile } from "@/lib/file-attente";
 import { journaliser } from "@/lib/journal";
 import { CONTROLES_CLIP } from "@/lib/libelles";
 import { lancerPlan, suivreEssais } from "@/lib/production";
@@ -120,6 +121,8 @@ export async function regenerer(projectId: string, sceneId: string) {
   ]);
   if (!plan) retour(projectId, "?erreur=plan");
   const moteur = estMoteur(dernier?.moteur) ? dernier.moteur : await moteurParDefaut();
+  if (moteur !== "qualite" && (await lireEtatFile(supabase, projectId)).serveurArrete)
+    retour(projectId, `?erreur=serveur-arrete#plan-${sceneId}`);
   const serveur = moteur === "qualite" ? null : await endpointEco();
   if (serveur) await mettreAJourServeur(supabase, serveur).catch(() => undefined);
   const erreur = await lancerPlan(supabase, profile.id, plan, projet?.aspect_ratio ?? "16:9", moteur);

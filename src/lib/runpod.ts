@@ -163,7 +163,8 @@ export async function lancerPhotoRunPod(p: {
 }
 
 export type StatutRunPod =
-  | { etat: "en_cours" }
+  // « enFile » : RunPod ne l'a pas encore commencée (on peut l'annuler sans rien perdre)
+  | { etat: "en_cours"; enFile: boolean }
   | {
       etat: "terminee";
       // Service tout prêt : vidéo à télécharger. Notre serveur : vidéo déjà rangée dans le stockage.
@@ -173,7 +174,8 @@ export type StatutRunPod =
       coutUsd: number | null;
       secondes: number | null;
     }
-  | { etat: "echouee"; erreur: string };
+  // « annulee » : arrêtée chez RunPod (bouton Pause, arrêt du serveur, ou annulation depuis la console)
+  | { etat: "echouee"; erreur: string; annulee?: boolean };
 
 export async function lireStatut(moteur: Cible, jobId: string, serveur?: string): Promise<StatutRunPod> {
   const data = await appel(moteur, `/status/${encodeURIComponent(jobId)}`, undefined, serveur);
@@ -192,15 +194,16 @@ export async function lireStatut(moteur: Cible, jobId: string, serveur?: string)
       const cout = Number(data.output?.cost);
       return { etat: "terminee", videoUrl: String(url), coutUsd: Number.isFinite(cout) ? cout : null, secondes };
     }
-    case "FAILED":
     case "CANCELLED":
+      return { etat: "echouee", erreur: "Annulée chez RunPod.", annulee: true };
+    case "FAILED":
     case "TIMED_OUT":
       return { etat: "echouee", erreur: String(data.error ?? data.status).slice(0, 500) };
     default:
-      return { etat: "en_cours" };
+      return { etat: "en_cours", enFile: data.status === "IN_QUEUE" };
   }
 }
 
-export async function annulerJob(moteur: Moteur, jobId: string) {
-  await appel(moteur, `/cancel/${encodeURIComponent(jobId)}`, { method: "POST" }).catch(() => undefined);
+export async function annulerJob(moteur: Cible, jobId: string, serveur?: string) {
+  await appel(moteur, `/cancel/${encodeURIComponent(jobId)}`, { method: "POST" }, serveur).catch(() => undefined);
 }

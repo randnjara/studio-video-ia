@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { lireEtatFile } from "@/lib/file-attente";
 import { journaliser } from "@/lib/journal";
 import { MOUVEMENT_PAR_DEFAUT } from "@/lib/libelles";
 import { demanderEssais, marquerEnProduction } from "@/lib/production";
@@ -203,6 +204,7 @@ export async function envoyerALaGeneration(projectId: string, formData: FormData
   const demande = formData.get("moteur");
   const disponibles = await moteursDisponibles();
   const moteur = estMoteur(demande) && disponibles.includes(demande) ? demande : disponibles[0];
+  if (moteur !== "qualite" && (await lireEtatFile(supabase, projectId)).serveurArrete) retour(projectId, "?erreur=serveur-arrete");
   const serveur = moteur === "qualite" ? null : await endpointEco();
   if (serveur) await mettreAJourServeur(supabase, serveur).catch(() => undefined);
 
@@ -297,6 +299,7 @@ export async function creerPhotos(projectId: string, formData: FormData) {
   const { supabase, profile } = await requireProfile();
   const serveur = await endpointPhoto();
   if (!serveur) retour(projectId, "?erreur=sans-serveur");
+  if ((await lireEtatFile(supabase, projectId)).serveurArrete) retour(projectId, "?erreur=serveur-arrete");
   // Ancien fonctionnement avec disque : il doit tenir les deux modèles. Le serveur doit avoir la dernière image.
   await Promise.all([
     agrandirStockage().catch(() => undefined),

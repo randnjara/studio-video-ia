@@ -6,7 +6,8 @@ import { actualiserEssais } from "./actions";
 
 // Tant qu'un essai tourne, demande des nouvelles à RunPod toutes les 10 secondes et rafraîchit la page.
 // Prévient avec une notification du navigateur quand une vidéo est prête.
-export function SuiviEssais({ projectId, enCours }: { projectId: string; enCours: number }) {
+// En pause, la page continue de demander des nouvelles : les vidéos déjà en calcul se terminent et sont rangées.
+export function SuiviEssais({ projectId, enCours, enPause }: { projectId: string; enCours: number; enPause: boolean }) {
   const router = useRouter();
   const [secondes, setSecondes] = useState(0);
   const [permission, setPermission] = useState<NotificationPermission | "absent">("absent");
@@ -48,11 +49,21 @@ export function SuiviEssais({ projectId, enCours }: { projectId: string; enCours
   if (enCours === 0) return null;
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-lg bg-accent-doux px-4 py-3 text-sm text-accent">
-      <span className="inline-block size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+      {enPause ? (
+        <span aria-hidden>⏸</span>
+      ) : (
+        <span className="inline-block size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+      )}
       <span className="flex-1">
-        {enCours === 1 ? "1 vidéo en cours de génération" : `${enCours} vidéos en cours de génération`} ({secondes} s). Comptez
-        1 à 4 minutes par plan. Gardez cette page ouverte (ou revenez-y dans les 20 minutes) pour que la vidéo soit rangée dans
-        le projet.
+        {enPause ? (
+          `En pause : ${enCours === 1 ? "1 vidéo pas encore terminée" : `${enCours} vidéos pas encore terminées`}. Celles déjà en calcul se terminent et sont rangées ici.`
+        ) : (
+          <>
+            {enCours === 1 ? "1 vidéo en cours de génération" : `${enCours} vidéos en cours de génération`} ({secondes} s). Comptez
+            1 à 4 minutes par plan. Gardez cette page ouverte (ou revenez-y dans les 20 minutes) pour que la vidéo soit rangée
+            dans le projet.
+          </>
+        )}
       </span>
       {permission === "default" && (
         <button

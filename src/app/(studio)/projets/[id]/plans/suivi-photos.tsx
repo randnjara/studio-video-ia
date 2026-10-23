@@ -10,12 +10,15 @@ export function SuiviPhotos({
   enCours,
   depuis,
   lot,
+  enPause,
 }: {
   projectId: string;
   enCours: number;
   // Heure de la demande du lot et nombre de photos demandées ensemble, pour que le compteur ne reparte pas de zéro
   depuis: string;
   lot: number;
+  // En pause, la page continue de demander des nouvelles : les photos déjà en calcul se terminent et sont rangées
+  enPause: boolean;
 }) {
   const router = useRouter();
   const [secondes, setSecondes] = useState(0);
@@ -39,7 +42,17 @@ export function SuiviPhotos({
   if (enCours === 0) return null;
   // Mesuré sur le serveur photo : environ 1 min de démarrage, puis 10 à 15 s par photo
   const prevu = DEMARRAGE_S + PAR_PHOTO_S * Math.max(lot, enCours);
-  const enRetard = secondes > prevu * 2;
+  const enRetard = !enPause && secondes > prevu * 2;
+  if (enPause)
+    return (
+      <div className="flex flex-wrap items-center gap-3 rounded-lg bg-accent-doux px-4 py-3 text-sm text-accent">
+        <span aria-hidden>⏸</span>
+        <span className="flex-1">
+          En pause : {enCours === 1 ? "1 photo de départ pas encore terminée" : `${enCours} photos de départ pas encore terminées`}.
+          Celles déjà en calcul se terminent et sont rangées dans leur plan.
+        </span>
+      </div>
+    );
   return (
     <div
       className={`flex flex-wrap items-center gap-3 rounded-lg px-4 py-3 text-sm ${enRetard ? "bg-alerte-doux text-alerte" : "bg-accent-doux text-accent"}`}
