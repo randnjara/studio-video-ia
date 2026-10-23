@@ -121,6 +121,10 @@ export default async function PagePlans({
     }
   }
   const nbPhotosEnCours = plans.reduce((n, p) => n + p.photos.filter((ph) => ph.status === "en_cours").length, 0);
+  // Le lot en cours : depuis la plus ancienne photo en création, toutes les photos demandées ensemble
+  const toutesPhotos = plans.flatMap((p) => p.photos);
+  const depuisPhotos = toutesPhotos.filter((ph) => ph.status === "en_cours").map((ph) => ph.created_at).sort()[0] ?? "";
+  const lotPhotos = depuisPhotos ? toutesPhotos.filter((ph) => ph.created_at >= depuisPhotos).length : 0;
   const liens = await signerLiens(supabase, plans.map((p) => p.image_path));
 
   const pret = (p: Plan) => Boolean(p.image_path && p.motion_prompt && p.consent_confirmed);
@@ -166,7 +170,7 @@ export default async function PagePlans({
           {sp.sansref ? ` ${sp.sansref} plan(s) ignoré(s) : leur description ne cite aucune référence.` : ""}
         </p>
       )}
-      <SuiviPhotos projectId={id} enCours={nbPhotosEnCours} />
+      <SuiviPhotos projectId={id} enCours={nbPhotosEnCours} depuis={depuisPhotos} lot={lotPhotos} />
       {sp["script-restaure"] && <p className="message-ok">Ancien script remis dans la zone de texte.</p>}
       {sp.importe && (
         <p className="message-ok">
