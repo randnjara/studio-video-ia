@@ -15,7 +15,7 @@ const norm = (t: string) =>
     .replace(/^_|_$/g, "");
 
 // Lit le fichier corrigé (colonnes du prompt de vérification) ; le bloc ```csv collé tel quel est aussi accepté
-function lire(texte: string, nbPlans: number) {
+function lire(texte: string, nbPlans: number, avecPhoto: number[]) {
   const brut = texte.replace(/^\s*```(?:csv)?\s*$/gim, "");
   const [entetes = [], ...lignes] = lireCsv(brut);
   const col = new Map(entetes.map((e, i) => [norm(e), i]));
@@ -28,7 +28,8 @@ function lire(texte: string, nbPlans: number) {
       numero,
       corrige: !/^ok$/i.test(v(l, "verdict")),
       probleme: v(l, "probleme"),
-      photoARefaire: /^(oui|yes|o|y)$/i.test(v(l, "photo_a_refaire")),
+      // Un plan sans photo n'a rien à refaire : sa photo sera créée après
+      photoARefaire: avecPhoto.includes(numero) && /^(oui|yes|o|y)$/i.test(v(l, "photo_a_refaire")),
       duree: Number(v(l, "duree").replace(",", ".")) || null,
       intention: v(l, "intention"),
       cadrage: v(l, "cadrage"),
@@ -44,11 +45,14 @@ function lire(texte: string, nbPlans: number) {
 }
 
 // Réimport du tableau corrigé par l'assistant : met à jour les plans existants, sans en créer
-export function ImportCorrection({ projectId, nbPlans }: { projectId: string; nbPlans: number }) {
+export function ImportCorrection({ projectId, nbPlans, avecPhoto }: { projectId: string; nbPlans: number; avecPhoto: number[] }) {
   const [texte, setTexte] = useState("");
   const [erreur, setErreur] = useState<string | null>(null);
   const [enCours, demarrer] = useTransition();
-  const { plans, reconnu } = useMemo(() => (texte ? lire(texte, nbPlans) : { plans: [], reconnu: false }), [texte, nbPlans]);
+  const { plans, reconnu } = useMemo(
+    () => (texte ? lire(texte, nbPlans, avecPhoto) : { plans: [], reconnu: false }),
+    [texte, nbPlans, avecPhoto],
+  );
   const corriges = plans.filter((p) => p.corrige);
   const photos = plans.filter((p) => p.photoARefaire);
 
