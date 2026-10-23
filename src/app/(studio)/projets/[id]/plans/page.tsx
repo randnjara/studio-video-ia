@@ -2,7 +2,7 @@ import Link from "next/link";
 import { BoutonEnvoi } from "@/components/bouton-envoi";
 import { MOUVEMENT_PAR_DEFAUT, STATUTS_PLAN, couleurStatut, dureeLisible } from "@/lib/libelles";
 import { alertesPlans } from "@/lib/controles";
-import { suivrePhotos } from "@/lib/photos";
+import { promptsPhotos, suivrePhotos } from "@/lib/photos";
 import { signerLiens } from "@/lib/production";
 import { MOTEURS, PRIX_PHOTO_ESTIME_USD, endpointEco, moteursDisponibles } from "@/lib/runpod";
 import { getClient } from "@/lib/session";
@@ -16,6 +16,7 @@ import {
   supprimerPlans,
 } from "./actions";
 import { FormulairePlan } from "./formulaire-plan";
+import { ImportPhotos } from "./import-photos";
 import { ImportGroupe } from "./import-groupe";
 import { BarreSelection } from "./selection";
 import { CopierVerification } from "./copier-verification";
@@ -61,6 +62,7 @@ const ERREURS: Record<string, string> = {
     "Aucune photo lancée : chaque description doit citer le nom d'au moins une référence du film (ex. : « Rova marche sur la Plage »).",
   "sans-serveur": "Créez d'abord notre serveur RunPod dans « Équipe et budget ».",
   photo: "La création des photos n'a pas pu démarrer. Réessayez.",
+  "photos-importees": "Les photos n'ont pas pu être rattachées aux plans. Réessayez.",
 };
 
 export default async function PagePlans({
@@ -138,6 +140,12 @@ export default async function PagePlans({
     <div className="flex flex-col gap-6">
       {sp.erreur && ERREURS[sp.erreur] && <p className="message-erreur">{ERREURS[sp.erreur]}</p>}
       {sp.ajoute && <p className="message-ok">Plan ajouté en bas du tableau.</p>}
+      {sp["photos-importees"] && (
+        <p className="message-ok">
+          {Number(sp["photos-importees"]) > 1 ? `${sp["photos-importees"]} photos importées.` : "1 photo importée."} Vérifiez-les
+          dans le tableau.
+        </p>
+      )}
       {sp.enregistre && <p className="message-ok">Plan enregistré.</p>}
       {sp.supprime && (
         <p className="message-ok">{Number(sp.supprime) > 1 ? `${sp.supprime} plans supprimés.` : "Plan supprimé."}</p>
@@ -208,25 +216,66 @@ export default async function PagePlans({
         </details>
       </section>
 
-      {/* Rappel des références (elles se gèrent à l'étape 1) et de ce qu'il faut pour créer les photos */}
-      <section className="carte flex flex-col gap-2 text-sm" id="references">
-        <p>
-          <span className="font-semibold">Photos de référence : </span>
-          {refs.length ? refs.map((r) => r.nom).join(", ") : "aucune"}
-          {" · "}
-          <Link href={`/projets/${id}#references`} className="lien">
-            modifier à l'étape 1
-          </Link>
-        </p>
-        {!serveur && (
-          <p className="text-sourdine">La création des photos utilise notre serveur RunPod : créez-le d'abord dans « Équipe et budget ».</p>
-        )}
-        {serveur && decrits === 0 && plans.length > 0 && (
-          <p className="text-sourdine">
-            Ajoutez une description de photo à vos plans (« Modifier ce plan »), puis cochez-les et cliquez sur « 🖼 Créer les
-            photos ».
+      {/* Photos de départ : créées par notre serveur RunPod, ou faites ailleurs puis importées d'un coup */}
+      <section className="carte flex flex-col gap-4" id="references">
+        <div>
+          <h2 className="text-lg font-bold">Photos de départ : 2 façons</h2>
+          <p className="text-sm">
+            <span className="font-semibold">Photos de référence : </span>
+            {refs.length ? refs.map((r) => r.nom).join(", ") : "aucune"}
+            {" · "}
+            <Link href={`/projets/${id}#references`} className="lien">
+              modifier à l'étape 1
+            </Link>
           </p>
-        )}
+        </div>
+        <details className="rounded-lg border border-ligne p-4">
+          <summary className="cursor-pointer font-semibold">🖼 A. Créées par notre serveur RunPod (≈ {PRIX_PHOTO_ESTIME_USD} $ la photo)</summary>
+          <div className="mt-3 flex flex-col gap-2 text-sm text-sourdine">
+            {serveur ? (
+              <p>
+                Cochez les plans dans le tableau ci-dessous, puis cliquez sur « 🖼 Créer les photos ». Chaque photo part de la
+                description du plan et des photos de référence qu'elle cite.
+              </p>
+            ) : (
+              <p>Créez d'abord notre serveur RunPod dans « Équipe et budget ».</p>
+            )}
+            {decrits === 0 && plans.length > 0 && (
+              <p>Aucun plan n'a de description de photo : importez le tableau ChatGPT (étape 2) ou modifiez les plans.</p>
+            )}
+          </div>
+        </details>
+        <details className="rounded-lg border border-ligne p-4" open={Boolean(sp["photos-importees"])}>
+          <summary className="cursor-pointer font-semibold">📥 B. Faites ailleurs (ChatGPT, votre ordinateur…) puis importées</summary>
+          <div className="mt-3 flex flex-col gap-4">
+            {decrits > 0 && projet && (
+              <CopierVerification
+                carte={false}
+                titre="1. Copier les prompts des photos"
+                explication="Le bouton copie le prompt de chaque photo (description, cadrage, lieu, pose, règles du studio), avec le nom de fichier à utiliser : plan_01.png, plan_02.png… Collez-le dans votre outil d'images avec les photos de référence."
+                bouton="📋 Copier les prompts des photos"
+                texte={promptsPhotos(
+                  plans.map((p, i) => ({
+                    numero: i + 1,
+                    description: p.image_description,
+                    cadrage: p.cadrage,
+                    angle: p.angle,
+                    lieu: p.lieu,
+                    intention: p.intention,
+                    pose_debut: p.pose_debut,
+                  })),
+                  projet,
+                  refs,
+                )}
+              />
+            )}
+            {plans.length > 0 ? (
+              <ImportPhotos projectId={id} plans={plans.map((p, i) => ({ id: p.id, numero: i + 1, aPhoto: Boolean(p.image_path) }))} />
+            ) : (
+              <p className="text-sm text-sourdine">Créez d'abord les plans (étape 2).</p>
+            )}
+          </div>
+        </details>
       </section>
 
       {/* 2. Le tableau des plans, et l'envoi à la génération */}

@@ -67,6 +67,32 @@ export function promptPhoto(p: FichePlan & { numero: number; total: number; form
     .join("\n");
 }
 
+// Prompts de toutes les photos de départ, pour les créer ailleurs (ChatGPT, ordinateur avec carte graphique…).
+// Chaque image doit être enregistrée sous plan_NN.png pour être réimportée d'un coup dans le bon plan.
+export function promptsPhotos(
+  plans: (FichePlan & { numero: number })[],
+  projet: { aspect_ratio: string; style_text: string },
+  refs: Reference[],
+) {
+  const avec = plans.filter((p) => p.description.trim());
+  const nom = (n: number) => `plan_${String(n).padStart(2, "0")}.png`;
+  const entete = `Crée une image par plan ci-dessous, une à la fois, au format ${projet.aspect_ratio}. Je te joins les photos de référence citées (${refs.map((r) => r.nom).join(", ") || "aucune"}) : garde exactement les mêmes visages, tenues et décors.
+Enregistre chaque image sous le nom indiqué (${nom(avec[0]?.numero ?? 1)}, …) : je les réimporterai toutes d'un coup dans mon studio.`;
+  return [
+    entete,
+    ...avec.map(
+      (p) =>
+        `=== ${nom(p.numero)} ===\n${promptPhoto({
+          ...p,
+          total: plans.length,
+          format: projet.aspect_ratio,
+          style: projet.style_text,
+          refs: referencesCitees(`${p.description} ${p.lieu ?? ""}`, refs),
+        })}`,
+    ),
+  ].join("\n\n");
+}
+
 // Lance la création de la photo d'un plan. Renvoie un code d'erreur, ou null si c'est parti.
 export async function lancerPhoto(
   supabase: SupabaseClient,
