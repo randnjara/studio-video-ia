@@ -2,7 +2,23 @@
 // Aucun appel réseau ici : ce fichier sert au navigateur comme au serveur.
 
 export type Nature = "video" | "image" | "audio";
-export type Fondu = "coupe" | "fondu" | "noir";
+export type Fondu = "coupe" | "fondu" | "noir" | "blanc" | "glisse" | "volet" | "zoom";
+
+// Les transitions proposées entre deux plans, avec leur nom et leur symbole sur la piste
+export const TRANSITIONS: { valeur: Fondu; nom: string; symbole: string }[] = [
+  { valeur: "coupe", nom: "Coupe nette", symbole: "│" },
+  { valeur: "fondu", nom: "Fondu enchaîné", symbole: "⧉" },
+  { valeur: "noir", nom: "Fondu au noir", symbole: "◐" },
+  { valeur: "blanc", nom: "Fondu au blanc (flash)", symbole: "○" },
+  { valeur: "glisse", nom: "Glissement (pousse le plan)", symbole: "⇠" },
+  { valeur: "volet", nom: "Volet (balayage)", symbole: "▶" },
+  { valeur: "zoom", nom: "Zoom d’arrivée", symbole: "⊕" },
+];
+export const symboleTransition = (f: Fondu) => TRANSITIONS.find((t) => t.valeur === f)?.symbole ?? "";
+
+// Ces transitions font chevaucher deux plans ; le noir et le blanc passent entre les deux
+const CHEVAUCHE: Fondu[] = ["fondu", "glisse", "volet", "zoom"];
+const PASSAGE: Fondu[] = ["noir", "blanc"];
 export type Zoom = "aucun" | "avant" | "arriere";
 
 // Un fichier utilisable dans le montage (clip validé, photo de départ, fichier importé)
@@ -101,10 +117,13 @@ export type Place = {
   fin: number;
   fonduEntree: number; // 0 = coupe franche
   fonduSortie: number;
-  noirEntree: boolean; // fondu depuis le noir (et non vers le plan précédent)
+  entree: Fondu; // effet pendant fonduEntree
+  sortie: Fondu; // effet pendant fonduSortie (noir, blanc ou fondu)
+  pousse: number; // glissement : durée pendant laquelle le plan suivant pousse celui-ci hors du cadre
 };
 
-// Place chaque élément dans le temps. Sur la piste principale, un fondu enchaîné fait chevaucher deux plans.
+// Place chaque élément dans le temps. Sur la piste principale, un fondu enchaîné (ou un glissement, un volet, un zoom)
+// fait chevaucher deux plans ; le fondu au noir ou au blanc passe par une image unie (moitié du temps chacun).
 export function placer(timeline: Timeline): { places: Place[]; duree: number } {
   const places: Place[] = [];
   timeline.pistes.forEach((piste, niveau) => {
@@ -115,23 +134,31 @@ export function placer(timeline: Timeline): { places: Place[]; duree: number } {
       const apres = piste.elements[i + 1];
       let debut = e.debut;
       let fonduEntree = e.entree === "coupe" ? 0 : dureeFondu(e);
-      let noirEntree = e.entree === "noir";
       let fonduSortie = e.sortie === "coupe" ? 0 : dureeFondu(e);
+      let entree: Fondu = e.entree;
+      let sortie: Fondu = e.sortie;
+      let pousse = 0;
       if (principale) {
-        // Le fondu enchaîné chevauche le plan précédent ; le fondu au noir passe par le noir (moitié chacun)
-        if (avant && e.entree === "fondu") {
+        if (avant && CHEVAUCHE.includes(e.entree)) {
           fonduEntree = dureeFondu(e, avant);
           debut = curseur - fonduEntree;
         } else {
           debut = curseur;
-          if (avant && e.entree === "noir") fonduEntree = dureeFondu(e, avant) / 2;
-          if (!avant && e.entree === "fondu") noirEntree = true;
+          if (avant && PASSAGE.includes(e.entree)) fonduEntree = dureeFondu(e, avant) / 2;
+          // Premier plan : un fondu enchaîné part du noir
+          if (!avant && e.entree === "fondu") entree = "noir";
         }
-        if (apres?.entree === "noir") fonduSortie = dureeFondu(apres, e) / 2;
-        else if (apres) fonduSortie = 0;
+        if (apres && PASSAGE.includes(apres.entree)) {
+          fonduSortie = dureeFondu(apres, e) / 2;
+          sortie = apres.entree;
+        } else if (apres) {
+          fonduSortie = 0;
+          sortie = "coupe";
+          if (apres.entree === "glisse") pousse = dureeFondu(apres, e);
+        }
         curseur = debut + e.longueur;
       }
-      places.push({ element: e, piste, niveau, principale, debut, fin: debut + e.longueur, fonduEntree, fonduSortie, noirEntree });
+      places.push({ element: e, piste, niveau, principale, debut, fin: debut + e.longueur, fonduEntree, fonduSortie, entree, sortie, pousse });
     });
   });
   const duree = places.reduce((m, p) => Math.max(m, p.fin), 0);
@@ -155,7 +182,10 @@ export function visiblesA(places: Place[], t: number) {
     .sort((a, b) => a.niveau - b.niveau || a.debut - b.debut); // du fond vers le dessus
 }
 
-// Dessine une image (frame vidéo ou photo) en remplissant le cadre, avec le zoom lent éventuel
+const borne = (x: number) => Math.max(0, Math.min(1, x));
+const lisse = (x: number) => x * x * (3 - 2 * x); // départ et arrivée en douceur
+
+// Dessine une image (frame vidéo ou photo) en remplissant le cadre, avec le zoom lent et la transition en cours
 export function dessiner(
   ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
   source: CanvasImageSource,
@@ -167,16 +197,46 @@ export function dessiner(
   hauteur: number,
 ) {
   if (!sw || !sh) return;
-  const alpha = enveloppe(p, t);
-  if (alpha <= 0) return;
-  const progres = Math.max(0, Math.min(1, (t - p.debut) / Math.max(0.01, p.fin - p.debut)));
-  const z = p.element.zoom === "avant" ? 1 + 0.12 * progres : p.element.zoom === "arriere" ? 1.12 - 0.12 * progres : 1;
+  let alpha = 1;
+  let dx = 0;
+  let volet = 1;
+  let blanc = 0;
+  let zoomEffet = 1;
+  if (p.fonduEntree > 0 && t < p.debut + p.fonduEntree) {
+    const q = lisse(borne((t - p.debut) / p.fonduEntree));
+    if (p.entree === "glisse") dx = (1 - q) * largeur;
+    else if (p.entree === "volet") volet = q;
+    else if (p.entree === "blanc") blanc = 1 - q;
+    else if (p.entree === "zoom") (alpha = q), (zoomEffet = 1 + 0.3 * (1 - q));
+    else alpha = q;
+  }
+  if (p.fonduSortie > 0 && t > p.fin - p.fonduSortie) {
+    const q = lisse(borne((p.fin - t) / p.fonduSortie));
+    if (p.sortie === "blanc") blanc = Math.max(blanc, 1 - q);
+    else alpha = Math.min(alpha, q);
+  }
+  if (p.pousse > 0 && t > p.fin - p.pousse) dx = -lisse(borne((t - (p.fin - p.pousse)) / p.pousse)) * largeur;
+  if (alpha <= 0 || volet <= 0) return;
+
+  const progres = borne((t - p.debut) / Math.max(0.01, p.fin - p.debut));
+  const z = (p.element.zoom === "avant" ? 1 + 0.12 * progres : p.element.zoom === "arriere" ? 1.12 - 0.12 * progres : 1) * zoomEffet;
   const echelle = Math.max(largeur / sw, hauteur / sh) * z;
   const w = sw * echelle;
   const h = sh * echelle;
+  ctx.save();
+  if (volet < 1) {
+    ctx.beginPath();
+    ctx.rect(0, 0, largeur * volet, hauteur);
+    ctx.clip();
+  }
   ctx.globalAlpha = alpha;
-  ctx.drawImage(source, (largeur - w) / 2, (hauteur - h) / 2, w, h);
-  ctx.globalAlpha = 1;
+  ctx.drawImage(source, (largeur - w) / 2 + dx, (hauteur - h) / 2, w, h);
+  if (blanc > 0) {
+    ctx.globalAlpha = blanc;
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, largeur, hauteur);
+  }
+  ctx.restore();
 }
 
 // Programme tous les sons (voix off, musique, son des vidéos importées) dans un contexte Web Audio.

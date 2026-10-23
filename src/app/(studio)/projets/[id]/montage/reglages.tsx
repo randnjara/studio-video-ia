@@ -1,6 +1,6 @@
 "use client";
 
-import { DUREE_MIN, type Element, type Fondu, type Piste, type Place, type Timeline, type Zoom } from "@/lib/montage";
+import { DUREE_MIN, type Element, type Fondu, type Piste, type Place, TRANSITIONS, type Timeline, type Zoom } from "@/lib/montage";
 import { deplacerDansPiste, majElement } from "./edition";
 
 // Réglages de l'élément choisi : durée, coupe, transitions, zoom lent, volume
@@ -112,25 +112,54 @@ export function Reglages({
       {visuel ? (
         <>
           <label className="flex flex-col gap-1">
-            <span className="etiquette mb-0 text-xs">{principale ? "Transition d'entrée" : "Apparition"}</span>
+            <span className="etiquette mb-0 text-xs">
+              {principale ? (index > 0 ? "Transition avec le plan d'avant" : "Début du film") : "Apparition"}
+            </span>
             <select value={element.entree} onChange={(e) => maj({ entree: e.target.value as Fondu })} className="champ py-1 text-sm">
-              <option value="coupe">Coupe nette</option>
-              <option value="fondu">{principale && index > 0 ? "Fondu enchaîné (avec le plan d'avant)" : "Fondu"}</option>
-              {principale && <option value="noir">Fondu au noir</option>}
+              {(principale ? TRANSITIONS : TRANSITIONS.filter((x) => ["coupe", "fondu", "zoom"].includes(x.valeur))).map((x) => (
+                <option key={x.valeur} value={x.valeur}>
+                  {x.symbole} {principale && index === 0 && x.valeur === "fondu" ? "Fondu depuis le noir" : x.nom}
+                </option>
+              ))}
             </select>
           </label>
+          {principale && piste.elements.length > 2 && (
+            <button
+              type="button"
+              className="bouton-discret self-start px-2 py-1 text-xs"
+              onClick={() =>
+                modifier((t) => ({
+                  ...t,
+                  pistes: t.pistes.map((p, i) =>
+                    i === 0
+                      ? { ...p, elements: p.elements.map((x, j) => (j === 0 ? x : { ...x, entree: element.entree, transition: element.transition })) }
+                      : p,
+                  ),
+                }))
+              }
+            >
+              Mettre cette transition entre tous les plans
+            </button>
+          )}
           {(!principale || dernier) && (
             <label className="flex flex-col gap-1">
               <span className="etiquette mb-0 text-xs">{principale ? "Fin du film" : "Disparition"}</span>
               <select value={element.sortie} onChange={(e) => maj({ sortie: e.target.value as Fondu })} className="champ py-1 text-sm">
                 <option value="coupe">Coupe nette</option>
-                <option value={principale ? "noir" : "fondu"}>{principale ? "Fondu au noir" : "Fondu"}</option>
+                {principale ? (
+                  <>
+                    <option value="noir">Fondu au noir</option>
+                    <option value="blanc">Fondu au blanc</option>
+                  </>
+                ) : (
+                  <option value="fondu">Fondu</option>
+                )}
               </select>
             </label>
           )}
           {(element.entree !== "coupe" || element.sortie !== "coupe") && (
             <label className="flex flex-col gap-1">
-              <span className="etiquette mb-0 text-xs">Durée du fondu : {element.transition.toFixed(1)} s</span>
+              <span className="etiquette mb-0 text-xs">Durée de la transition : {element.transition.toFixed(1)} s</span>
               <input
                 type="range"
                 min={0.2}
