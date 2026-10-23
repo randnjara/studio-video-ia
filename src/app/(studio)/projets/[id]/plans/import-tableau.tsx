@@ -141,8 +141,12 @@ function convertir(lignes: string[][], personnage: string): { plans: LigneTablea
     const v = i === undefined || i < 0 ? "" : (l[i] ?? "").trim();
     return vide(v) ? "" : v;
   };
-  const descriptions = retirerCommun(corps.map((l) => [lire(l, index.description), lire(l, action)].filter(Boolean).join(", ")));
-  const mouvements = retirerCommun(corps.map((l) => lire(l, index.mouvement)));
+  // Le fichier à remplir du studio a des prompts déjà structurés (« Static camera. 0-1s: … ») : rien n'y est retiré.
+  // Pour les autres tableaux, les règles générales recopiées dans chaque cellule sont enlevées.
+  const standard = titres.includes("prompt image") || titres.includes("prompt video");
+  const garder = (valeurs: string[]) => (standard ? { valeurs, retire: "" } : retirerCommun(valeurs));
+  const descriptions = garder(corps.map((l) => [lire(l, index.description), lire(l, action)].filter(Boolean).join(", ")));
+  const mouvements = garder(corps.map((l) => lire(l, index.mouvement)));
   const cite = (t: string) => !personnage || norm(t).split(" ").includes(norm(personnage));
   const plans = corps.map((l, k) => {
     const morceaux = descriptions.valeurs[k];
