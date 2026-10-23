@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { noterConnexionReussie, noterErreurLien } from "./actions";
 
 // Les e-mails par défaut de Supabase (invitation envoyée depuis le tableau de bord ou la page Équipe)
 // renvoient ici avec la session dans l'adresse, après le « # ». Le serveur ne la voit pas :
@@ -16,6 +17,7 @@ export function SessionDepuisLien() {
 
     if (params.get("error")) {
       setEtat("erreur");
+      noterErreurLien(`${params.get("error_code") ?? params.get("error")} : ${params.get("error_description") ?? ""}`);
       history.replaceState(null, "", window.location.pathname);
       return;
     }
@@ -27,9 +29,10 @@ export function SessionDepuisLien() {
       .then(({ error }) => {
         if (error) {
           setEtat("erreur");
+          noterErreurLien(`session : ${error.message}`);
           history.replaceState(null, "", window.location.pathname);
         } else {
-          window.location.replace("/");
+          noterConnexionReussie().finally(() => window.location.replace("/"));
         }
       });
   }, []);
