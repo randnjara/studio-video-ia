@@ -11,6 +11,8 @@ import {
   TAILLE_VOLUME_GO,
 } from "@/lib/runpod-admin";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { CLE_ARRET_SERVEUR, lireArretServeur } from "@/lib/file-attente";
+import { arreterServeur, redemarrerServeur } from "../projets/[id]/file-actions";
 import {
   ajouterStockageEco,
   changerAcces,
@@ -107,6 +109,7 @@ export default async function Equipe({
     "passe-cache"?: string;
     "sans-email"?: string;
     membre?: string;
+    file?: string;
   }>;
 }) {
   const sp = await searchParams;
@@ -145,11 +148,12 @@ export default async function Equipe({
   const { data: reglagesCache } = await supabase
     .from("reglages")
     .select("cle, valeur")
-    .in("cle", [CLE_CACHE_VIDEO, CLE_CACHE_PHOTO, CLE_ENDPOINT_PHOTO]);
+    .in("cle", [CLE_CACHE_VIDEO, CLE_CACHE_PHOTO, CLE_ENDPOINT_PHOTO, CLE_ARRET_SERVEUR]);
   const reglage = (c: string) => reglagesCache?.find((x) => x.cle === c)?.valeur ?? null;
   const cacheVideo = reglage(CLE_CACHE_VIDEO);
   const cachePhoto = reglage(CLE_CACHE_PHOTO);
   const serveurPhoto = reglage(CLE_ENDPOINT_PHOTO);
+  const serveurArrete = Boolean(lireArretServeur(reglage(CLE_ARRET_SERVEUR))?.arrete);
 
   const compte = new Map(comptes.map((u) => [u.id, u]));
   const session = new Map(
@@ -252,10 +256,41 @@ export default async function Equipe({
         <h2 className="text-lg font-bold">Serveur de génération économique</h2>
         {endpoint ? (
           <>
+            {sp.file === "serveur-arrete" && <p className="message-ok">Serveur arrêté : plus rien n'est facturé.</p>}
+            {sp.file === "serveur-redemarre" && <p className="message-ok">Serveur redémarré : les files repartent.</p>}
+            {sp.file === "serveur-erreur" && <p className="message-erreur">RunPod n'a pas accepté la demande. {sp.detail ?? ""}</p>}
             <p className="text-sm">
-              <span className="pastille bg-succes-doux text-succes">Actif</span> Identifiant RunPod <code>{endpoint}</code>.
+              {serveurArrete ? (
+                <span className="pastille bg-alerte-doux text-alerte">Arrêté</span>
+              ) : (
+                <span className="pastille bg-succes-doux text-succes">Actif</span>
+              )}{" "}
+              Identifiant RunPod <code>{endpoint}</code>.
               Les choix « Économique 480p » et « Économique 720p » sont proposés dans l'onglet Plans de chaque projet.
             </p>
+            {/* Interrupteur pour être sûr de ne plus rien payer : photos et vidéos en attente repartent au redémarrage */}
+            <div className="flex flex-wrap items-center gap-3 text-sm">
+              <span className="flex-1 text-sourdine">
+                {serveurArrete
+                  ? "Aucune machine ne peut s'allumer, rien n'est facturé. Les photos et vidéos en attente repartiront au redémarrage."
+                  : "Le serveur ne coûte rien quand il ne calcule pas. Pour tout couper tout de suite (calculs en cours compris) :"}
+              </span>
+              {serveurArrete ? (
+                <form action={redemarrerServeur.bind(null, "/equipe")}>
+                  <BoutonEnvoi enCours="Redémarrage…">Redémarrer le serveur</BoutonEnvoi>
+                </form>
+              ) : (
+                <form action={arreterServeur.bind(null, "/equipe")}>
+                  <BoutonEnvoi
+                    className="bouton-danger"
+                    enCours="Arrêt chez RunPod…"
+                    confirmer="Arrêter le serveur RunPod pour toute l'équipe ? Les calculs en cours sont coupés et remis dans la file, plus rien n'est facturé."
+                  >
+                    Arrêter le serveur
+                  </BoutonEnvoi>
+                </form>
+              )}
+            </div>
             {serveurPhoto ? (
               <p className="text-sm">
                 <span className="pastille bg-succes-doux text-succes">Cache gratuit</span> Vidéo et photos sur deux

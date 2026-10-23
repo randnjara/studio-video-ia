@@ -7,6 +7,8 @@
   // Fait tourner le site près de la base Supabase (Irlande, aws eu-west-1) : chaque requête à la base
   // passe de ~400 ms (depuis Antananarivo) à quelques millisecondes
   "placement": { "region": "aws:eu-west-1" },
+  // Aperçus des PR (Cloudflare « wrangler preview ») : même région que le site, aucune ressource de production
+  "previews": { "placement": { "region": "aws:eu-west-1" } },
   // Garde les variables ajoutées dans le tableau de bord Cloudflare lors de chaque mise en ligne
   "keep_vars": true,
   "assets": {

@@ -3,7 +3,9 @@ import { BoutonEnvoi } from "@/components/bouton-envoi";
 import { CONTROLES_CLIP, STATUTS_PLAN, couleurStatut } from "@/lib/libelles";
 import { signerLiens, suivreEssais } from "@/lib/production";
 import { MOTEURS, type Moteur, estMoteur, moteurParDefaut } from "@/lib/runpod";
-import { getClient } from "@/lib/session";
+import { lireEtatFile } from "@/lib/file-attente";
+import { requireProfile } from "@/lib/session";
+import { ControleFile } from "../controle-file";
 import { refuserClips, regenerer, retirerValidation, supprimerClip, validerClip } from "./actions";
 import { SuiviEssais } from "./suivi-essais";
 
@@ -36,6 +38,7 @@ const ERREURS: Record<string, string> = {
   "sans-accord": "L'accord des personnes photographiées n'est pas coché : voyez « Plans ».",
   budget: "Le plafond GPU du mois est atteint. Le responsable peut l'augmenter dans « Équipe et budget ».",
   essai: "La génération n'a pas pu démarrer. Réessayez.",
+  "serveur-arrete": "Notre serveur RunPod est arrêté : redémarrez-le (bouton ci-dessous ou « Équipe et budget ») avant de regénérer.",
 };
 
 const FILTRES = [
@@ -65,7 +68,7 @@ export default async function PageClips({
 }) {
   const { id } = await params;
   const sp = await searchParams;
-  const supabase = await getClient();
+  const { supabase, profile } = await requireProfile();
 
   const lire = () =>
     supabase
@@ -75,7 +78,7 @@ export default async function PageClips({
       .order("position")
       .order("created_at", { referencedTable: "takes", ascending: false });
 
-  const [premiere, defaut] = await Promise.all([lire(), moteurParDefaut()]);
+  const [premiere, defaut, etat] = await Promise.all([lire(), moteurParDefaut(), lireEtatFile(supabase, id)]);
   let plans = (premiere.data ?? []) as Plan[];
 
   // Range d'abord les vidéos qui ont fini pendant que la page était fermée (seulement s'il y en a en cours)
@@ -92,7 +95,7 @@ export default async function PageClips({
       })),
   );
   if (enCoursAvant.length > 0) {
-    const restants = await suivreEssais(supabase, id, enCoursAvant, false);
+    const restants = await suivreEssais(supabase, id, enCoursAvant, false, etat);
     if (restants < enCoursAvant.length) plans = ((await lire()).data ?? []) as Plan[];
   }
 
@@ -130,7 +133,17 @@ export default async function PageClips({
           Clip validé. Il est maintenant disponible dans <Link href={`/projets/${id}/montage`} className="underline">Montage</Link>.
         </p>
       )}
-      <SuiviEssais projectId={id} enCours={enCours} />
+      <SuiviEssais projectId={id} enCours={enCours} enPause={etat.enPause || etat.serveurArrete} />
+      <ControleFile
+        projectId={id}
+        onglet="clips"
+        enCours={enCours}
+        enPause={etat.enPause}
+        serveurArrete={etat.serveurArrete}
+        serveurExiste={Boolean(etat.serveurVideo)}
+        responsable={profile.role === "responsable"}
+        sp={sp}
+      />
 
       <div className="flex flex-wrap items-center gap-2">
         {FILTRES.map((f) => (
@@ -220,6 +233,7 @@ export default async function PageClips({
                           Génération en cours…
                         </div>
                       )}
+                      {t.status === "annulee" && <p className="text-sm text-sourdine">Arrêté (non facturé).</p>}
                       {t.status === "echouee" && (
                         <p className="text-sm text-alerte">Échec (non facturé) : {t.error ?? "erreur inconnue"}</p>
                       )}

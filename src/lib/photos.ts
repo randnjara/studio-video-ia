@@ -1,7 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { GENRES } from "@/lib/libelles";
-import { BUCKET } from "@/lib/production";
-import { CLE_ENDPOINT, CLE_ENDPOINT_PHOTO, PRIX_PHOTO_ESTIME_USD, lancerPhotoRunPod, lireStatut } from "@/lib/runpod";
+import { type EtatFile, attente, lireEtatFile } from "@/lib/file-attente";
+import { ANNULATIONS_PAR_APPEL, BUCKET, aSuivre } from "@/lib/production";
+import { PRIX_PHOTO_ESTIME_USD, annulerJob, lancerPhotoRunPod, lireStatut } from "@/lib/runpod";
 
 // Photos de départ créées par Qwen-Image-Edit à partir des « références du film » (personnages, lieux, objets, style).
 // Une référence est utilisée quand son nom est cité dans la description de la photo du plan.
@@ -244,8 +245,15 @@ async function envoyerPhotos(supabase: SupabaseClient, projectId: string, enAtte
         uploadUrl: envoi.signedUrl,
         serveur,
       });
-      const { error: errJob } = await supabase.from("photos").update({ runpod_job_id: jobId }).eq("id", photo.id);
+      const { data: gardee, error: errJob } = await supabase
+        .from("photos")
+        .update({ runpod_job_id: jobId })
+        .eq("id", photo.id)
+        .eq("status", "en_cours")
+        .select("id");
       if (errJob) throw new Error(errJob.message);
+      // Lot arrêté pendant l'envoi : la photo ne doit pas être calculée (et facturée) pour rien
+      if (gardee?.length === 0) await annulerJob("photo", jobId, serveur);
     } catch (e) {
       await echec(supabase, photo.id, (e instanceof Error ? e.message : String(e)).slice(0, 500));
     }
@@ -254,34 +262,56 @@ async function envoyerPhotos(supabase: SupabaseClient, projectId: string, enAtte
 
 // Envoie les photos en attente puis met à jour celles en cours ; une photo réussie devient la photo de départ du plan.
 // « envoyer » est faux pendant l'affichage de la page (déjà beaucoup d'appels) : l'envoi se fait par l'actualisation.
-export async function suivrePhotos(supabase: SupabaseClient, projectId: string, photos: PhotoSuivie[], envoyer = true) {
+// En pause (ou serveur arrêté), rien ne part et les photos pas encore commencées reviennent dans la file.
+export async function suivrePhotos(
+  supabase: SupabaseClient,
+  projectId: string,
+  photos: PhotoSuivie[],
+  envoyer = true,
+  etatLu?: EtatFile,
+) {
   if (photos.length === 0) return;
-  // Serveur photo, sinon le serveur vidéo (lu une seule fois, en un appel)
-  const { data: reglages } = await supabase.from("reglages").select("cle, valeur").in("cle", [CLE_ENDPOINT_PHOTO, CLE_ENDPOINT]);
-  const lire = (cle: string) => reglages?.find((r) => r.cle === cle)?.valeur || null;
-  const serveur = lire(CLE_ENDPOINT_PHOTO) ?? process.env.RUNPOD_ENDPOINT_ID ?? lire(CLE_ENDPOINT);
+  // Serveur photo, sinon le serveur vidéo (lus une seule fois, avec la pause, en un appel)
+  const etat = etatLu ?? (await lireEtatFile(supabase, projectId));
+  const serveur = etat.serveurPhoto;
   if (!serveur) return;
-  const age = (p: PhotoSuivie) => Date.now() - new Date(p.created_at).getTime();
+  const bloque = etat.enPause || etat.serveurArrete;
+  const age = (p: PhotoSuivie) => attente(etat, p.created_at);
   const enAttente = photos.filter((p) => !p.runpod_job_id).sort((a, b) => a.created_at.localeCompare(b.created_at));
-  // Les plus anciennes d'abord : RunPod traite sa file dans l'ordre, ce sont elles qui finissent en premier
-  const parties = photos
-    .filter((p) => p.runpod_job_id && p.runpod_job_id !== ENVOI)
-    .sort((a, b) => a.created_at.localeCompare(b.created_at));
+  const parties = photos.filter((p) => p.runpod_job_id && p.runpod_job_id !== ENVOI);
   // Coupée pendant l'envoi : on ne sait pas si RunPod l'a reçue, elle passe en échec pour être relancée
   await Promise.all(
     photos
       .filter((p) => p.runpod_job_id === ENVOI && age(p) > ENVOI_MAX_MS)
       .map((p) => echec(supabase, p.id, "Le lancement a été interrompu. Relancez cette photo.")),
   );
-  await Promise.all(
-    enAttente.filter((p) => age(p) > ATTENTE_MAX_MS).map((p) => echec(supabase, p.id, "Photo jamais envoyée (page fermée). Relancez-la.")),
-  );
-  if (envoyer) await envoyerPhotos(supabase, projectId, enAttente.filter((p) => age(p) <= ATTENTE_MAX_MS), serveur);
+  if (!bloque)
+    await Promise.all(
+      enAttente.filter((p) => age(p) > ATTENTE_MAX_MS).map((p) => echec(supabase, p.id, "Photo jamais envoyée (page fermée). Relancez-la.")),
+    );
+  if (envoyer && !bloque) await envoyerPhotos(supabase, projectId, enAttente.filter((p) => age(p) <= ATTENTE_MAX_MS), serveur);
+
+  // Remet une photo dans notre file (sans numéro RunPod), si elle n'a pas changé entre-temps
+  const remettreEnFile = (p: PhotoSuivie) =>
+    supabase.from("photos").update({ runpod_job_id: null }).eq("id", p.id).eq("runpod_job_id", p.runpod_job_id!).eq("status", "en_cours");
 
   await Promise.all(
-    parties.slice(0, SUIVIS_PAR_APPEL).map(async (p) => {
+    aSuivre(parties, SUIVIS_PAR_APPEL, bloque).map(async (p) => {
       const statut = await lireStatut("photo", p.runpod_job_id!, serveur).catch(() => null);
-      if (!statut || statut.etat === "en_cours") return;
+      if (!statut) return;
+      if (statut.etat === "en_cours") {
+        // En pause : pas encore commencée chez RunPod, on la reprend pour qu'elle ne parte pas
+        if (statut.enFile && bloque) {
+          await annulerJob("photo", p.runpod_job_id!, serveur);
+          await remettreEnFile(p);
+        }
+        return;
+      }
+      // Annulée par la pause ou l'arrêt du serveur : elle repartira à la reprise
+      if (statut.etat === "echouee" && statut.annulee && bloque) {
+        await remettreEnFile(p);
+        return;
+      }
       const fin = new Date().toISOString();
       if (statut.etat === "echouee" || !statut.imagePath?.startsWith(`${projectId}/photos/`)) {
         const erreur = statut.etat === "echouee" ? statut.erreur : "Le serveur n'a pas renvoyé de photo.";
@@ -303,4 +333,30 @@ export async function suivrePhotos(supabase: SupabaseClient, projectId: string, 
       ]);
     }),
   );
+}
+
+// « Arrêter le lot » : annule chez RunPod les photos parties et retire de la file celles qui attendaient (non facturé).
+// Les photos déjà réussies restent. Renvoie le nombre arrêté et celles à arrêter au clic suivant.
+export async function arreterPhotos(supabase: SupabaseClient, projectId: string) {
+  const [{ data }, etat] = await Promise.all([
+    supabase
+      .from("photos")
+      .select("id, runpod_job_id, scenes!inner(project_id)")
+      .eq("status", "en_cours")
+      .eq("scenes.project_id", projectId),
+    lireEtatFile(supabase, projectId),
+  ]);
+  const photos = data ?? [];
+  const parties = photos.filter((p) => p.runpod_job_id && p.runpod_job_id !== ENVOI);
+  const restants = parties.slice(ANNULATIONS_PAR_APPEL).map((p) => p.id);
+  if (etat.serveurPhoto)
+    await Promise.all(parties.slice(0, ANNULATIONS_PAR_APPEL).map((p) => annulerJob("photo", p.runpod_job_id!, etat.serveurPhoto!)));
+  const arretees = photos.filter((p) => !restants.includes(p.id)).map((p) => p.id);
+  if (arretees.length > 0)
+    await supabase
+      .from("photos")
+      .update({ status: "echouee", error: "Arrêtée à la demande.", cost_usd: 0, finished_at: new Date().toISOString() })
+      .in("id", arretees)
+      .eq("status", "en_cours");
+  return { arretes: arretees.length, restants: restants.length };
 }

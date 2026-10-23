@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { journaliser } from "@/lib/journal";
-import { CLE_ENDPOINT, MOTEURS, type Moteur, lancerGeneration, lireStatut } from "@/lib/runpod";
+import { type EtatFile, attente, lireEtatFile } from "@/lib/file-attente";
+import { MOTEURS, type Moteur, annulerJob, lancerGeneration, lireStatut } from "@/lib/runpod";
 
 // Outils côté serveur partagés par les pages Plans, Clips et Montage.
 
@@ -142,6 +143,8 @@ const SUIVIS_PAR_APPEL = 4;
 const ENVOI = "envoi";
 const ENVOI_MAX_MS = 3 * 60 * 1000;
 const ATTENTE_MAX_MS = 60 * 60 * 1000;
+// Annulations chez RunPod par clic sur « Arrêter le lot » (limite d'appels de Cloudflare) : au-delà, recliquer
+export const ANNULATIONS_PAR_APPEL = 30;
 
 // Inscrit un essai par plan dans la file (un seul appel). Renvoie le nombre inscrit, ou un code d'erreur.
 export async function demanderEssais(
@@ -261,27 +264,54 @@ async function envoyerEssais(supabase: SupabaseClient, projectId: string, enAtte
         uploadUrl: envoi?.data?.signedUrl ?? "",
         serveur: essai.moteur === "qualite" ? undefined : (serveurEco ?? undefined),
       });
-      const { error } = await supabase.from("takes").update({ runpod_job_id: jobId }).eq("id", essai.id);
+      const { data: gardee, error } = await supabase
+        .from("takes")
+        .update({ runpod_job_id: jobId })
+        .eq("id", essai.id)
+        .eq("status", "en_cours")
+        .select("id");
       if (error) throw new Error(error.message);
+      // Lot arrêté pendant l'envoi : la vidéo ne doit pas tourner (et être facturée) sans personne pour la suivre
+      if (gardee?.length === 0) await annulerJob(essai.moteur, jobId, essai.moteur === "qualite" ? undefined : (serveurEco ?? undefined));
     } catch (e) {
       await echecEssai(supabase, essai, (e instanceof Error ? e.message : String(e)).slice(0, 500));
     }
   }
 }
 
+// Les essais à suivre à chaque actualisation, les plus anciens d'abord : RunPod traite sa file dans l'ordre, ce sont
+// eux qui finissent en premier. En pause, on regarde aussi les plus récents, encore dans la file de RunPod, pour les
+// y reprendre.
+export function aSuivre<T extends { created_at: string }>(parties: T[], nombre: number, pause: boolean) {
+  const tries = [...parties].sort((a, b) => a.created_at.localeCompare(b.created_at));
+  if (!pause) return tries.slice(0, nombre);
+  return [...new Set([...tries.slice(0, nombre), ...tries.slice(-nombre)])];
+}
+
 // Envoie les essais en attente, demande à RunPod où en sont les autres et range les vidéos terminées.
 // « envoyer » est faux pendant l'affichage de la page (déjà beaucoup d'appels) : l'envoi se fait par l'actualisation.
+// En pause (ou serveur arrêté), rien ne part et les vidéos pas encore commencées reviennent dans la file.
 // Renvoie le nombre d'essais encore en cours.
-export async function suivreEssais(supabase: SupabaseClient, projectId: string, essais: EssaiEnCours[], envoyer = true) {
+export async function suivreEssais(
+  supabase: SupabaseClient,
+  projectId: string,
+  essais: EssaiEnCours[],
+  envoyer = true,
+  etatLu?: EtatFile,
+) {
   if (essais.length === 0) return 0;
-  const age = (e: EssaiEnCours) => Date.now() - new Date(e.created_at).getTime();
-  const { data: reglage } = await supabase.from("reglages").select("valeur").eq("cle", CLE_ENDPOINT).maybeSingle();
-  const serveurEco = process.env.RUNPOD_ENDPOINT_ID || reglage?.valeur || null;
+  const etat = etatLu ?? (await lireEtatFile(supabase, projectId));
+  const age = (e: EssaiEnCours) => attente(etat, e.created_at);
+  const bloque = (e: EssaiEnCours) => etat.enPause || (etat.serveurArrete && e.moteur !== "qualite");
+  const serveurEco = etat.serveurVideo;
+  const serveurDe = (e: EssaiEnCours) => (e.moteur === "qualite" ? undefined : (serveurEco ?? undefined));
   let finis = 0;
 
-  // Coupé pendant l'envoi ou jamais envoyé (page fermée) : en échec, pour être relancé
+  // Coupé pendant l'envoi ou jamais envoyé (page fermée) : en échec, pour être relancé. En pause, l'attente est voulue.
   const perdus = essais.filter(
-    (e) => (e.runpod_job_id === ENVOI && age(e) > ENVOI_MAX_MS) || (!e.runpod_job_id && age(e) > ATTENTE_MAX_MS),
+    (e) =>
+      (e.runpod_job_id === ENVOI && age(e) > ENVOI_MAX_MS) ||
+      (!e.runpod_job_id && !bloque(e) && age(e) > ATTENTE_MAX_MS),
   );
   for (const e of perdus)
     await echecEssai(supabase, e, e.runpod_job_id ? "Le lancement a été interrompu. Relancez ce plan." : "Vidéo jamais envoyée (page fermée). Relancez ce plan.");
@@ -290,26 +320,42 @@ export async function suivreEssais(supabase: SupabaseClient, projectId: string, 
     await envoyerEssais(
       supabase,
       projectId,
-      essais.filter((e) => !e.runpod_job_id && age(e) <= ATTENTE_MAX_MS).sort((a, b) => a.created_at.localeCompare(b.created_at)),
+      essais.filter((e) => !e.runpod_job_id && !bloque(e) && age(e) <= ATTENTE_MAX_MS).sort((a, b) => a.created_at.localeCompare(b.created_at)),
       serveurEco,
     );
 
-  // Les plus anciens d'abord : RunPod traite sa file dans l'ordre, ce sont eux qui finissent en premier
-  const parties = essais
-    .filter((e) => e.runpod_job_id && e.runpod_job_id !== ENVOI)
-    .sort((a, b) => a.created_at.localeCompare(b.created_at))
-    .slice(0, SUIVIS_PAR_APPEL);
+  // Remet un essai dans notre file (sans numéro RunPod), s'il n'a pas changé entre-temps
+  const remettreEnFile = (essai: EssaiEnCours) =>
+    supabase.from("takes").update({ runpod_job_id: null }).eq("id", essai.id).eq("runpod_job_id", essai.runpod_job_id!).eq("status", "en_cours");
+
+  const parties = aSuivre(
+    essais.filter((e) => e.runpod_job_id && e.runpod_job_id !== ENVOI),
+    SUIVIS_PAR_APPEL,
+    essais.some(bloque),
+  );
   const resultats = await Promise.all(
     parties.map(async (essai) => {
       let statut;
       try {
-        statut = await lireStatut(essai.moteur, essai.runpod_job_id!, essai.moteur === "qualite" ? undefined : (serveurEco ?? undefined));
+        statut = await lireStatut(essai.moteur, essai.runpod_job_id!, serveurDe(essai));
       } catch {
         return 0;
       }
-      if (statut.etat === "en_cours") return 0;
+      if (statut.etat === "en_cours") {
+        // En pause : pas encore commencé chez RunPod, on le reprend pour qu'il ne parte pas
+        if (statut.enFile && bloque(essai)) {
+          await annulerJob(essai.moteur, essai.runpod_job_id!, serveurDe(essai));
+          await remettreEnFile(essai);
+        }
+        return 0;
+      }
 
       if (statut.etat === "echouee") {
+        // Annulé par la pause ou l'arrêt du serveur : il repartira à la reprise
+        if (statut.annulee && bloque(essai)) {
+          await remettreEnFile(essai);
+          return 0;
+        }
         await echecEssai(supabase, essai, statut.erreur);
         return 1;
       }
@@ -341,4 +387,53 @@ export async function suivreEssais(supabase: SupabaseClient, projectId: string, 
     }),
   );
   return essais.length - finis - resultats.reduce<number>((n, r) => n + r, 0);
+}
+
+// « Arrêter le lot » : annule chez RunPod les vidéos parties et retire de la file celles qui attendaient
+// (rien n'est facturé). Les vidéos déjà terminées restent. Renvoie le nombre arrêté et ceux à arrêter au clic suivant.
+export async function arreterEssais(supabase: SupabaseClient, projectId: string) {
+  const [{ data }, etat] = await Promise.all([
+    supabase
+      .from("takes")
+      .select("id, scene_id, runpod_job_id, moteur, scenes!takes_scene_id_fkey!inner(project_id, status)")
+      .eq("status", "en_cours")
+      .eq("scenes.project_id", projectId),
+    lireEtatFile(supabase, projectId),
+  ]);
+  const essais = data ?? [];
+  const parties = essais.filter((e) => e.runpod_job_id && e.runpod_job_id !== ENVOI);
+  const annulees = parties.slice(0, ANNULATIONS_PAR_APPEL);
+  const restants = parties.slice(ANNULATIONS_PAR_APPEL).map((e) => e.id);
+  await Promise.all(
+    annulees.map((e) =>
+      annulerJob(e.moteur as Moteur, e.runpod_job_id!, e.moteur === "qualite" ? undefined : (etat.serveurVideo ?? undefined)),
+    ),
+  );
+  const arretes = essais.filter((e) => !restants.includes(e.id));
+  if (arretes.length === 0) return { arretes: 0, restants: restants.length };
+  await supabase
+    .from("takes")
+    .update({ status: "annulee", cost_usd: 0, error: "Arrêté à la demande.", finished_at: new Date().toISOString() })
+    .in(
+      "id",
+      arretes.map((e) => e.id),
+    )
+    .eq("status", "en_cours");
+
+  // Les plans reviennent « à valider » s'ils ont déjà une vidéo réussie, sinon « brouillon »
+  const encore = new Set(essais.filter((e) => restants.includes(e.id)).map((e) => e.scene_id));
+  const plans = [...new Set(arretes.map((e) => e.scene_id))].filter((id) => !encore.has(id));
+  if (plans.length > 0) {
+    const { data: reussis } = await supabase.from("takes").select("scene_id").in("scene_id", plans).eq("status", "terminee");
+    const avecVideo = new Set((reussis ?? []).map((t) => t.scene_id));
+    await Promise.all(
+      [
+        { status: "a_valider", ids: plans.filter((id) => avecVideo.has(id)) },
+        { status: "brouillon", ids: plans.filter((id) => !avecVideo.has(id)) },
+      ]
+        .filter((g) => g.ids.length > 0)
+        .map((g) => supabase.from("scenes").update({ status: g.status }).in("id", g.ids).eq("status", "en_generation")),
+    );
+  }
+  return { arretes: arretes.length, restants: restants.length };
 }

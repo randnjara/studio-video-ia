@@ -5,7 +5,8 @@ import { alertesPlans } from "@/lib/controles";
 import { lotsPromptsPhotos, suivrePhotos } from "@/lib/photos";
 import { signerLiens } from "@/lib/production";
 import { MOTEURS, PRIX_PHOTO_ESTIME_USD, endpointEco, moteursDisponibles } from "@/lib/runpod";
-import { getClient } from "@/lib/session";
+import { lireEtatFile } from "@/lib/file-attente";
+import { requireProfile } from "@/lib/session";
 import { promptVerification } from "@/lib/verification";
 import { garderDecor,
   creerPhotos,
@@ -23,6 +24,7 @@ import { CopierLots } from "./copier-lots";
 import { ImportCorrection } from "./import-correction";
 import { CopierVerification } from "./copier-verification";
 import { SuiviPhotos } from "./suivi-photos";
+import { ControleFile } from "../controle-file";
 import { PhotoZoom } from "@/components/photo-zoom";
 
 type Plan = {
@@ -65,6 +67,8 @@ const ERREURS: Record<string, string> = {
     "Aucune photo lancée : chaque description doit citer le nom d'au moins une référence du film (ex. : « Rova marche sur la Plage »).",
   "sans-serveur": "Créez d'abord notre serveur RunPod dans « Équipe et budget ».",
   photo: "La création des photos n'a pas pu démarrer. Réessayez.",
+  "serveur-arrete":
+    "Notre serveur RunPod est arrêté : redémarrez-le (bouton du bandeau ou « Équipe et budget »), ou choisissez « Qualité max » pour les vidéos.",
   decor: "Ce plan n'a pas de lieu ou pas de photo : impossible de garder son décor.",
   "photos-importees": "Les photos n'ont pas pu être rattachées aux plans. Réessayez.",
   correction: "Les plans n'ont pas pu être mis à jour avec le tableau corrigé. Réessayez.",
@@ -79,10 +83,10 @@ export default async function PagePlans({
 }) {
   const { id } = await params;
   const sp = await searchParams;
-  const supabase = await getClient();
+  const { supabase, profile } = await requireProfile();
 
   // Le cadre du projet vérifie déjà la connexion et l'existence du projet : tout part en même temps
-  const [{ data: projet }, { data }, { data: versions }, moteurs, { data: refsLues }, serveur] = await Promise.all([
+  const [{ data: projet }, { data }, { data: versions }, moteurs, { data: refsLues }, serveur, etat] = await Promise.all([
     supabase.from("projects").select("title, aspect_ratio, scenario_text, style_text").eq("id", id).maybeSingle(),
     supabase
       .from("scenes")
@@ -101,6 +105,7 @@ export default async function PagePlans({
     moteursDisponibles(),
     supabase.from("film_refs").select("id, nom, genre, description, image_path").eq("project_id", id).order("created_at"),
     endpointEco(),
+    lireEtatFile(supabase, id),
   ]);
   const plans = (data ?? []) as Plan[];
   const refs = (refsLues ?? []) as Ref[];
@@ -112,7 +117,7 @@ export default async function PagePlans({
     p.photos.filter((ph) => ph.status === "en_cours").map((ph) => ({ ...ph, scene_id: p.id })),
   );
   if (photosEnCours.length > 0) {
-    await suivrePhotos(supabase, id, photosEnCours, false);
+    await suivrePhotos(supabase, id, photosEnCours, false, etat);
     const { data: maj } = await supabase
       .from("scenes")
       .select("id, image_path, photos(id, status, error, runpod_job_id, created_at)")
@@ -188,7 +193,23 @@ export default async function PagePlans({
           {sp.sansref ? ` ${sp.sansref} plan(s) ignoré(s) : leur description ne cite aucune référence.` : ""}
         </p>
       )}
-      <SuiviPhotos projectId={id} enCours={nbPhotosEnCours} depuis={depuisPhotos} lot={lotPhotos} />
+      <SuiviPhotos
+        projectId={id}
+        enCours={nbPhotosEnCours}
+        depuis={depuisPhotos}
+        lot={lotPhotos}
+        enPause={etat.enPause || etat.serveurArrete}
+      />
+      <ControleFile
+        projectId={id}
+        onglet="plans"
+        enCours={nbPhotosEnCours + plans.filter(enCours).length}
+        enPause={etat.enPause}
+        serveurArrete={etat.serveurArrete}
+        serveurExiste={Boolean(etat.serveurVideo)}
+        responsable={profile.role === "responsable"}
+        sp={sp}
+      />
       {sp["script-restaure"] && <p className="message-ok">Ancien script remis dans la zone de texte.</p>}
       {sp.importe && (
         <p className="message-ok">

@@ -217,3 +217,36 @@ export async function supprimerAncienServeurEtDisque(ancienEndpoint: string | nu
   for (const v of volumes.filter((x) => x.name === NOM_VOLUME))
     await rest(`/networkvolumes/${encodeURIComponent(v.id)}`, { method: "DELETE" });
 }
+
+// Arrêt de nos serveurs : plus aucune machine ne peut s'allumer (0 machine au maximum, 0 gardée allumée),
+// la file d'attente de RunPod est vidée et les calculs en cours sont annulés. Rien n'est plus facturé.
+// Renvoie le nombre de machines autorisées avant l'arrêt, pour le remettre au redémarrage.
+export async function arreterServeurs(ids: string[], jobsEnCours: { serveur: string; jobId: string }[]) {
+  const max: Record<string, number> = {};
+  for (const id of ids) {
+    const avant = (await rest(`/endpoints/${encodeURIComponent(id)}`).catch(() => null)) as { workersMax?: number } | null;
+    max[id] = avant?.workersMax && avant.workersMax > 0 ? avant.workersMax : 2;
+    await rest(`/endpoints/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ workersMin: 0, workersMax: 0 }),
+    });
+  }
+  const appel = (serveur: string, chemin: string) =>
+    fetch(`https://api.runpod.ai/v2/${encodeURIComponent(serveur)}${chemin}`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${cle()}`, "Content-Type": "application/json" },
+    }).catch(() => undefined);
+  await Promise.all([
+    ...ids.map((id) => appel(id, "/purge-queue")),
+    ...jobsEnCours.map((j) => appel(j.serveur, `/cancel/${encodeURIComponent(j.jobId)}`)),
+  ]);
+  return max;
+}
+
+export async function redemarrerServeurs(max: Record<string, number>) {
+  for (const [id, workersMax] of Object.entries(max))
+    await rest(`/endpoints/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ workersMax: workersMax > 0 ? workersMax : 2 }),
+    });
+}
