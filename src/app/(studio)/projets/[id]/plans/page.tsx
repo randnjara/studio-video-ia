@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { BoutonEnvoi } from "@/components/bouton-envoi";
-import { GENRES, MOUVEMENT_PAR_DEFAUT, STATUTS_PLAN, couleurStatut, dureeLisible } from "@/lib/libelles";
+import { MOUVEMENT_PAR_DEFAUT, STATUTS_PLAN, couleurStatut, dureeLisible } from "@/lib/libelles";
 import { alertesPlans } from "@/lib/controles";
 import { suivrePhotos } from "@/lib/photos";
 import { signerLiens } from "@/lib/production";
@@ -10,20 +10,15 @@ import { promptVerification } from "@/lib/verification";
 import {
   creerPhotos,
   deplacerPlan,
-  enregistrerStyle,
   envoyerALaGeneration,
   restaurerScript,
   supprimerPlan,
   supprimerPlans,
-  supprimerReference,
 } from "./actions";
 import { FormulairePlan } from "./formulaire-plan";
 import { ImportGroupe } from "./import-groupe";
-import { ImportTableau } from "./import-tableau";
-import { PreparationTableau } from "./preparation";
 import { BarreSelection } from "./selection";
 import { CopierVerification } from "./copier-verification";
-import { AjoutReference } from "./references";
 import { SuiviPhotos } from "./suivi-photos";
 
 type Plan = {
@@ -66,7 +61,6 @@ const ERREURS: Record<string, string> = {
     "Aucune photo lancée : chaque description doit citer le nom d'au moins une référence du film (ex. : « Rova marche sur la Plage »).",
   "sans-serveur": "Créez d'abord notre serveur RunPod dans « Équipe et budget ».",
   photo: "La création des photos n'a pas pu démarrer. Réessayez.",
-  reference: "La référence n'a pas pu être ajoutée : donnez-lui un nom et une photo.",
 };
 
 export default async function PagePlans({
@@ -82,7 +76,7 @@ export default async function PagePlans({
 
   // Le cadre du projet vérifie déjà la connexion et l'existence du projet : tout part en même temps
   const [{ data: projet }, { data }, { data: versions }, moteurs, { data: refsLues }, serveur] = await Promise.all([
-    supabase.from("projects").select("title, aspect_ratio, scenario_text, style_text, resume").eq("id", id).maybeSingle(),
+    supabase.from("projects").select("title, aspect_ratio, scenario_text, style_text").eq("id", id).maybeSingle(),
     supabase
       .from("scenes")
       .select(
@@ -122,7 +116,7 @@ export default async function PagePlans({
     }
   }
   const nbPhotosEnCours = plans.reduce((n, p) => n + p.photos.filter((ph) => ph.status === "en_cours").length, 0);
-  const liens = await signerLiens(supabase, [...plans.map((p) => p.image_path), ...refs.map((r) => r.image_path)]);
+  const liens = await signerLiens(supabase, plans.map((p) => p.image_path));
 
   const pret = (p: Plan) => Boolean(p.image_path && p.motion_prompt && p.consent_confirmed);
   const enCours = (p: Plan) => p.takes.some((t) => t.status === "en_cours");
@@ -154,8 +148,6 @@ export default async function PagePlans({
           {sp.sansref ? ` ${sp.sansref} plan(s) ignoré(s) : leur description ne cite aucune référence.` : ""}
         </p>
       )}
-      {sp.reference && <p className="message-ok">Référence ajoutée.</p>}
-      {sp.style && <p className="message-ok">Style du film enregistré.</p>}
       <SuiviPhotos projectId={id} enCours={nbPhotosEnCours} />
       {sp["script-restaure"] && <p className="message-ok">Ancien script remis dans la zone de texte.</p>}
       {sp.importe && (
@@ -170,16 +162,19 @@ export default async function PagePlans({
         </p>
       )}
 
-      {/* 1. Créer des plans, en une ou plusieurs fois */}
+      {/* Autres façons d'ajouter des plans : la méthode conseillée est le tableau ChatGPT (étape 2) */}
       <section className="carte flex flex-col gap-4" id="script">
         <div>
-          <h2 className="text-lg font-bold">Créer des plans</h2>
+          <h2 className="text-lg font-bold">Ajouter des plans à la main</h2>
           <p className="text-sm text-sourdine">
-            Un plan = une photo + un mouvement de caméra + le texte de la voix off, pour un clip de 5 secondes. Ajoutez-en autant
-            que vous voulez, en une ou plusieurs fois : la durée de la vidéo n'est pas limitée.
+            Méthode conseillée : le tableau préparé par ChatGPT, à l'{" "}
+            <Link href={`/projets/${id}/chatgpt`} className="lien">
+              étape 2
+            </Link>
+            . Ici, vous pouvez aussi ajouter des plans vous-même : un plan = une photo + un mouvement + le texte de la voix off.
           </p>
         </div>
-        <details className="rounded-lg border border-ligne p-4" open={plans.length === 0}>
+        <details className="rounded-lg border border-ligne p-4">
           <summary className="cursor-pointer font-semibold">⚡ Plusieurs plans d'un coup : script + photos</summary>
           <div className="mt-4 flex flex-col gap-4">
             <ImportGroupe projectId={id} scenario={projet?.scenario_text ?? ""} />
@@ -205,21 +200,6 @@ export default async function PagePlans({
             )}
           </div>
         </details>
-        <PreparationTableau
-          projectId={id}
-          titre={projet?.title ?? ""}
-          format={projet?.aspect_ratio ?? "16:9"}
-          style={projet?.style_text ?? ""}
-          script={projet?.scenario_text ?? ""}
-          resume={projet?.resume ?? ""}
-          refs={refs}
-        />
-        <details className="rounded-lg border border-ligne p-4">
-          <summary className="cursor-pointer font-semibold">📋 Importer un tableau de scènes (CSV ou scénario Markdown)</summary>
-          <div className="mt-4">
-            <ImportTableau projectId={id} />
-          </div>
-        </details>
         <details className="rounded-lg border border-ligne p-4">
           <summary className="cursor-pointer font-semibold">＋ Un seul plan</summary>
           <div className="mt-4">
@@ -228,70 +208,21 @@ export default async function PagePlans({
         </details>
       </section>
 
-      {/* Références du film : les photos de départ sont créées à partir d'elles, toutes avec les mêmes visages et décors */}
-      <section className="carte flex flex-col gap-4" id="references">
-        <div>
-          <h2 className="text-lg font-bold">Références du film</h2>
-          <p className="text-sm text-sourdine">
-            Une photo par personnage, lieu ou objet important, avec un nom court. Dans la description de la photo de chaque plan,
-            citez ces noms : notre serveur crée alors toutes les photos de départ d'un coup, avec les mêmes visages, vêtements et
-            décors (3 références au plus par photo).
-          </p>
-        </div>
-        {refs.length > 0 && (
-          <ul className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            {refs.map((r) => (
-              <li key={r.id} className="flex flex-col gap-1 text-sm">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={liens.get(r.image_path)} alt={r.nom} className="aspect-square w-full rounded-lg border border-ligne object-cover" />
-                <div className="flex items-center gap-1">
-                  <span className="min-w-0 flex-1 truncate font-semibold">{r.nom}</span>
-                  <form action={supprimerReference.bind(null, id, r.id)}>
-                    <BoutonEnvoi className="lien text-xs" enCours="…" confirmer={`Retirer la référence « ${r.nom} » ?`}>
-                      Retirer
-                    </BoutonEnvoi>
-                  </form>
-                </div>
-                <span className="text-xs text-sourdine">
-                  {GENRES[r.genre] ?? r.genre}
-                  {r.description ? ` · ${r.description}` : ""}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-        <details className="rounded-lg border border-ligne p-4" open={refs.length === 0}>
-          <summary className="cursor-pointer font-semibold">＋ Ajouter une référence</summary>
-          <div className="mt-4">
-            <AjoutReference projectId={id} />
-          </div>
-        </details>
-        <form action={enregistrerStyle.bind(null, id)} className="flex flex-col gap-2">
-          <label className="etiquette" htmlFor="style-film">
-            Style du film (facultatif, ajouté à chaque photo ; ChatGPT peut le proposer)
-          </label>
-          <textarea
-            id="style-film"
-            name="style_text"
-            rows={2}
-            maxLength={600}
-            defaultValue={projet?.style_text ?? ""}
-            placeholder="Ex. : Madagascar années 1990, lumière chaude de fin de journée, couleurs douces, caméra 35 mm"
-            className="champ text-sm"
-          />
-          <div>
-            <BoutonEnvoi className="bouton-discret" enCours="Enregistrement…">
-              Enregistrer le style
-            </BoutonEnvoi>
-          </div>
-        </form>
+      {/* Rappel des références (elles se gèrent à l'étape 1) et de ce qu'il faut pour créer les photos */}
+      <section className="carte flex flex-col gap-2 text-sm" id="references">
+        <p>
+          <span className="font-semibold">Photos de référence : </span>
+          {refs.length ? refs.map((r) => r.nom).join(", ") : "aucune"}
+          {" · "}
+          <Link href={`/projets/${id}#references`} className="lien">
+            modifier à l'étape 1
+          </Link>
+        </p>
         {!serveur && (
-          <p className="text-sm text-sourdine">
-            La création des photos utilise notre serveur RunPod : créez-le d'abord dans « Équipe et budget ».
-          </p>
+          <p className="text-sourdine">La création des photos utilise notre serveur RunPod : créez-le d'abord dans « Équipe et budget ».</p>
         )}
         {serveur && decrits === 0 && plans.length > 0 && (
-          <p className="text-sm text-sourdine">
+          <p className="text-sourdine">
             Ajoutez une description de photo à vos plans (« Modifier ce plan »), puis cochez-les et cliquez sur « 🖼 Créer les
             photos ».
           </p>

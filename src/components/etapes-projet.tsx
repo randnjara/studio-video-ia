@@ -10,12 +10,12 @@ export type Etape = {
   etat: "fait" | "actuelle" | "a_venir";
 };
 
-// Les 4 étapes du projet, en onglets. L'étape où en est le projet est en couleur,
+// Les 5 étapes du projet, en onglets. L'étape où en est le projet est en couleur,
 // les étapes finies en vert, et l'onglet ouvert est souligné.
 export function EtapesProjet({ etapes }: { etapes: Etape[] }) {
   const chemin = usePathname();
   return (
-    <nav aria-label="Étapes du projet" className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+    <nav aria-label="Étapes du projet" className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
       {etapes.map((e, i) => {
         const ouvert = chemin === e.href;
         const couleur =
