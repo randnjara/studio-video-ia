@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { DUREE_MIN, type Place, type Timeline } from "@/lib/montage";
+import { DUREE_MIN, type Place, type Timeline, TRANSITIONS, symboleTransition } from "@/lib/montage";
 import { type Selection, ajouterPiste, deplacerDansPiste, majElement, majPisteInfos, supprimerPiste } from "./edition";
 
 // Les pistes, comme dans un logiciel de montage : on glisse un bloc pour le déplacer (ou changer l'ordre sur la piste
@@ -301,7 +301,7 @@ export function Pistes({
                             />
                           )}
                           <span className="pointer-events-none relative block truncate px-2 pt-1 font-semibold">
-                            {e.entree !== "coupe" ? (e.entree === "noir" ? "◐ " : "⧉ ") : ""}
+                            {e.entree !== "coupe" ? `${symboleTransition(e.entree)} ` : ""}
                             {e.zoom !== "aucun" ? "🔍 " : ""}
                             {e.nom}
                           </span>
@@ -325,6 +325,24 @@ export function Pistes({
                         </div>
                       );
                     })}
+                  {/* Entre deux plans : un rond pour choisir la transition */}
+                  {niveau === 0 &&
+                    places
+                      .filter((p) => p.principale)
+                      .slice(1)
+                      .map((p) => (
+                        <button
+                          key={`t-${p.element.id}`}
+                          type="button"
+                          title={`Transition : ${TRANSITIONS.find((x) => x.valeur === p.element.entree)?.nom ?? ""} (cliquez pour changer)`}
+                          className={`absolute top-1/2 z-[4] flex h-6 w-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border text-xs shadow ${p.element.entree === "coupe" ? "border-ligne bg-surface text-sourdine" : "border-accent bg-accent text-accent-texte"}`}
+                          style={{ left: (p.debut + (p.entree === "noir" || p.entree === "blanc" ? 0 : p.fonduEntree / 2)) * zoom }}
+                          onPointerDown={(ev) => ev.stopPropagation()}
+                          onClick={() => onSelection({ piste: piste.id, element: p.element.id })}
+                        >
+                          {p.element.entree === "coupe" ? "+" : symboleTransition(p.element.entree)}
+                        </button>
+                      ))}
                   {piste.elements.length === 0 && (
                     <span className="pointer-events-none absolute inset-0 flex items-center px-3 text-xs text-sourdine">
                       {piste.nature === "audio"
@@ -342,8 +360,8 @@ export function Pistes({
         </div>
       </div>
       <p className="text-xs text-sourdine">
-        Glissez un bloc pour le déplacer (sur la piste principale : pour changer l'ordre). Tirez ses bords pour raccourcir. ⧉ = fondu
-        enchaîné, ◐ = fondu au noir, 🔍 = zoom lent.
+        Glissez un bloc pour le déplacer (sur la piste principale : pour changer l'ordre). Tirez ses bords pour raccourcir. Le rond entre
+        deux plans choisit la transition : {TRANSITIONS.slice(1).map((x) => `${x.symbole} ${x.nom.split(" (")[0].toLowerCase()}`).join(", ")}. 🔍 = zoom lent.
       </p>
     </div>
   );
