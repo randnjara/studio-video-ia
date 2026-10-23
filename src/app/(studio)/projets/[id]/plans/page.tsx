@@ -194,8 +194,9 @@ export default async function PagePlans({
       {lieuxSansPhoto.length > 0 && (
         <p className="message-erreur">
           {lieuxSansPhoto.length > 1 ? "Ces lieux n'ont" : "Ce lieu n'a"} pas de photo de référence : {lieuxSansPhoto.join(", ")}.
-          Sans elle, le décor change d'une photo à l'autre. Créez d'abord une photo réussie dans ce lieu, puis cliquez sur
-          « Garder ce décor » sous la photo (ou ajoutez une photo du lieu à l'étape Infos).
+          Sans elle, le décor change d'une photo à l'autre. En créant les photos ici, la première réussie dans ce lieu devient
+          sa référence et les suivantes attendent pour reprendre le même décor. Vous pouvez aussi cliquer sur « Garder ce
+          décor » sous une photo réussie, ou ajouter une photo du lieu à l'étape Infos.
         </p>
       )}
       {sp.photos && Number(sp.photos) > 0 && (
