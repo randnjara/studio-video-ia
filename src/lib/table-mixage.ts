@@ -247,7 +247,8 @@ export async function rendre(son: AudioBuffer, r: Reglages): Promise<AudioBuffer
   const brouillon = new OfflineAudioContext(1, 1, son.sampleRate);
   const modifie = hauteurEtVitesse(brouillon, son, r.hauteur, r.vitesse);
   const traine = r.echo > 0 || r.reverb > 0 || r.effet === "grotte" ? 3 : 0.1;
-  const ctx = new OfflineAudioContext(2, Math.ceil((modifie.duration + traine) * son.sampleRate), son.sampleRate);
+  // Mono : une voix off n'a pas besoin de deux canaux, et le fichier est deux fois plus léger
+  const ctx = new OfflineAudioContext(1,Math.ceil((modifie.duration + traine) * son.sampleRate), son.sampleRate);
   brancher(ctx, modifie, r, ctx.destination);
   return ctx.startRendering();
 }
