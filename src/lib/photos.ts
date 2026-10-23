@@ -77,7 +77,7 @@ export function promptPhoto(
       .slice(0, 1)
       .map(
         ({ r, n }) =>
-          `Image ${n} is the fixed film set "${r.nom}": use only its background and ignore any person in it. Reproduce the same place exactly, as the same continuous scene: same architecture, balustrade, columns, furniture, plants and flowers at the same places, same sky, same time of day, same light direction and colours. Do not add, remove or move set elements (no new bench, flowers, building or sky colour); if the scene text describes the background differently, follow image ${n}. Only the camera framing and angle, the person's pose, hand gesture and facial expression change.`,
+          `Image ${n} is the fixed film set "${r.nom}": use only its background and ignore any person in it. Reproduce the same place exactly, as the same continuous scene: same architecture, balustrade, columns, furniture, plants and flowers at the same places, same sky colours and same time of day. Do not add, remove or move set elements (no new bench, flowers, building or sky colour); if the scene text describes the background differently, follow image ${n}. Only the camera framing and angle, the person's pose, hand gesture and facial expression change.`,
       ),
     ...p.refs
       .filter((r) => r.genre === "produit")
@@ -89,6 +89,12 @@ export function promptPhoto(
     p.style.trim() ? `Film style: ${p.style.trim()}.` : "",
     "One single natural photographic moment that can be the first frame of a five-second video. Full-frame image filling the whole format: no collage, no storyboard sheet, no grid, no split screen, no blurred side bars, no border, no added text, no caption, no extra logo, no watermark (only the product's own label if a product is shown).",
     "Natural anatomy: exactly two arms and two hands, five fingers per hand, realistic contact with objects. Cinematic lighting, realistic depth of field, natural skin texture.",
+    // Plan 5 du Projet Mama : soleil couchant derrière elle, visage sombre et silhouette à contre-jour à chaque essai
+    "The person's face and body are always clearly and softly lit from the front (soft fill light), bright and readable: never a dark backlit silhouette, even with the sun behind.",
+    // Rappel en fin de consigne : seules les remarques du « Re-générer » passent avant tout le reste (décor, lumière, scène)
+    p.voulu?.trim() || p.a_eviter?.trim()
+      ? `Final reminder, this overrides the scene text and every rule above: ${[p.voulu?.trim(), p.a_eviter?.trim() && `avoid: ${p.a_eviter.trim()}`].filter(Boolean).join(". ")}.`
+      : "",
   ]
     .filter(Boolean)
     .join("\n");
