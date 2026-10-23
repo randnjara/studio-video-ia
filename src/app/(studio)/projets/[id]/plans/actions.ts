@@ -386,3 +386,57 @@ export async function importerTableau(projectId: string, lignes: LigneTableau[],
   retour(projectId, `?importe=${Math.min(lignes.length, 300)}`);
 }
 
+
+export type LigneCorrection = {
+  numero: number;
+  photoARefaire: boolean;
+  duree: number | null;
+  intention: string;
+  cadrage: string;
+  angle: string;
+  lieu: string;
+  pose_debut: string;
+  pose_fin: string;
+  description: string;
+  mouvement: string;
+};
+
+// Tableau corrigé rendu par la vérification (ChatGPT, Claude…) : met à jour les plans existants, repérés par leur
+// numéro dans l'ordre du tableau. Les répliques ne sont jamais modifiées ; une cellule vide garde la valeur actuelle.
+export async function corrigerPlans(projectId: string, lignes: LigneCorrection[]) {
+  const { supabase, profile } = await requireProfile();
+  const { data: scenes } = await supabase
+    .from("scenes")
+    .select("id, duration_s, intention, cadrage, angle, lieu, pose_debut, pose_fin, image_description, motion_prompt, image_path")
+    .eq("project_id", projectId)
+    .order("position");
+  if (!scenes?.length) retour(projectId, "?erreur=correction");
+
+  const court = (t: string, n = 300) => String(t ?? "").trim().slice(0, n);
+  const changements: { id: string; maj: Record<string, string | number> }[] = [];
+  const photos: number[] = [];
+  for (const l of lignes) {
+    const s = scenes[l.numero - 1];
+    if (!s) continue;
+    const proposes: Record<string, string | number> = {
+      intention: court(l.intention),
+      cadrage: court(l.cadrage),
+      angle: court(l.angle),
+      lieu: court(l.lieu),
+      pose_debut: court(l.pose_debut),
+      pose_fin: court(l.pose_fin),
+      image_description: court(l.description, 2000),
+      motion_prompt: court(l.mouvement, 2000),
+    };
+    if (l.duree && l.duree >= 2 && l.duree <= 10) proposes.duration_s = l.duree;
+    const maj = Object.fromEntries(
+      Object.entries(proposes).filter(([k, v]) => v !== "" && v !== (s as Record<string, unknown>)[k]),
+    );
+    if (Object.keys(maj).length) changements.push({ id: s.id, maj });
+    if (l.photoARefaire && s.image_path) photos.push(l.numero);
+  }
+  const resultats = await Promise.all(changements.map((c) => supabase.from("scenes").update(c.maj).eq("id", c.id)));
+  if (resultats.some((r) => r.error)) retour(projectId, "?erreur=correction");
+  await journaliser(supabase, profile.id, "correction", "plan", null, { project_id: projectId, nombre: changements.length });
+  retour(projectId, `?corriges=${changements.length}${photos.length ? `&refaire=${photos.join(",")}` : ""}`);
+}
