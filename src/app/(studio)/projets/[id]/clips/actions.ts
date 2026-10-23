@@ -19,7 +19,7 @@ export async function actualiserEssais(projectId: string): Promise<number> {
   const { supabase } = await requireProfile();
   const { data } = await supabase
     .from("takes")
-    .select("id, scene_id, runpod_job_id, moteur, scenes!takes_scene_id_fkey!inner(project_id, status)")
+    .select("id, scene_id, runpod_job_id, moteur, created_at, scenes!takes_scene_id_fkey!inner(project_id, status)")
     .eq("status", "en_cours")
     .eq("scenes.project_id", projectId);
   const essais = (data ?? []).map((t) => ({
@@ -28,6 +28,7 @@ export async function actualiserEssais(projectId: string): Promise<number> {
     runpod_job_id: t.runpod_job_id,
     moteur: estMoteur(t.moteur) ? t.moteur : ("qualite" as const),
     sceneValidee: (t.scenes as unknown as { status: string }).status === "validee",
+    created_at: t.created_at,
   }));
   if (essais.length === 0) return 0;
   const restants = await suivreEssais(supabase, projectId, essais);
