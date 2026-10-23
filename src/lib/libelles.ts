@@ -78,10 +78,11 @@ export const CADRAGES = [
 export const ANGLES = ["face", "3/4 gauche", "3/4 droit", "profil gauche", "profil droit", "dos", "plongée", "contre-plongée"];
 
 // Grille de contrôle obligatoire avant de valider un clip
+// Points à améliorer la prochaine fois, cochés (ou non) en validant un clip : rien n'est obligatoire
 export const CONTROLES_CLIP: Record<string, string> = {
-  visage: "Visage, âge et tenue fidèles aux références",
-  mains: "Deux mains, doigts naturels, pas de membre en trop",
-  mouvement: "Mouvement naturel, pas figé, sans déformation (morphing)",
-  cadre: "Image entière au bon format, sans texte ni bord flou",
-  raccord: "Raccord correct avec le plan précédent et le suivant",
+  visage: "Visage, âge ou tenue différents des références",
+  mains: "Mains ou doigts pas naturels, membre en trop",
+  mouvement: "Mouvement figé ou déformation (morphing)",
+  cadre: "Mauvais format, texte ou bord flou dans l'image",
+  raccord: "Mauvais raccord avec le plan précédent ou suivant",
 };

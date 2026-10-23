@@ -15,6 +15,7 @@ type Essai = {
   video_path: string | null;
   cost_usd: number | null;
   error: string | null;
+  controle: unknown;
   created_at: string;
 };
 
@@ -29,7 +30,6 @@ type Plan = {
 };
 
 const ERREURS: Record<string, string> = {
-  controle: "Pour valider un clip, cochez les 5 points de contrôle. Sinon, refusez-le ou régénérez-le.",
   plan: "Plan introuvable.",
   "sans-photo": "Ce plan n'a pas de photo : complétez-le dans « Plans ».",
   "sans-prompt": "Ce plan n'a pas de mouvement : complétez-le dans « Plans ».",
@@ -46,9 +46,15 @@ const FILTRES = [
 ] as const;
 
 const SELECT =
-  "id, position, image_path, voiceover_text, status, validated_take_id, takes!takes_scene_id_fkey(id, status, runpod_job_id, moteur, video_path, cost_usd, error, created_at)";
+  "id, position, image_path, voiceover_text, status, validated_take_id, takes!takes_scene_id_fkey(id, status, runpod_job_id, moteur, video_path, cost_usd, error, controle, created_at)";
 
 const moteurDe = (t: Essai): Moteur => (estMoteur(t.moteur) ? t.moteur : "qualite");
+
+// Points notés à la validation (anciens clips : grille où tout était coché, donc rien à améliorer)
+function aAmeliorer(controle: unknown): string[] {
+  const c = controle as { a_ameliorer?: string[]; note?: string } | null;
+  return [...(c?.a_ameliorer ?? []).map((k) => CONTROLES_CLIP[k] ?? k), ...(c?.note ? [c.note] : [])];
+}
 
 export default async function PageClips({
   params,
@@ -218,6 +224,9 @@ export default async function PageClips({
                         <p className="text-sm text-alerte">Échec (non facturé) : {t.error ?? "erreur inconnue"}</p>
                       )}
                       {video && <video src={video} controls loop playsInline preload="metadata" className="w-full rounded-md bg-black" />}
+                      {aAmeliorer(t.controle).length > 0 && (
+                        <p className="mt-2 text-xs text-sourdine">À améliorer : {aAmeliorer(t.controle).join(" · ")}</p>
+                      )}
                       <div className="mt-2 flex flex-wrap items-center gap-3 text-sm">
                         {video &&
                           (choisi ? (
@@ -231,15 +240,18 @@ export default async function PageClips({
                               <summary className="bouton inline-flex cursor-pointer list-none px-3 py-1 [&::-webkit-details-marker]:hidden">
                                 ✓ Valider…
                               </summary>
-                              {/* Grille de contrôle : regardez le début, le milieu et la fin du clip avant de cocher */}
+                              {/* Points à améliorer la prochaine fois : facultatifs, le clip peut être validé sans rien cocher */}
                               <form action={validerClip.bind(null, id, plan.id, t.id)} className="mt-2 flex flex-col gap-1.5 rounded-md bg-surface-2 p-3">
-                                <p className="text-xs text-sourdine">Regardez le début, le milieu et la fin du clip, puis cochez :</p>
+                                <p className="text-xs text-sourdine">
+                                  À améliorer la prochaine fois (facultatif) : cochez ce qui ne va pas encore.
+                                </p>
                                 {Object.entries(CONTROLES_CLIP).map(([cle, libelle]) => (
                                   <label key={cle} className="flex items-start gap-2 text-sm">
-                                    <input type="checkbox" name={cle} required className="mt-1" />
+                                    <input type="checkbox" name={cle} className="mt-1" />
                                     {libelle}
                                   </label>
                                 ))}
+                                <input name="note" placeholder="Autre remarque (facultatif)" className="champ mt-1 text-sm" maxLength={500} />
                                 <div className="mt-1">
                                   <BoutonEnvoi className="bouton px-3 py-1" enCours="Validation…">
                                     ✓ Valider ce clip
