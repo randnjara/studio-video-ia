@@ -10,6 +10,7 @@ import { requireProfile } from "@/lib/session";
 import { promptVerification } from "@/lib/verification";
 import { garderDecor,
   creerPhotos,
+  regenererPhoto,
   deplacerPlan,
   envoyerALaGeneration,
   restaurerScript,
@@ -48,7 +49,16 @@ type Plan = {
   photos: Photo[];
 };
 
-type Photo = { id: string; status: string; error: string | null; runpod_job_id: string | null; created_at: string };
+type Photo = {
+  id: string;
+  status: string;
+  error: string | null;
+  runpod_job_id: string | null;
+  created_at: string;
+  // Remarques de « Re-générer » (absentes tant que la migration 0013 n'est pas passée)
+  a_eviter?: string;
+  voulu?: string;
+};
 type Ref = { id: string; nom: string; genre: string; description: string; image_path: string };
 
 type Version = { id: number; created_at: string; data: { scenario_text?: string } };
@@ -72,6 +82,7 @@ const ERREURS: Record<string, string> = {
   decor: "Ce plan n'a pas de lieu ou pas de photo : impossible de garder son décor.",
   "photos-importees": "Les photos n'ont pas pu être rattachées aux plans. Réessayez.",
   correction: "Les plans n'ont pas pu être mis à jour avec le tableau corrigé. Réessayez.",
+  "sans-remarque": "Pour re-générer, écrivez en quelques mots ce qui ne va pas ou ce que vous voulez.",
 };
 
 export default async function PagePlans({
@@ -91,7 +102,7 @@ export default async function PagePlans({
     supabase
       .from("scenes")
       .select(
-        "id, position, motion_prompt, voiceover_text, image_description, image_path, cadrage, angle, lieu, intention, pose_debut, pose_fin, consent_confirmed, duration_s, status, validated_take_id, takes!takes_scene_id_fkey(status), photos(id, status, error, runpod_job_id, created_at)",
+        "id, position, motion_prompt, voiceover_text, image_description, image_path, cadrage, angle, lieu, intention, pose_debut, pose_fin, consent_confirmed, duration_s, status, validated_take_id, takes!takes_scene_id_fkey(status), photos(*)",
       )
       .eq("project_id", id)
       .order("position"),
@@ -120,7 +131,7 @@ export default async function PagePlans({
     await suivrePhotos(supabase, id, photosEnCours, false, etat);
     const { data: maj } = await supabase
       .from("scenes")
-      .select("id, image_path, photos(id, status, error, runpod_job_id, created_at)")
+      .select("id, image_path, photos(*)")
       .eq("project_id", id);
     for (const m of maj ?? []) {
       const p = plans.find((x) => x.id === m.id);
@@ -183,8 +194,9 @@ export default async function PagePlans({
       {lieuxSansPhoto.length > 0 && (
         <p className="message-erreur">
           {lieuxSansPhoto.length > 1 ? "Ces lieux n'ont" : "Ce lieu n'a"} pas de photo de référence : {lieuxSansPhoto.join(", ")}.
-          Sans elle, le décor change d'une photo à l'autre. Créez d'abord une photo réussie dans ce lieu, puis cliquez sur
-          « Garder ce décor » sous la photo (ou ajoutez une photo du lieu à l'étape Infos).
+          Sans elle, le décor change d'une photo à l'autre. En créant les photos ici, la première réussie dans ce lieu devient
+          sa référence et les suivantes attendent pour reprendre le même décor. Vous pouvez aussi cliquer sur « Garder ce
+          décor » sous une photo réussie, ou ajouter une photo du lieu à l'étape Infos.
         </p>
       )}
       {sp.photos && Number(sp.photos) > 0 && (
@@ -474,6 +486,44 @@ export default async function PagePlans({
                         </Link>
                       )}
                     </div>
+
+                    {serveur && (photo || derniere) && plan.image_description.trim() && derniere?.status !== "en_cours" && (
+                      <details open={sp.erreur === "sans-remarque" && sp.plan === plan.id}>
+                        <summary className="cursor-pointer text-sm font-semibold text-accent">🔁 Re-générer cette photo</summary>
+                        <form action={regenererPhoto.bind(null, id, plan.id)} className="mt-3 flex flex-col gap-3">
+                          <p className="text-xs text-sourdine">
+                            Le résultat ne vous plaît pas ? Dites en quelques phrases ce qui ne va pas et ce que vous voulez : ces
+                            remarques sont ajoutées à la consigne de la nouvelle photo (≈ {PRIX_PHOTO_ESTIME_USD} $). Soyez précis
+                            (ex. : « le visage est trop jeune », « elle doit tenir le téléphone dans la main droite »).
+                          </p>
+                          <label className="flex flex-col gap-1 text-sm">
+                            <span className="etiquette">Ce qui ne va pas</span>
+                            <textarea
+                              name="a_eviter"
+                              rows={2}
+                              maxLength={600}
+                              defaultValue={derniere?.a_eviter ?? ""}
+                              placeholder="Ex. : deux personnes au lieu d'une, mains déformées, décor trop sombre"
+                              className="champ text-sm"
+                            />
+                          </label>
+                          <label className="flex flex-col gap-1 text-sm">
+                            <span className="etiquette">Ce que vous voulez à la place</span>
+                            <textarea
+                              name="voulu"
+                              rows={2}
+                              maxLength={600}
+                              defaultValue={derniere?.voulu ?? ""}
+                              placeholder="Ex. : Mama seule, assise près de la fenêtre, lumière du matin, sourire léger"
+                              className="champ text-sm"
+                            />
+                          </label>
+                          <div>
+                            <BoutonEnvoi enCours="Envoi…">🔁 Re-générer avec ces remarques</BoutonEnvoi>
+                          </div>
+                        </form>
+                      </details>
+                    )}
 
                     <details>
                       <summary className="cursor-pointer text-sm font-semibold text-accent">Modifier ce plan</summary>

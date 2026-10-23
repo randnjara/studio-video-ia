@@ -40,10 +40,15 @@ export type FichePlan = {
   pose_debut?: string;
 };
 
+// Remarques laissées avec « Re-générer » : ce qui n'allait pas sur la photo précédente et ce que l'on veut
+export type Remarques = { a_eviter?: string; voulu?: string };
+
 // Consigne envoyée à Qwen-Image-Edit, qui comprend mieux l'anglais : les parties fixes sont en anglais,
 // les textes de la personne (souvent en français) sont repris tels quels.
 // Les règles fixes viennent des erreurs vues sur le Projet Mama (planches, texte, mains, visage qui change).
-export function promptPhoto(p: FichePlan & { numero: number; total: number; format: string; style: string; refs: Reference[] }) {
+export function promptPhoto(
+  p: FichePlan & Remarques & { numero: number; total: number; format: string; style: string; refs: Reference[] },
+) {
   const images = p.refs
     .map((r, i) => `image ${i + 1} = ${r.nom} (${r.genre}${r.description ? `: ${r.description}` : ""})`)
     .join("; ");
@@ -58,8 +63,22 @@ export function promptPhoto(p: FichePlan & { numero: number; total: number; form
     `Photorealistic cinematic film still, shot ${p.numero} of ${p.total}, ${p.format} frame.`,
     `Scene: ${p.description.trim()}`,
     fiche.length ? `Shot sheet: ${fiche.join("; ")}.` : "",
+    // Placées juste après la scène pour peser plus lourd. Le serveur n'utilise pas le prompt négatif (true_cfg_scale 1) :
+    // ce qu'il faut éviter est donc écrit dans le prompt lui-même.
+    p.voulu?.trim() ? `Correction requested after a previous failed attempt (top priority, apply it exactly): ${p.voulu.trim()}` : "",
+    p.a_eviter?.trim() ? `Problems of the previous attempt that must NOT appear again: ${p.a_eviter.trim()}` : "",
     `Reference images: ${images}.`,
-    "Keep exactly the same person as the reference images: same face, facial proportions, apparent age, wrinkles, skin tone, hairstyle, body shape and clothing. Do not beautify, rejuvenate or reshape the face. Keep the reference locations unchanged.",
+    "Keep exactly the same person as the reference images: same face, facial proportions, apparent age, wrinkles, skin tone, hairstyle, body shape and clothing. Do not beautify, rejuvenate or reshape the face.",
+    // Le décor changeait d'un plan à l'autre dans un même lieu (Projet Mama : ciel, fleurs, bancs, colonnes réinventés) :
+    // la photo du lieu devient le plateau fixe, et ce que la description ajoute au décor passe après elle.
+    ...p.refs
+      .map((r, i) => ({ r, n: i + 1 }))
+      .filter(({ r }) => r.genre === "lieu")
+      .slice(0, 1)
+      .map(
+        ({ r, n }) =>
+          `Image ${n} is the fixed film set "${r.nom}": use only its background and ignore any person in it. Reproduce the same place exactly, as the same continuous scene: same architecture, balustrade, columns, furniture, plants and flowers at the same places, same sky, same time of day, same light direction and colours. Do not add, remove or move set elements (no new bench, flowers, building or sky colour); if the scene text describes the background differently, follow image ${n}. Only the camera framing and angle, the person's pose, hand gesture and facial expression change.`,
+      ),
     ...p.refs
       .filter((r) => r.genre === "produit")
       .slice(0, 1)
@@ -155,6 +174,7 @@ export async function demanderPhotos(
   auteurId: string,
   plans: { id: string; image_description: string; lieu?: string | null }[],
   refs: Reference[],
+  remarques: Remarques = {},
 ): Promise<{ inscrites: number; sansReference: number; erreur: "budget" | "photo" | null }> {
   const lignes = plans.flatMap((plan) => {
     if (!plan.image_description.trim()) return [];
@@ -169,6 +189,9 @@ export async function demanderPhotos(
         ref_ids: choisies.map((r) => r.id),
         cost_usd: PRIX_PHOTO_ESTIME_USD,
         created_by: auteurId,
+        // Seulement quand il y en a : une demande normale reste valable même si la colonne n'existe pas encore
+        ...(remarques.a_eviter?.trim() ? { a_eviter: remarques.a_eviter.trim() } : {}),
+        ...(remarques.voulu?.trim() ? { voulu: remarques.voulu.trim() } : {}),
       },
     ];
   });
@@ -187,8 +210,21 @@ const echec = (supabase: SupabaseClient, id: string, erreur: string) =>
     .update({ status: "echouee", error: erreur, cost_usd: 0, finished_at: new Date().toISOString() })
     .eq("id", id);
 
-// Envoie à RunPod les photos en attente du projet (quelques-unes par appel)
-async function envoyerPhotos(supabase: SupabaseClient, projectId: string, enAttente: PhotoSuivie[], serveur: string) {
+// Un lieu a-t-il déjà sa photo de référence ?
+const cleLieu = (t: string) => normaliser(t).replace(/[^a-z0-9]+/g, " ").trim();
+const lieuAvecPhoto = (lieu: string, refs: Reference[]) =>
+  refs.some((r) => r.genre === "lieu" && cleLieu(r.nom) === cleLieu(lieu));
+
+// Envoie à RunPod les photos en attente du projet (quelques-unes par appel).
+// Un lieu sans photo de référence : une seule photo part d'abord (le premier plan de ce lieu) ; réussie, elle devient
+// la référence du lieu (voir suivrePhotos) et les suivantes reprennent son décor au lieu d'en inventer un chacune.
+async function envoyerPhotos(
+  supabase: SupabaseClient,
+  projectId: string,
+  enAttente: PhotoSuivie[],
+  parties: PhotoSuivie[],
+  serveur: string,
+) {
   const [{ data: projet }, { data: scenes }, { data: refs }] = await Promise.all([
     supabase.from("projects").select("id, aspect_ratio, style_text").eq("id", projectId).single(),
     supabase
@@ -199,18 +235,37 @@ async function envoyerPhotos(supabase: SupabaseClient, projectId: string, enAtte
     supabase.from("film_refs").select("id, nom, genre, description, image_path").eq("project_id", projectId).order("created_at"),
   ]);
   if (!projet || !scenes) return;
-  for (const photo of enAttente.slice(0, ENVOIS_PAR_APPEL)) {
+  const toutesRefs = (refs ?? []) as Reference[];
+  const lieuDe = (sceneId: string) => scenes.find((s) => s.id === sceneId)?.lieu?.trim() ?? "";
+  const place = (sceneId: string) => scenes.findIndex((s) => s.id === sceneId);
+  // Lieux sans photo dont une photo est déjà partie : leurs autres photos attendent qu'elle revienne
+  const occupes = new Set(parties.map((p) => cleLieu(lieuDe(p.scene_id))).filter((l) => l && !lieuAvecPhoto(l, toutesRefs)));
+  const aEnvoyer: PhotoSuivie[] = [];
+  for (const photo of [...enAttente].sort((a, b) => place(a.scene_id) - place(b.scene_id))) {
+    const lieu = lieuDe(photo.scene_id);
+    if (lieu && !lieuAvecPhoto(lieu, toutesRefs)) {
+      if (occupes.has(cleLieu(lieu))) continue;
+      occupes.add(cleLieu(lieu));
+    }
+    aEnvoyer.push(photo);
+  }
+  for (const photo of aEnvoyer.slice(0, ENVOIS_PAR_APPEL)) {
     const { data: prise } = await supabase
       .from("photos")
       .update({ runpod_job_id: ENVOI })
       .eq("id", photo.id)
       .is("runpod_job_id", null)
-      .select("id, seed, ref_ids")
+      // Toutes les colonnes : les remarques (a_eviter, voulu) sont lues si elles existent dans la base
+      .select("*")
       .maybeSingle();
     if (!prise) continue; // déjà prise par une autre actualisation
     const numero = scenes.findIndex((s) => s.id === photo.scene_id) + 1;
     const plan = scenes[numero - 1];
-    const choisies = (refs ?? []).filter((r) => (prise.ref_ids as string[]).includes(r.id));
+    // Références recalculées à l'envoi : une photo de lieu créée entre-temps est prise ; sinon celles de la demande
+    const recalculees = plan ? referencesCitees(`${plan.image_description} ${plan.lieu ?? ""}`, toutesRefs) : [];
+    const choisies = recalculees.length
+      ? recalculees
+      : toutesRefs.filter((r) => (prise.ref_ids as string[]).includes(r.id));
     try {
       if (!plan || choisies.length === 0) throw new Error("Le plan ou ses photos de référence ont été supprimés.");
       const imagePath = `${projectId}/photos/genere-${photo.id}.jpg`;
@@ -232,6 +287,8 @@ async function envoyerPhotos(supabase: SupabaseClient, projectId: string, enAtte
           lieu: plan.lieu ?? undefined,
           intention: plan.intention ?? undefined,
           pose_debut: plan.pose_debut ?? undefined,
+          a_eviter: prise.a_eviter ?? undefined,
+          voulu: prise.voulu ?? undefined,
           numero,
           total: scenes.length,
           format: projet.aspect_ratio,
@@ -289,7 +346,14 @@ export async function suivrePhotos(
     await Promise.all(
       enAttente.filter((p) => age(p) > ATTENTE_MAX_MS).map((p) => echec(supabase, p.id, "Photo jamais envoyée (page fermée). Relancez-la.")),
     );
-  if (envoyer && !bloque) await envoyerPhotos(supabase, projectId, enAttente.filter((p) => age(p) <= ATTENTE_MAX_MS), serveur);
+  if (envoyer && !bloque)
+    await envoyerPhotos(
+      supabase,
+      projectId,
+      enAttente.filter((p) => age(p) <= ATTENTE_MAX_MS),
+      photos.filter((p) => p.runpod_job_id),
+      serveur,
+    );
 
   // Remet une photo dans notre file (sans numéro RunPod), si elle n'a pas changé entre-temps
   const remettreEnFile = (p: PhotoSuivie) =>
@@ -330,9 +394,27 @@ export async function suivrePhotos(
           })
           .eq("id", p.id),
         supabase.from("scenes").update({ image_path: statut.imagePath }).eq("id", p.scene_id),
+        garderLieu(supabase, projectId, p.scene_id, statut.imagePath),
       ]);
     }),
   );
+}
+
+// Première photo réussie d'un lieu sans photo de référence : elle devient la référence du lieu (comme « Garder ce décor »)
+async function garderLieu(supabase: SupabaseClient, projectId: string, sceneId: string, imagePath: string) {
+  const [{ data: plan }, { data: lieux }] = await Promise.all([
+    supabase.from("scenes").select("lieu").eq("id", sceneId).single(),
+    supabase.from("film_refs").select("id, nom, genre, description, image_path").eq("project_id", projectId).eq("genre", "lieu"),
+  ]);
+  const lieu = plan?.lieu?.trim();
+  if (!lieu || lieuAvecPhoto(lieu, (lieux ?? []) as Reference[])) return;
+  await supabase.from("film_refs").insert({
+    project_id: projectId,
+    nom: lieu.slice(0, 60),
+    genre: "lieu",
+    description: "décor seulement : garder la pièce, les meubles et la lumière, ignorer la personne de cette photo",
+    image_path: imagePath,
+  });
 }
 
 // « Arrêter le lot » : annule chez RunPod les photos parties et retire de la file celles qui attendaient (non facturé).
