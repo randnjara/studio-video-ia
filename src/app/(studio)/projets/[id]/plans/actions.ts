@@ -265,6 +265,27 @@ export async function ajouterReference(projectId: string, formData: FormData) {
   versInfos(projectId, "?reference=1#references");
 }
 
+// Une photo de plan réussie devient la référence de son lieu : les photos suivantes gardent le même décor
+export async function garderDecor(projectId: string, sceneId: string) {
+  const { supabase, profile } = await requireProfile();
+  const { data: plan } = await supabase
+    .from("scenes")
+    .select("lieu, image_path")
+    .eq("id", sceneId)
+    .eq("project_id", projectId)
+    .single();
+  if (!plan?.lieu?.trim() || !plan.image_path) retour(projectId, `?erreur=decor#plan-${sceneId}`);
+  await supabase.from("film_refs").insert({
+    project_id: projectId,
+    nom: plan.lieu.trim().slice(0, 60),
+    genre: "lieu",
+    description: "décor seulement : garder la pièce, les meubles et la lumière, ignorer la personne de cette photo",
+    image_path: plan.image_path,
+    created_by: profile.id,
+  });
+  retour(projectId, `?decor=1#plan-${sceneId}`);
+}
+
 export async function supprimerReference(projectId: string, refId: string) {
   const { supabase } = await requireProfile();
   await supabase.from("film_refs").delete().eq("id", refId).eq("project_id", projectId);

@@ -95,6 +95,7 @@ AVANT DE COMMENCER
 POUR CHAQUE IMAGE
 - Format ${projet.aspect_ratio}, une seule photo réaliste qui remplit tout le cadre : pas de planche, pas de grille, pas de texte, pas de bordure.
 - Suis le prompt du plan à la lettre (cadrage, angle, lieu, pose de départ, lumière).
+- Un même lieu = exactement la même pièce sur toutes les images (murs, meubles, objets à la même place, même lumière) : seuls le cadrage, l'angle et la pose changent. Si une photo du lieu est jointe, recopie ce décor.
 - Nom du fichier : celui indiqué au-dessus du prompt (${nom(debut)}, …), sans le changer.
 
 À LA FIN DU LOT

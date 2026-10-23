@@ -7,7 +7,7 @@ import { signerLiens } from "@/lib/production";
 import { MOTEURS, PRIX_PHOTO_ESTIME_USD, endpointEco, moteursDisponibles } from "@/lib/runpod";
 import { getClient } from "@/lib/session";
 import { promptVerification } from "@/lib/verification";
-import {
+import { garderDecor,
   creerPhotos,
   deplacerPlan,
   envoyerALaGeneration,
@@ -23,6 +23,7 @@ import { CopierLots } from "./copier-lots";
 import { ImportCorrection } from "./import-correction";
 import { CopierVerification } from "./copier-verification";
 import { SuiviPhotos } from "./suivi-photos";
+import { PhotoZoom } from "@/components/photo-zoom";
 
 type Plan = {
   id: string;
@@ -64,6 +65,7 @@ const ERREURS: Record<string, string> = {
     "Aucune photo lancée : chaque description doit citer le nom d'au moins une référence du film (ex. : « Rova marche sur la Plage »).",
   "sans-serveur": "Créez d'abord notre serveur RunPod dans « Équipe et budget ».",
   photo: "La création des photos n'a pas pu démarrer. Réessayez.",
+  decor: "Ce plan n'a pas de lieu ou pas de photo : impossible de garder son décor.",
   "photos-importees": "Les photos n'ont pas pu être rattachées aux plans. Réessayez.",
   correction: "Les plans n'ont pas pu être mis à jour avec le tableau corrigé. Réessayez.",
 };
@@ -142,6 +144,12 @@ export default async function PagePlans({
   const alertes = alertesPlans(plans, MOUVEMENT_PAR_DEFAUT);
   const nbAlertes = [...alertes.values()].reduce((n, a) => n + a.length, 0);
   const lieux = refs.filter((r) => r.genre === "lieu").map((r) => r.nom);
+  // Lieux des plans sans photo de référence : le décor sera réinventé à chaque photo
+  const cleLieu = (t: string) => t.trim().toLowerCase();
+  const lieuxAvecPhoto = new Set(lieux.map(cleLieu));
+  const lieuxSansPhoto = [...new Set(plans.map((p) => p.lieu?.trim()).filter((l): l is string => Boolean(l)))].filter(
+    (l) => !lieuxAvecPhoto.has(cleLieu(l)),
+  );
 
   return (
     <div className="flex flex-col gap-6">
@@ -163,6 +171,16 @@ export default async function PagePlans({
       )}
       {sp.supprime && (
         <p className="message-ok">{Number(sp.supprime) > 1 ? `${sp.supprime} plans supprimés.` : "Plan supprimé."}</p>
+      )}
+      {sp.decor && (
+        <p className="message-ok">Décor gardé : les prochaines photos de ce lieu reprendront cette pièce.</p>
+      )}
+      {lieuxSansPhoto.length > 0 && (
+        <p className="message-erreur">
+          {lieuxSansPhoto.length > 1 ? "Ces lieux n'ont" : "Ce lieu n'a"} pas de photo de référence : {lieuxSansPhoto.join(", ")}.
+          Sans elle, le décor change d'une photo à l'autre. Créez d'abord une photo réussie dans ce lieu, puis cliquez sur
+          « Garder ce décor » sous la photo (ou ajoutez une photo du lieu à l'étape Infos).
+        </p>
       )}
       {sp.photos && Number(sp.photos) > 0 && (
         <p className="message-ok">
@@ -387,8 +405,7 @@ export default async function PagePlans({
 
                     <div className="flex gap-3">
                       {photo ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={photo} alt="" className="aspect-video w-36 shrink-0 rounded-lg object-cover" />
+                        <PhotoZoom src={photo} alt={`Photo du plan ${i + 1}`} className="aspect-video w-36 rounded-lg object-cover" />
                       ) : (
                         <div className="flex aspect-video w-36 shrink-0 items-center justify-center rounded-lg border-2 border-dashed border-alerte/50 text-xs text-alerte">
                           Photo manquante
@@ -401,6 +418,13 @@ export default async function PagePlans({
                           <p className="mt-1 text-xs text-sourdine">
                             🎬 {[plan.cadrage, plan.angle, plan.lieu, plan.intention].filter(Boolean).join(" · ")}
                           </p>
+                        )}
+                        {photo && plan.lieu && !lieuxAvecPhoto.has(cleLieu(plan.lieu)) && (
+                          <form action={garderDecor.bind(null, id, plan.id)} className="mt-1">
+                            <BoutonEnvoi className="bouton-discret px-2 py-0.5 text-xs" enCours="…">
+                              📌 Garder ce décor pour « {plan.lieu} »
+                            </BoutonEnvoi>
+                          </form>
                         )}
                       </div>
                     </div>
