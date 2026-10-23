@@ -30,10 +30,18 @@ export async function inviterMembre(formData: FormData) {
   if (!email) redirect("/equipe?erreur=email-vide");
 
   const admin = createAdminClient();
-  const { error } = await admin.auth.admin.inviteUserByEmail(email, {
-    data: { display_name: nom || email.split("@")[0] },
-    redirectTo: `${await siteUrl()}/connexion`,
-  });
+  const data = { display_name: nom || email.split("@")[0] };
+  const { error } = await admin.auth.admin.inviteUserByEmail(email, { data, redirectTo: `${await siteUrl()}/connexion` });
+  if (error && (error.status === 429 || error.code === "over_email_send_rate_limit")) {
+    // Limite d'e-mails atteinte : le compte est créé sans e-mail, le responsable envoie lui-même le lien de connexion
+    const cree = await admin.auth.admin.generateLink({ type: "invite", email, options: { data } });
+    if (cree.error || !cree.data.user)
+      redirect(`/equipe?erreur=invitation&detail=${encodeURIComponent(cree.error?.message ?? "")}`);
+    await noterConnexion(email, "compte-cree-sans-email", profile.display_name);
+    await journaliser(supabase, profile.id, "invitation", "membre", cree.data.user.id, { email });
+    revalidatePath("/equipe");
+    redirect(`/equipe?sans-email=${encodeURIComponent(email)}&membre=${cree.data.user.id}#membre-${cree.data.user.id}`);
+  }
   if (error) redirect(`/equipe?erreur=invitation&detail=${encodeURIComponent(error.message)}`);
 
   await journaliser(supabase, profile.id, "invitation", "membre", null, { email });
@@ -123,11 +131,13 @@ export async function creerLienConnexion(userId: string): Promise<{ lien?: strin
   const admin = createAdminClient();
   const { data: u } = await admin.auth.admin.getUserById(userId);
   if (!u.user?.email) return { erreur: "Membre introuvable." };
-  const { data, error } = await admin.auth.admin.generateLink({ type: "magiclink", email: u.user.email });
+  // Compte jamais ouvert : lien d'invitation ; sinon lien de connexion
+  const type = u.user.email_confirmed_at ? "magiclink" : "invite";
+  const { data, error } = await admin.auth.admin.generateLink({ type, email: u.user.email });
   if (error || !data.properties?.hashed_token) return { erreur: error?.message ?? "Lien non créé." };
   await journaliser(supabase, profile.id, "lien-connexion", "membre", userId, { email: u.user.email });
   await noterConnexion(u.user.email, "lien-cree-par-responsable", profile.display_name);
-  return { lien: `${await siteUrl()}/auth/confirm?token_hash=${data.properties.hashed_token}&type=magiclink` };
+  return { lien: `${await siteUrl()}/auth/confirm?token_hash=${data.properties.hashed_token}&type=${type}` };
 }
 
 // Renvoie par e-mail l'invitation (compte jamais ouvert) ou un lien de connexion
