@@ -4,13 +4,14 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { journaliser } from "@/lib/journal";
 import { noterConnexion } from "@/lib/journal-connexion";
-import { CLE_ENDPOINT, CLE_ENDPOINT_PHOTO, CLE_VOLUME, endpointEco } from "@/lib/runpod";
+import { CLE_ENDPOINT, CLE_ENDPOINT_PHOTO, CLE_ENDPOINT_VOIX, CLE_VOLUME, endpointEco } from "@/lib/runpod";
 import {
   CLE_CACHE_PHOTO,
   CLE_CACHE_VIDEO,
   ajouterStockage,
   creerServeur,
   creerServeursCache,
+  creerServeurVoix,
   supprimerAncienServeurEtDisque,
 } from "@/lib/runpod-admin";
 import { requireProfile } from "@/lib/session";
@@ -79,6 +80,24 @@ export async function changerRole(userId: string, role: "responsable" | "membre"
   await supabase.from("profiles").update({ role }).eq("id", userId);
   await journaliser(supabase, profile.id, "role", "membre", userId, { role });
   revalidatePath("/equipe");
+}
+
+// Crée le serveur du studio voix (petite carte, sa propre image) et garde son identifiant dans les réglages
+export async function creerServeurVoixAction() {
+  const { supabase, profile } = await requireResponsable();
+  let id: string;
+  try {
+    id = await creerServeurVoix();
+  } catch (e) {
+    redirect(`/equipe?erreur=serveur-voix&detail=${encodeURIComponent(e instanceof Error ? e.message : String(e))}#voix`);
+  }
+  const { error } = await supabase
+    .from("reglages")
+    .upsert({ cle: CLE_ENDPOINT_VOIX, valeur: id, updated_at: new Date().toISOString() });
+  if (error) redirect(`/equipe?erreur=serveur-voix&detail=${encodeURIComponent(error.message)}#voix`);
+  await journaliser(supabase, profile.id, "creation-serveur-voix", "reglage", null, { endpoint_id: id });
+  revalidatePath("/", "layout");
+  redirect("/equipe?voix=1#voix");
 }
 
 // Crée notre serveur de génération économique chez RunPod et garde son identifiant dans les réglages

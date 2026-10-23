@@ -9,6 +9,7 @@ export default async function StudioLayout({ children }: { children: React.React
 
   const entrees: Entree[] = [
     { href: "/", libelle: "Projets", icone: "🎬" },
+    { href: "/voix", libelle: "Voix", icone: "🎙" },
     ...(profile.role === "responsable" ? [{ href: "/equipe", libelle: "Équipe et budget", icone: "👥" }] : []),
   ];
 

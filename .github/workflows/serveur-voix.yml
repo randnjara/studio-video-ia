@@ -1,0 +1,44 @@
+# Construit l'image du serveur du studio voix (dossier worker-voix/) et la publie sur GitHub Container Registry,
+# pour que RunPod puisse la télécharger : ghcr.io/randnjara/studio-video-ia-voix
+name: Serveur voix
+
+on:
+  push:
+    branches: [main]
+    paths: ["worker-voix/**", ".github/workflows/serveur-voix.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      # L'image de base PyTorch est grosse : on libère de la place sur la machine de construction
+      - name: Libérer de l'espace disque
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          docker system prune -af
+          df -h /
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+      # Numéro de version lu par le studio, qui bascule le serveur voix sur la nouvelle image
+      - name: Version
+        id: version
+        run: echo "v=$(cat worker-voix/VERSION)" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: worker-voix
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}-voix:latest
+            ghcr.io/${{ github.repository }}-voix:${{ github.sha }}
+            ghcr.io/${{ github.repository }}-voix:v${{ steps.version.outputs.v }}
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}

@@ -38,6 +38,14 @@ export const endpointEco = cache(async (): Promise<string | null> => {
   return data?.valeur || null;
 });
 
+// Serveur du studio voix (dossier worker-voix/), sur une petite carte graphique
+export const CLE_ENDPOINT_VOIX = "runpod_endpoint_voix";
+export const endpointVoix = cache(async (): Promise<string | null> => {
+  const supabase = await getClient();
+  const { data } = await supabase.from("reglages").select("valeur").eq("cle", CLE_ENDPOINT_VOIX).maybeSingle();
+  return data?.valeur || null;
+});
+
 export const endpointPhoto = cache(async (): Promise<string | null> => {
   const supabase = await getClient();
   const { data } = await supabase.from("reglages").select("valeur").eq("cle", CLE_ENDPOINT_PHOTO).maybeSingle();
@@ -72,15 +80,20 @@ export function cle() {
   return k;
 }
 
-// « photo » : notre serveur des photos de départ
-type Cible = Moteur | "photo";
+// « photo » : notre serveur des photos de départ ; « voix » : celui du studio voix
+type Cible = Moteur | "photo" | "voix";
 
 // « serveur » : identifiant déjà lu, pour ne pas relire la base à chaque appel (Cloudflare limite le nombre
 // d'appels extérieurs par requête)
 async function base(moteur: Cible, serveur?: string) {
   if (moteur === "qualite") return PUBLIC;
-  const id = serveur ?? (moteur === "photo" ? await endpointPhoto() : await endpointEco());
-  if (!id) throw new Error("Notre serveur RunPod n'est pas encore créé (voir « Équipe et budget »).");
+  const id = serveur ?? (moteur === "photo" ? await endpointPhoto() : moteur === "voix" ? await endpointVoix() : await endpointEco());
+  if (!id)
+    throw new Error(
+      moteur === "voix"
+        ? "Le serveur voix n'est pas encore créé (voir « Équipe et budget »)."
+        : "Notre serveur RunPod n'est pas encore créé (voir « Équipe et budget »).",
+    );
   return `https://api.runpod.ai/v2/${encodeURIComponent(id)}`;
 }
 
@@ -162,6 +175,41 @@ export async function lancerPhotoRunPod(p: {
   return String(data.id);
 }
 
+// Voix (texte → voix, ou enregistrement transformé) sur le serveur voix. Une carte de 16 à 24 Go suffit :
+// prix d'une seconde de GPU estimé au plus cher de ces cartes, recalculé ensuite à partir du temps réel.
+export const PRIX_SECONDE_VOIX = Number(process.env.RUNPOD_PRIX_SECONDE_VOIX ?? 0.00031);
+export const PRIX_VOIX_ESTIME_USD = 0.01;
+
+export async function lancerVoixRunPod(input: {
+  moteur: "mms" | "kokoro" | "chatterbox" | "conversion";
+  modele: string;
+  texte: string;
+  emotion: number;
+  seed: number;
+  referenceUrl?: string;
+  sourceUrl?: string;
+  audioPath: string;
+  uploadUrl: string;
+}): Promise<string> {
+  const data = await appel("voix", "/run", {
+    method: "POST",
+    body: JSON.stringify({
+      input: {
+        moteur: input.moteur,
+        modele: input.modele,
+        texte: input.texte,
+        emotion: input.emotion,
+        seed: input.seed,
+        reference_url: input.referenceUrl,
+        source_url: input.sourceUrl,
+        audio_path: input.audioPath,
+        upload_url: input.uploadUrl,
+      },
+    }),
+  });
+  return String(data.id);
+}
+
 export type StatutRunPod =
   // « enFile » : RunPod ne l'a pas encore commencée (on peut l'annuler sans rien perdre)
   | { etat: "en_cours"; enFile: boolean }
@@ -171,6 +219,8 @@ export type StatutRunPod =
       videoUrl?: string;
       videoPath?: string;
       imagePath?: string;
+      audioPath?: string;
+      duree?: number;
       coutUsd: number | null;
       secondes: number | null;
     }
@@ -184,7 +234,10 @@ export async function lireStatut(moteur: Cible, jobId: string, serveur?: string)
       const secondes = typeof data.executionTime === "number" ? data.executionTime / 1000 : null;
       if (data.output?.error) return { etat: "echouee", erreur: String(data.output.error).slice(0, 500) };
       if (moteur !== "qualite") {
-        const coutUsd = secondes !== null ? Math.round(secondes * PRIX_SECONDE_GPU * 10000) / 10000 : null;
+        const prix = moteur === "voix" ? PRIX_SECONDE_VOIX : PRIX_SECONDE_GPU;
+        const coutUsd = secondes !== null ? Math.round(secondes * prix * 10000) / 10000 : null;
+        if (data.output?.audio_path)
+          return { etat: "terminee", audioPath: String(data.output.audio_path), duree: Number(data.output.duree) || undefined, secondes, coutUsd };
         if (data.output?.image_path) return { etat: "terminee", imagePath: String(data.output.image_path), secondes, coutUsd };
         if (!data.output?.video_path) return { etat: "echouee", erreur: "Le serveur n'a pas renvoyé de vidéo." };
         return { etat: "terminee", videoPath: String(data.output.video_path), secondes, coutUsd };

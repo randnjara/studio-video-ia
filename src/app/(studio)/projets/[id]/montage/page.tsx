@@ -42,7 +42,7 @@ export default async function PageMontage({
   const sp = await searchParams;
   const supabase = await getClient();
 
-  const [{ data: scenes }, { data: projet }, montages] = await Promise.all([
+  const [{ data: scenes }, { data: projet }, montages, { data: voixStudio }] = await Promise.all([
     supabase
       .from("scenes")
       .select("id, position, duration_s, voiceover_text, image_path, validated_take_id, takes!takes_scene_id_fkey(id, video_path)")
@@ -50,6 +50,13 @@ export default async function PageMontage({
       .order("position"),
     supabase.from("projects").select("aspect_ratio").eq("id", id).single(),
     lireMontages(supabase, id),
+    // Voix du studio voix (la version mixée si elle existe) ; sans la migration 0014, la liste reste vide
+    supabase
+      .from("voix_creations")
+      .select("nom, audio_path, mixage_path, duree_s")
+      .eq("project_id", id)
+      .eq("status", "terminee")
+      .order("created_at", { ascending: false }),
   ]);
   const format = (projet?.aspect_ratio as string) ?? "9:16";
 
@@ -73,6 +80,12 @@ export default async function PageMontage({
   });
   const enMedia = (c: Clip): Media => ({ chemin: c.videoPath!, nature: "video", nom: `Plan ${c.planNumero}`, duree: c.duree, takeId: c.takeId });
   const medias = disponibles.map(enMedia);
+  const voix: Media[] = (voixStudio ?? []).flatMap((v) => {
+    const chemin = (v.mixage_path ?? v.audio_path) as string | null;
+    return chemin
+      ? [{ chemin, nature: "audio" as const, nom: `${v.nom || "Voix"}${v.mixage_path ? " (mixée)" : ""}`, duree: v.duree_s !== null ? Number(v.duree_s) : null }]
+      : [];
+  });
 
   // L'éditeur s'ouvre sur un montage à la fois (le plus récent par défaut)
   const ouvert = montages.find((m) => m.id === sp.ouvert) ?? montages[0];
@@ -88,6 +101,7 @@ export default async function PageMontage({
   const liens = await signerLiens(supabase, [
     ...disponibles.map((c) => c.videoPath),
     ...photos.map((p) => p.chemin),
+    ...voix.map((v) => v.chemin),
     ...(timeline ? [...timeline.bibliotheque.map((m) => m.chemin), ...timeline.pistes.flatMap((p) => p.elements.map((e) => e.chemin))] : []),
   ]);
   const message = Object.keys(MESSAGES).find((k) => sp[k]);
@@ -199,6 +213,7 @@ export default async function PageMontage({
                   initiale={timeline}
                   clips={medias}
                   photos={photos}
+                  voix={voix}
                   liensInitiaux={Object.fromEntries(liens)}
                 />
                 <div className="flex flex-wrap items-start gap-4">

@@ -1,0 +1,11 @@
+# Versions figées pour que chaque reconstruction donne le même serveur voix.
+# torch 2.6.0 est déjà dans l'image de base (Chatterbox demande cette version).
+chatterbox-tts==0.1.7
+transformers==5.2.0
+kokoro==0.9.4
+misaki[en,zh]==0.9.4
+librosa==0.11.0
+soundfile==0.14.0
+requests==2.34.2
+runpod==1.10.0
+hf_transfer==0.1.9

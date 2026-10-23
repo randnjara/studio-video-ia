@@ -69,6 +69,23 @@ Un démarrage « à froid » se produit au premier clip, puis après chaque paus
 
 Le même serveur crée aussi les **photos de départ** des plans avec Qwen-Image-Edit (licence Apache 2.0, version rapide en 4 étapes, quelques centimes la photo). À l'étape Infos, ajoutez les **photos de référence** (une photo et un nom court par personnage, lieu ou objet), écrivez la description de la photo de chaque plan en citant ces noms, cochez les plans puis cliquez sur **🖼 Créer les photos** : toutes les photos partent d'un coup, avec les mêmes visages et décors. Envoyez de préférence les photos d'abord, puis les vidéos, pour que le serveur ne change pas de modèle à chaque fois.
 
+## 7. Studio voix (RunPod)
+
+Le studio voix a son propre petit serveur (dossier `worker-voix/`), sur une carte de 16 à 24 Go, bien moins chère que celle des vidéos : moins d'un centime par minute de voix, rien quand il ne tourne pas. Les modèles sont rangés dans l'image, donc rien à télécharger au démarrage.
+
+| Modèle | Ce qu'il fait | Licence |
+| --- | --- | --- |
+| Meta MMS (`facebook/mms-tts-mlg`) | Texte → voix en **malgache** (une seule voix) | CC-BY-NC 4.0 : **pas d'usage commercial** |
+| Kokoro 82M | Une cinquantaine de voix toutes prêtes : anglais US et UK, français, espagnol, chinois, italien, portugais, hindi | Apache 2.0 |
+| Chatterbox multilingue | 23 langues, émotion réglable, voix d'une personne copiée à partir de 10 à 30 s d'enregistrement | MIT |
+| Chatterbox VC | Change le timbre d'une voix (enregistrement, ou voix MMS en malgache) en gardant les mots | MIT |
+
+1. Appliquez la migration `supabase/migrations/0014_voix.sql` (SQL Editor → coller → **Run**) : catalogue des voix, voix par défaut, voix créées dans les projets, et budget du mois qui compte aussi les voix.
+2. Après la fusion dans `main`, GitHub construit l'image `ghcr.io/randnjara/studio-video-ia-voix` (`.github/workflows/serveur-voix.yml`, environ 20 minutes la première fois). Rendez ce paquet **public** comme celui du serveur vidéo : GitHub → profil → **Packages** → `studio-video-ia-voix` → **Package settings** → **Change visibility** → **Public**.
+3. Page **Équipe et budget** → **Créer le serveur voix**. Son identifiant est gardé dans la table `reglages` (`runpod_endpoint_voix`). « Arrêter le serveur » l'arrête aussi.
+
+Ensuite : menu **Voix** pour le catalogue et pour ajouter la voix d'une personne (avec son accord), et lien **🎙 Studio voix** en haut de chaque projet pour créer les voix, les régler dans la table de mixage (calculée par le navigateur, gratuite) et les envoyer au montage.
+
 ## Vérifications
 
 - [ ] Je me connecte et je vois « Responsable » en haut à droite.

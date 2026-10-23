@@ -32,7 +32,24 @@ async function cartes80Go(): Promise<string[]> {
   return ids.length > 0 ? ids : ["NVIDIA A100 80GB PCIe", "NVIDIA A100-SXM4-80GB", "NVIDIA H100 80GB HBM3", "NVIDIA H100 PCIe"];
 }
 
-export async function creerServeur(nom = NOM, nomModele = NOM, image = IMAGE_SERVEUR): Promise<string> {
+// Le studio voix tient sur une petite carte (16 à 24 Go), bien moins chère
+async function cartesVoix(): Promise<string[]> {
+  const res = await fetch("https://api.runpod.io/graphql", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${cle()}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ query: "query { gpuTypes { id memoryInGb } }" }),
+  });
+  const data = (await res.json().catch(() => null)) as { data?: { gpuTypes?: { id: string; memoryInGb: number }[] } } | null;
+  const ids = (data?.data?.gpuTypes ?? []).filter((g) => g.memoryInGb >= 16 && g.memoryInGb <= 24).map((g) => g.id);
+  return ids.length > 0 ? ids : ["NVIDIA RTX A4000", "NVIDIA RTX A4500", "NVIDIA RTX A5000", "NVIDIA GeForce RTX 4090", "NVIDIA L4"];
+}
+
+export async function creerServeur(
+  nom = NOM,
+  nomModele = NOM,
+  image = IMAGE_SERVEUR,
+  options: { cartes?: string[]; disqueGo?: number; maxMachines?: number } = {},
+): Promise<string> {
   // Réutilise le modèle de serveur s'il existe déjà (par exemple après un premier essai interrompu)
   const modeles = ((await rest("/templates").catch(() => [])) ?? []) as { id: string; name: string }[];
   let modele = modeles.find((m) => m.name === nomModele);
@@ -43,7 +60,7 @@ export async function creerServeur(nom = NOM, nomModele = NOM, image = IMAGE_SER
         name: nomModele,
         imageName: image,
         isServerless: true,
-        containerDiskInGb: 150,
+        containerDiskInGb: options.disqueGo ?? 150,
         env: {},
       }),
     });
@@ -59,10 +76,10 @@ export async function creerServeur(nom = NOM, nomModele = NOM, image = IMAGE_SER
     body: JSON.stringify({
       name: nom,
       templateId: modele.id,
-      gpuTypeIds: await cartes80Go(),
+      gpuTypeIds: options.cartes ?? (await cartes80Go()),
       gpuCount: 1,
       workersMin: 0, // rien n'est payé quand rien ne tourne
-      workersMax: 2,
+      workersMax: options.maxMachines ?? 2,
       idleTimeout: 30, // garde le serveur 30 s après un clip, pour enchaîner une série sans redémarrer
       executionTimeoutMs: 900_000,
       scalerType: "QUEUE_DELAY",
@@ -72,6 +89,28 @@ export async function creerServeur(nom = NOM, nomModele = NOM, image = IMAGE_SER
   });
   if (!endpoint?.id) throw new Error("RunPod n'a pas renvoyé d'identifiant de serveur.");
   return String(endpoint.id);
+}
+
+// Serveur du studio voix (dossier worker-voix/) : sa propre image, construite par GitHub
+// (.github/workflows/serveur-voix.yml). À augmenter avec worker-voix/VERSION.
+export const VERSION_SERVEUR_VOIX = "1";
+const IMAGE_VOIX = `ghcr.io/randnjara/studio-video-ia-voix:v${VERSION_SERVEUR_VOIX}`;
+const NOM_VOIX = "studio-voix";
+
+export async function creerServeurVoix(): Promise<string> {
+  // Les modèles de voix sont déjà dans l'image : un petit disque suffit
+  return creerServeur(NOM_VOIX, NOM_VOIX, IMAGE_VOIX, { cartes: await cartesVoix(), disqueGo: 30, maxMachines: 1 });
+}
+
+export async function mettreAJourServeurVoix(supabase: SupabaseClient, endpointId: string) {
+  const cleImage = `${CLE_IMAGE}:${endpointId}`;
+  const { data } = await supabase.from("reglages").select("valeur").eq("cle", cleImage).maybeSingle();
+  if (data?.valeur === IMAGE_VOIX) return;
+  await v2(`/v2/serverless/${encodeURIComponent(endpointId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ image: IMAGE_VOIX }),
+  });
+  await supabase.from("reglages").upsert({ cle: cleImage, valeur: IMAGE_VOIX });
 }
 
 // Stockage du modèle chez RunPod (« network volume ») : le modèle reste sur ce disque entre deux pauses,
