@@ -79,8 +79,13 @@ RÉSUMÉ / BUT DU FILM : ${p.resume?.trim() || "(non donné : déduis-le de la v
 STYLE DU FILM (le studio l'ajoute lui-même à chaque photo : ne le répète jamais dans les cellules) : ${p.style.trim() || "(à proposer en partie A)"}
 PERSONNAGES (noms à écrire exactement ainsi) : ${parGenre("personnage")}
 LIEUX AUTORISÉS (noms à écrire exactement ainsi, aucun autre lieu) : ${parGenre("lieu")}
-Si aucun lieu n'est donné : choisis toi-même le MOINS de lieux possible (souvent un seul ; 3 au plus pour 3 minutes), donne-leur un nom court, et utilise uniquement ces noms dans tout le tableau.
-OBJETS : ${parGenre("objet")}
+Si aucun lieu n'est donné : choisis toi-même le MOINS de lieux possible (UN SEUL pour un film de 2 minutes ou moins ; 3 au plus pour 3 minutes), donne-leur un nom court, et utilise uniquement ces noms dans tout le tableau.
+${
+    p.refs.some((r) => r.genre === "produit")
+      ? `PRODUIT À PROMOUVOIR (film de promotion, nom à écrire exactement ainsi) : ${[...new Set(p.refs.filter((r) => r.genre === "produit").map((r) => `${r.nom}${r.description ? ` (${r.description})` : ""}`))].join(", ")}
+`
+      : ""
+  }OBJETS : ${parGenre("objet")}
 
 === VOIX OFF ===
 ${p.script.trim() || "Je te la donne juste après cette consigne (ou en fichier joint), telle quelle."}
@@ -109,6 +114,12 @@ Lis le résumé et toute la voix off. Repère l'histoire, les moments forts, les
 - On GARDE L'AXE : la caméra reste du même côté de la personne pendant toute la séquence (règle des 180°), le regard part toujours du même côté.
 - RYTHME : plans plus courts et plus serrés sur les moments forts (surprise, émotion, chiffre important) ; plans plus longs et plus larges pour présenter ou conclure.
 - Dans un même lieu, la pièce, les meubles, les objets et la lumière ne bougent jamais : seuls le cadrage, l'angle, la pose et le geste changent.
+- Un film de 1 à 2 minutes est trop court pour changer de lieu : UN SEUL lieu. Ce qui fait vivre le film, c'est le GESTE (et le cadrage), pas le décor.${
+    p.refs.some((r) => r.genre === "produit")
+      ? `
+- FILM DE PROMOTION : le produit est la vedette. Il apparaît clairement dès qu'on en parle, et au moins dans le premier plan où il est cité, dans un gros plan du produit seul et dans le plan de fin. Écris son nom exact dans « prompt_image » de chaque plan où il est visible (sinon sa photo n'est pas utilisée). Les gestes le montrent et l'utilisent (le présenter, l'allumer, poser la casserole dessus…), mains bien visibles, sans le cacher. Il ne change jamais de forme, de couleur ni de logo.`
+      : ""
+  }
 
 === ÉTAPE 2 — RÈGLES DU TABLEAU ===
 1. DÉCOUPAGE. Découpe toi-même la voix off en plans, dans l'ordre : un plan = une réplique, ou un morceau de réplique coupé à une pause naturelle (fin de phrase, virgule, respiration). Chaque mot prononcé apparaît une seule fois dans « voix », sans traduction, correction ni oubli, dans sa langue d'origine. Les titres, numéros, noms de locuteur et indications de mise en scène ne sont pas des paroles : ne les mets pas dans « voix », sers-t'en pour l'intention et les gestes. Un plan sans parole (respiration, regard, transition) est permis : « voix » vide.
@@ -129,7 +140,7 @@ Relis tout le tableau et corrige-le jusqu'à ce que tout soit vrai :
 - Numéros continus ; aucune durée au-dessus de 5 ; chaque durée tient sa parole (mots ÷ 2,5 ≤ durée) ; « debut » et « fin » se suivent sans trou.
 - Aucun couple cadrage + angle répété deux plans de suite ; aucun geste ni pose_fin répété dans 10 plans voisins ; aucune pose_fin identique dans tout le film.
 - Chaque pose_debut raccorde avec la pose_fin précédente, ou la coupe franche est évidente.
-- Le moins de lieux possible ; aucun changement de lieu au milieu d'une phrase ; aucun lieu tenu un seul plan ; même pièce, même lumière dans tout un lieu.
+- Le moins de lieux possible (un seul pour 2 minutes ou moins) ; aucun changement de lieu au milieu d'une phrase ; aucun lieu tenu un seul plan ; même pièce, même lumière dans tout un lieu.
 - « prompt_image » et « prompt_video » remplis sur CHAQUE ligne, en anglais, sans phrase générale recopiée ; noms des personnages et des lieux exactement comme dans les listes ; au plus 3 références citées par plan.
 - Le fichier est complet jusqu'au dernier plan, quel que soit le nombre de plans.
 

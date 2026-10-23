@@ -256,13 +256,14 @@ export async function ajouterReference(projectId: string, formData: FormData) {
   const { error } = await supabase.from("film_refs").insert({
     project_id: projectId,
     nom: nom.slice(0, 60),
-    genre: ["personnage", "lieu", "objet", "style"].includes(genre) ? genre : "personnage",
+    genre: ["personnage", "lieu", "produit", "objet", "style"].includes(genre) ? genre : "personnage",
     description: String(formData.get("description") ?? "").trim().slice(0, 300),
     image_path: image,
     created_by: profile.id,
   });
-  if (error) versInfos(projectId, "?erreur=reference#references");
-  versInfos(projectId, "?reference=1#references");
+  const ancre = genre === "produit" ? "#produit" : "#references";
+  if (error) versInfos(projectId, `?erreur=reference${ancre}`);
+  versInfos(projectId, `?reference=1${ancre}`);
 }
 
 // Une photo de plan réussie devient la référence de son lieu : les photos suivantes gardent le même décor

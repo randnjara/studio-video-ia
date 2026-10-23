@@ -77,6 +77,8 @@ export default async function PageProjet({
   const refs = refsLues ?? [];
   const liens = await signerLiens(supabase, refs.map((r) => r.image_path));
   const sansPersonnage = !refs.some((r) => r.genre === "personnage");
+  const produits = refs.filter((r) => r.genre === "produit");
+  const autresRefs = refs.filter((r) => r.genre !== "produit");
 
   // Ce qu'il faut faire maintenant
   const base = `/projets/${id}`;
@@ -245,9 +247,9 @@ export default async function PageProjet({
           {sansPersonnage && (
             <p className="text-sm text-alerte">Ajoutez la photo du personnage principal (type « Personnage »).</p>
           )}
-          {refs.length > 0 && (
+          {autresRefs.length > 0 && (
             <ul className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              {refs.map((r) => (
+              {autresRefs.map((r) => (
                 <li key={r.id} className="flex flex-col gap-1 text-sm">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
@@ -275,6 +277,51 @@ export default async function PageProjet({
             <summary className="cursor-pointer font-semibold">＋ Ajouter une photo de référence</summary>
             <div className="mt-4">
               <AjoutReference projectId={id} />
+            </div>
+          </details>
+        </section>
+
+        {/* Film de promotion : 2 ou 3 photos du produit, toutes sous le même nom, utilisées dans chaque plan qui le cite */}
+        <section className="carte flex scroll-mt-4 flex-col gap-4" id="produit">
+          <div>
+            <h2 className="text-lg font-bold">Produit à promouvoir</h2>
+            <p className="text-sm text-sourdine">
+              Seulement pour un film de promotion. Ajoutez 2 ou 3 photos du produit (de face, de côté, en marche), toutes avec le même
+              nom exact : l'assistant le met en vedette et le studio garde la même forme, les mêmes couleurs et le même logo sur tous les
+              plans.
+            </p>
+          </div>
+          {produits.length === 1 && <p className="text-sm text-alerte">Ajoutez encore 1 ou 2 photos du produit, sous un autre angle.</p>}
+          {produits.length > 0 && (
+            <ul className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {produits.map((r) => (
+                <li key={r.id} className="flex flex-col gap-1 text-sm">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={liens.get(r.image_path)}
+                    alt={r.nom}
+                    className="aspect-square w-full rounded-lg border border-ligne object-cover"
+                  />
+                  <div className="flex items-center gap-1">
+                    <span className="min-w-0 flex-1 truncate font-semibold">{r.nom}</span>
+                    <form action={supprimerReference.bind(null, id, r.id)}>
+                      <BoutonEnvoi className="lien text-xs" enCours="…" confirmer={`Retirer la référence « ${r.nom} » ?`}>
+                        Retirer
+                      </BoutonEnvoi>
+                    </form>
+                  </div>
+                  <span className="text-xs text-sourdine">
+                    {GENRES[r.genre] ?? r.genre}
+                    {r.description ? ` · ${r.description}` : ""}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <details className="rounded-lg border border-ligne p-4" open={produits.length > 0 && produits.length < 3}>
+            <summary className="cursor-pointer font-semibold">＋ Ajouter une photo du produit</summary>
+            <div className="mt-4">
+              <AjoutReference projectId={id} produit={produits[0]?.nom ?? ""} />
             </div>
           </details>
         </section>
