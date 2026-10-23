@@ -2,8 +2,8 @@ import { ANGLES, CADRAGES } from "@/lib/libelles";
 
 // Prompt de préparation : à coller dans un assistant gratuit (ChatGPT, Claude, Gemini…) avec la photo principale.
 // Il découpe la voix off en plans et remplit le fichier vide du studio (format standard, CSV), qui se réimporte tel quel.
-// Les règles reprennent les erreurs vues sur le Projet Mama : gestes en boucle, poses de fin toutes identiques,
-// texte répété dans chaque prompt, lieux qui changent d'un fichier à l'autre, consignes vidéo pas en anglais.
+// Les règles reprennent les erreurs vues sur le Projet Mama, sans rien de propre à ce projet : gestes en boucle, poses de fin
+// toutes identiques, texte répété dans chaque prompt, lieux qui changent d'un fichier à l'autre, consignes vidéo pas en anglais.
 
 export const COLONNES_STANDARD = [
   "numero",
@@ -36,46 +36,57 @@ export function promptPreparation(p: {
     p.refs
       .filter((r) => r.genre === g)
       .map((r) => `${r.nom}${r.description ? ` (${r.description})` : ""}`)
-      .join(", ") || "(aucune pour l'instant : propose-en dans ta réponse, avant le tableau)";
+      .join(", ") || "(aucun pour l'instant : propose-les en partie A)";
+  const colonnes = COLONNES_STANDARD.join(";");
 
-  return `Tu es réalisateur et scripte sur un film fait entièrement en vidéo générée par IA, image par image.
-Je te joins la ou les photos de référence du personnage principal, la voix off et le fichier à remplir. Prépare le tableau des plans du film au format standard de mon studio.
+  return `Tu es à la fois réalisateur, scripte et directeur photo sur un film fait entièrement en vidéo générée par IA, plan par plan.
+Je te joins : la ou les photos de référence du personnage principal, la voix off du film, et le fichier vide « ${FICHIER_A_REMPLIR} ».
+Ta mission : remplir ce fichier avec TOUT ce dont mon studio a besoin pour fabriquer le film, en une seule fois, avec un niveau de qualité professionnel. Je l'importerai tel quel : rien ne sera corrigé à la main après toi.
 
 FILM : « ${p.titre} » — format ${p.format}
-STYLE DU FILM (déjà ajouté automatiquement à chaque photo, ne le répète pas) : ${p.style.trim() || "(à proposer)"}
-PERSONNAGES (noms à citer tels quels) : ${parGenre("personnage")}
-LIEUX AUTORISÉS (noms à utiliser tels quels, aucun autre lieu) : ${parGenre("lieu")}
+STYLE DU FILM (le studio l'ajoute lui-même à chaque photo : ne le répète jamais dans les cellules) : ${p.style.trim() || "(à proposer en partie A)"}
+PERSONNAGES (noms à écrire exactement ainsi) : ${parGenre("personnage")}
+LIEUX AUTORISÉS (noms à écrire exactement ainsi, aucun autre lieu) : ${parGenre("lieu")}
 OBJETS : ${parGenre("objet")}
 
 === VOIX OFF ===
 ${p.script.trim() || "Je te la donne juste après cette consigne (ou en fichier joint), telle quelle."}
 
-=== FICHIER À REMPLIR ===
-Je te joins aussi le fichier vide « ${FICHIER_A_REMPLIR} ». Sa première ligne contient les colonnes : ${COLONNES_STANDARD.join(";")}
-Remplis-le : une ligne par plan.
+=== COMMENT MON STUDIO UTILISE TON FICHIER ===
+- Chaque ligne = un plan. Le studio crée d'abord la photo de départ (Qwen-Image-Edit) à partir de « description » et des photos de référence, puis l'anime avec « mouvement » (Wan 2.2, image vers vidéo), sur la durée « duree ».
+- Une photo de référence n'est utilisée que si son nom est écrit dans « description » ou dans « lieu ». Au maximum 3 références par plan (par exemple 2 personnages + 1 lieu).
+- Le studio ajoute LUI-MÊME à chaque photo : même visage, même âge, même tenue que la référence, style du film, image plein cadre sans texte ni bande floue, anatomie correcte des mains. Et à chaque vidéo : visage stable, gestes naturels, pas de déformation.
+- Donc tes cellules ne contiennent QUE ce qui est propre au plan. Jamais de phrase générale recopiée de ligne en ligne (« photorealistic », « 4K », « same face », « cinematic lighting »…).
+- Après l'import, le studio signale automatiquement : gestes ou poses de fin répétés sur 10 plans voisins, même cadrage + angle deux plans de suite, voix trop longue pour la durée, consignes vidéo pas en anglais. Vise zéro alerte.
 
-=== COMMENT FONCTIONNE MON STUDIO ===
-- Chaque plan = une photo de départ créée à partir des références (Qwen-Image-Edit), puis animée 5 s par Wan 2.2 « image vers vidéo ».
-- Le studio ajoute LUI-MÊME à chaque photo : le respect du visage, de l'âge et de la tenue, le style du film, le plein cadre sans texte ni bande floue, l'anatomie des mains. Et à chaque vidéo : visage stable, gestes subtils, pas de déformation.
-- Donc tes colonnes ne contiennent QUE ce qui est propre au plan. Ne répète jamais ces règles générales dans les cellules.
+=== ÉTAPE 1 — ANALYSE (dans ta tête, avant d'écrire) ===
+Lis toute la voix off. Repère l'histoire, les moments forts, les changements d'émotion et les séquences (groupes de plans dans un même lieu et une même lumière). Décide la carte des lieux et l'ordre des séquences. Ce plan d'ensemble guide tout le tableau : un film, pas une suite de plans isolés.
 
-=== RÈGLES DU TABLEAU ===
-1. Découpe toi-même la voix off en plans, dans l'ordre : un plan = une réplique, ou un morceau de réplique coupé à une pause naturelle (fin de phrase, virgule). Chaque mot prononcé apparaît une seule fois dans « voix », sans traduction, correction ni oubli. Les titres, numéros et indications de mise en scène ne sont pas des paroles : ne les mets pas dans « voix », sers-t'en pour l'intention et les gestes.
-2. « numero » : 1, 2, 3… sans trou. « duree » en secondes : 5 par défaut ; plus si le texte dépasse environ 12 mots (2,5 mots par seconde), au maximum 10 ; au-delà, coupe en deux plans.
-3. « intention » : l'émotion du moment, en français, en lien avec le sens de la réplique.
-4. « cadrage » parmi : ${CADRAGES.join(", ")}. « angle » parmi : ${ANGLES.join(", ")}. Jamais le même couple cadrage + angle deux plans de suite ; varie sur l'ensemble du film.
-5. « lieu » : uniquement un nom de la liste des lieux autorisés. Garde le même lieu sur des groupes de plans qui se suivent ; change de lieu seulement à un moment fort.
-6. « pose_debut » et « pose_fin » : position précise du corps, de la tête, du regard et des mains. Chaque pose_fin est différente. La pose_debut d'un plan enchaîne avec la pose_fin du plan précédent, sauf coupe franche voulue (changement net de cadrage).
-7. « description » EN ANGLAIS : l'instant figé au tout début du plan (la photo de départ) : qui, où, pose, expression, cadrage. Cite le nom du personnage et du lieu tels qu'écrits plus haut. 40 mots maximum.
-8. « mouvement » EN ANGLAIS, découpé ainsi : "0-1s: … 1-3s: … 3-4s: … 4-5s: …" (adapter si la durée est plus longue). Un seul geste principal qui correspond au sens de la réplique, réalisable dans la durée, caméra fixe ou mouvement très léger. Pas de geste recopié d'un plan à l'autre : chaque geste vient de la réplique. 50 mots maximum.
-9. Bouche toujours visible pendant que le personnage parle ; pas de main devant le visage.
+=== ÉTAPE 2 — RÈGLES DU TABLEAU ===
+1. DÉCOUPAGE. Découpe toi-même la voix off en plans, dans l'ordre : un plan = une réplique, ou un morceau de réplique coupé à une pause naturelle (fin de phrase, virgule, respiration). Chaque mot prononcé apparaît une seule fois dans « voix », sans traduction, correction ni oubli, dans sa langue d'origine. Les titres, numéros, noms de locuteur et indications de mise en scène ne sont pas des paroles : ne les mets pas dans « voix », sers-t'en pour l'intention et les gestes. Un plan sans parole (respiration, regard, transition) est permis : « voix » vide.
+2. NUMÉRO ET DURÉE. « numero » : 1, 2, 3… sans trou. « duree » en secondes, nombre entier : 5 par défaut ; plus si la parole dépasse 12 mots (2,5 mots par seconde), au maximum 10 ; au-delà, coupe en deux plans.
+3. INTENTION. L'émotion précise du moment, en français, tirée du sens de la réplique (pas « joie » partout : tendresse, fierté amusée, inquiétude retenue…).
+4. CADRAGE ET ANGLE. « cadrage » parmi : ${CADRAGES.join(", ")}. « angle » parmi : ${ANGLES.join(", ")}. Écris-les exactement ainsi. Jamais le même couple cadrage + angle deux plans de suite. Varie sur tout le film : aucun cadrage sur plus d'un tiers des plans. Plans serrés (gros plan, plan rapproché) pour l'émotion forte, plans larges pour ouvrir une séquence ou changer de lieu. Pendant que le personnage parle : face ou 3/4, jamais de dos ni de profil strict.
+5. LIEU. Uniquement un nom de la liste des lieux autorisés, écrit exactement pareil. Même lieu et même lumière (heure du jour) sur toute une séquence ; on ne change de lieu qu'à un moment fort.
+6. POSES ET RACCORDS. « pose_debut » et « pose_fin » : position précise du corps, de la tête, du regard et des deux mains, en français. La pose_debut d'un plan reprend exactement la pose_fin du plan précédent (même texte ou presque), sauf coupe franche voulue : changement net de cadrage ou d'angle, ou de séquence. Chaque pose_fin est différente de toutes les autres du film.
+7. DESCRIPTION = PROMPT DE LA PHOTO DE DÉPART, EN ANGLAIS, 25 à 60 mots. L'instant figé au tout début du plan : qui (nom exact), où (nom exact du lieu), la pose_debut, l'expression du visage, le cadrage et l'angle, la lumière de la séquence. Aucun verbe de mouvement, aucune suite d'actions, aucun texte écrit dans l'image. Si plusieurs personnages : qui est où dans le cadre et qui parle.
+8. MOUVEMENT = PROMPT DE LA VIDÉO, EN ANGLAIS, 30 à 60 mots, découpé en temps : "0-1s: … 1-3s: … 3-4s: … 4-5s: …" jusqu'à la durée du plan. Un seul geste principal, qui vient du sens de la réplique (pas un geste décoratif). Quand il y a une parole : "she speaks softly", "he says warmly"… pour animer la bouche. La dernière tranche arrive exactement sur la pose_fin. Caméra fixe par défaut ; au plus un plan sur quatre avec un mouvement très léger (slow push-in, slight pan). Aucun geste repris dans les 10 plans voisins.
+9. CE QUE L'IA VIDÉO RATE (à éviter) : mains devant le visage ou la bouche pendant la parole, bras croisés, doigts entremêlés, mains qui se touchent longtemps, manger ou boire, objets qui apparaissent, personnage qui sort du cadre ou se retourne complètement en parlant, gestes rapides, plus de deux actions en 5 s, foule, reflets dans un miroir, texte à l'écran.
+10. Toutes les cellules sont remplies (sauf « voix » d'un plan sans parole). Jamais « à définir », « idem », « … » ni « etc. ».
+
+=== ÉTAPE 3 — VÉRIFICATION AVANT DE RENDRE ===
+Relis tout le tableau et corrige-le jusqu'à ce que tout soit vrai :
+- La voix off complète se retrouve dans « voix », mot pour mot, dans l'ordre, sans doublon.
+- Numéros continus ; chaque durée tient sa parole (mots ÷ 2,5 ≤ durée).
+- Aucun couple cadrage + angle répété deux plans de suite ; aucun geste ni pose_fin répété dans 10 plans voisins ; aucune pose_fin identique dans tout le film.
+- Chaque pose_debut raccorde avec la pose_fin précédente, ou la coupe franche est évidente.
+- « description » et « mouvement » en anglais, sans phrase générale recopiée ; noms des personnages et des lieux exactement comme dans les listes ; au plus 3 références citées par plan.
+- Le fichier est complet jusqu'au dernier plan, quel que soit le nombre de plans.
 
 === RÉPONSE ATTENDUE ===
-A. Si des lieux ou personnages manquent : la liste à créer (nom + description courte), avant le tableau.
-B. Le fichier « ${FICHIER_A_REMPLIR} » rempli, à télécharger. Donne aussi son contenu dans UN SEUL bloc de code CSV (au cas où le fichier ne s'ouvre pas) : séparateur point-virgule, même première ligne :
-${COLONNES_STANDARD.join(";")}
-Mets chaque cellule entre guillemets doubles. Aucune autre colonne, aucune ligne vide, aucun commentaire dans le bloc.
-C. Après le bloc : les 3 plans les plus risqués (visage, mains, raccord) et pourquoi, en une phrase chacun.
-
-Je réimporterai le fichier .csv tel quel dans le studio.`;
+A. Avant le fichier, seulement si besoin : les personnages ou lieux à créer (nom + description courte en français pour que je prépare leur photo), et une proposition de style si aucun n'est donné (une phrase, en anglais).
+B. Le fichier « ${FICHIER_A_REMPLIR} » rempli, à télécharger (crée-le avec ton outil de fichiers ou d'analyse : c'est le seul moyen sûr pour un long film). Format exact : CSV, encodage UTF-8, séparateur point-virgule, chaque cellule entre guillemets doubles (un guillemet dans le texte s'écrit ""), aucune ligne vide, aucune autre colonne, première ligne :
+${colonnes}
+Si tu ne peux pas créer de fichier : le même contenu dans UN SEUL bloc de code CSV ; si c'est trop long pour un message, continue dans le message suivant sans répéter la première ligne, jusqu'au dernier plan.
+C. Après le fichier : le nombre de plans et la durée totale, puis les 3 plans les plus risqués (visage, mains, raccord) et pourquoi, en une phrase chacun.`;
 }
