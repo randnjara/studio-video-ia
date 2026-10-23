@@ -11,6 +11,7 @@ export type PlanControle = {
   cadrage: string;
   angle: string;
   pose_fin?: string;
+  lieu?: string | null;
 };
 
 // Débit moyen d'une voix posée, en mots par seconde
@@ -98,6 +99,15 @@ export function alertesPlans(plans: PlanControle[], mouvementParDefaut = "") {
     const prec = plans[i - 1];
     if (prec && p.cadrage && p.angle && p.cadrage === prec.cadrage && p.angle === prec.angle)
       ajouter(p.id, `Même cadrage et même angle que le plan ${i} : les deux plans vont sembler collés.`);
+
+    // Lieux : un changement de décor au milieu d'une phrase, ou un lieu tenu un seul plan, casse le réalisme
+    const suiv = plans[i + 1];
+    if (prec && p.lieu && prec.lieu && p.lieu !== prec.lieu) {
+      if (prec.voiceover_text.trim() && !/[.!?…»"”]\s*$/.test(prec.voiceover_text.trim()))
+        ajouter(p.id, `Changement de lieu au milieu d'une phrase (plan ${i} → ${i + 1}) : gardez « ${prec.lieu} » jusqu'à la fin de la phrase.`);
+      if (suiv?.lieu && suiv.lieu !== p.lieu)
+        ajouter(p.id, `Un seul plan dans « ${p.lieu} » : restez plus longtemps dans un même lieu, ne changez que le cadrage, l'angle ou le geste.`);
+    }
 
     const voix = dureeVoix(p.voiceover_text);
     const duree = Number(p.duration_s || 5);
