@@ -323,7 +323,7 @@ export default async function PagePlans({
         )}
         {plans.length > 0 && projet && (
           <CopierVerification
-            texte={promptVerification(projet, plans)}
+            texte={promptVerification(projet, plans, [...new Set(refs.filter((r) => r.genre === "produit").map((r) => r.nom))])}
             explication="Le bouton copie une consigne complète avec votre script et le tableau de tous les plans. Collez-la dans ChatGPT ou Claude (joignez les photos de départ dans l'ordre si possible). L'assistant rend un fichier tableau_corrige.csv : importez-le juste en dessous pour mettre à jour les plans."
           />
         )}

@@ -59,6 +59,7 @@ export const STATUTS_MONTAGE: Record<string, string> = {
 export const GENRES: Record<string, string> = {
   personnage: "Personnage",
   lieu: "Lieu",
+  produit: "Produit (promotion)",
   objet: "Objet",
   style: "Style",
 };

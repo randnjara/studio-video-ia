@@ -23,6 +23,7 @@ export default async function PageChatGPT({
   const refs = refsLues ?? [];
   const personnages = refs.filter((r) => r.genre === "personnage").map((r) => r.nom);
   const lieux = refs.filter((r) => r.genre === "lieu").map((r) => r.nom);
+  const produits = [...new Set(refs.filter((r) => r.genre === "produit").map((r) => r.nom))];
   const mots = projet.scenario_text.trim().split(/\s+/).filter(Boolean).length;
 
   // Rappel de l'étape 1 : ce que ChatGPT recevra
@@ -30,7 +31,8 @@ export default async function PageChatGPT({
     { ok: personnages.length > 0, texte: personnages.length ? `Personnage : ${personnages.join(", ")}` : "Photo du personnage principal manquante", requis: true },
     { ok: mots > 0, texte: mots ? `Voix off : ${mots} mots` : "Voix off pas encore collée (vous pourrez la joindre dans l'assistant)" },
     { ok: Boolean(projet.resume.trim()), texte: projet.resume.trim() ? "Résumé donné" : "Pas de résumé (l'assistant le déduira de la voix off)" },
-    { ok: lieux.length > 0, texte: lieux.length ? `Lieux : ${lieux.join(", ")}` : "Pas de lieu (l'assistant en choisira 2 à 5)" },
+    { ok: lieux.length > 0, texte: lieux.length ? `Lieux : ${lieux.join(", ")}` : "Pas de lieu (l'assistant en choisira le moins possible)" },
+    ...(produits.length ? [{ ok: true, texte: `Produit à promouvoir : ${produits.join(", ")}` }] : []),
     { ok: Boolean(projet.style_text.trim()), texte: projet.style_text.trim() ? "Style donné" : "Pas de style (l'assistant en proposera un)" },
   ];
 

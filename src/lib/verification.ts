@@ -36,7 +36,11 @@ export const FICHIER_CORRIGE = "tableau_corrige.csv";
 
 const cellule = (v: string) => `"${String(v ?? "").replace(/"/g, '""').replace(/\r?\n/g, " ")}"`;
 
-export function promptVerification(projet: { title: string; aspect_ratio: string; scenario_text: string }, plans: PlanVerif[]) {
+export function promptVerification(
+  projet: { title: string; aspect_ratio: string; scenario_text: string },
+  plans: PlanVerif[],
+  produits: string[] = [],
+) {
   const tableau = [
     COLONNES_CORRECTION.join(";"),
     ...plans.map((p, i) =>
@@ -85,13 +89,18 @@ ${tableau}
 
 === CE QUE TU DOIS VÉRIFIER ===
 1. Respect du script : chaque moment important a son plan, dans le bon ordre, sans plan en double.
-2. Lieux : le moins de lieux possible, de longues séquences par lieu ; jamais de changement de lieu au milieu d'une phrase ou d'une idée, ni de lieu tenu un seul plan. Un témoignage reste dans un seul lieu (un souvenir se raconte depuis ce lieu). Corrige « lieu », les poses et les prompts en conséquence.
+2. Lieux : le moins de lieux possible (un seul pour un film de 2 minutes ou moins : c'est le geste qui fait varier), de longues séquences par lieu ; jamais de changement de lieu au milieu d'une phrase ou d'une idée, ni de lieu tenu un seul plan. Un témoignage reste dans un seul lieu (un souvenir se raconte depuis ce lieu). Corrige « lieu », les poses et les prompts en conséquence.
 2 bis. Découpage : chaque séquence s'ouvre par un plan large puis se resserre avec l'émotion ; cadrage ou angle changent à chaque nouvelle idée (jamais deux plans de suite identiques) ; caméra toujours du même côté de la personne dans une séquence (règle des 180°).
 2 ter. Continuité entre plans voisins : visage, âge, coiffure, tenue, accessoires, objets, lieu, moment de la journée, lumière, direction du regard (règle des 180°) ; la pose_fin d'un plan doit enchaîner avec la pose_debut du suivant dans le même lieu, sinon coupe franche motivée (changement net de cadrage).
 3. Chaque prompt_video : une seule action principale réalisable dans la durée, découpée en temps (0-1s, 1-3s…), caméra précise, rien qui contredise la photo de départ, pas de texte à l'écran, mains visibles si un geste les montre (sinon adapter le cadrage ou remplacer le geste par une expression), lèvres libres pendant la parole.
 4. Variété : aucun geste, cadrage ou angle répété en boucle (comparer aux 10 plans voisins) ; chaque geste vient du sens de la réplique ; pas la même phrase recopiée au début ou à la fin de chaque prompt.
 5. Langue : prompt_image et prompt_video en anglais ; les répliques (« voix ») restent EXACTEMENT telles quelles.
-6. Seulement si je te joins des photos de départ déjà créées : compare-les entre elles et avec les prompts. Sinon, ne parle pas des photos.
+${
+    produits.length
+      ? `5 bis. Film de promotion (produit : ${produits.join(", ")}) : le produit est bien visible dès qu'on en parle, avec un gros plan du produit seul et le plan de fin ; son nom exact est écrit dans « prompt_image » de chaque plan où il apparaît ; les gestes le montrent sans le cacher.
+`
+      : ""
+  }6. Seulement si je te joins des photos de départ déjà créées : compare-les entre elles et avec les prompts. Sinon, ne parle pas des photos.
 
 === RÉPONSE ATTENDUE ===
 1. D'abord le FICHIER CORRIGÉ, à télécharger, nommé ${FICHIER_CORRIGE}, en CSV UTF-8, séparateur point-virgule, chaque cellule entre guillemets, avec exactement ces colonnes dans cet ordre :

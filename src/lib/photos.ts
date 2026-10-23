@@ -10,7 +10,7 @@ export type Reference = { id: string; nom: string; genre: string; description: s
 
 
 const MAX_REFERENCES = 3; // Qwen-Image-Edit garde bien les détails jusqu'à 3 images
-const ORDRE_GENRES = ["personnage", "lieu", "objet", "style"];
+const ORDRE_GENRES = ["personnage", "lieu", "produit", "objet", "style"];
 
 const normaliser = (t: string) =>
   t
@@ -59,8 +59,15 @@ export function promptPhoto(p: FichePlan & { numero: number; total: number; form
     fiche.length ? `Shot sheet: ${fiche.join("; ")}.` : "",
     `Reference images: ${images}.`,
     "Keep exactly the same person as the reference images: same face, facial proportions, apparent age, wrinkles, skin tone, hairstyle, body shape and clothing. Do not beautify, rejuvenate or reshape the face. Keep the reference locations unchanged.",
+    ...p.refs
+      .filter((r) => r.genre === "produit")
+      .slice(0, 1)
+      .map(
+        (r) =>
+          `The product ${r.nom} must look exactly like its reference images: same shape, proportions, colours, materials, buttons, logo and printed label; clearly visible and sharp.`,
+      ),
     p.style.trim() ? `Film style: ${p.style.trim()}.` : "",
-    "One single natural photographic moment that can be the first frame of a five-second video. Full-frame image filling the whole format: no collage, no storyboard sheet, no grid, no split screen, no blurred side bars, no border, no text, no caption, no logo, no watermark.",
+    "One single natural photographic moment that can be the first frame of a five-second video. Full-frame image filling the whole format: no collage, no storyboard sheet, no grid, no split screen, no blurred side bars, no border, no added text, no caption, no extra logo, no watermark (only the product's own label if a product is shown).",
     "Natural anatomy: exactly two arms and two hands, five fingers per hand, realistic contact with objects. Cinematic lighting, realistic depth of field, natural skin texture.",
   ]
     .filter(Boolean)
@@ -96,6 +103,7 @@ POUR CHAQUE IMAGE
 - Format ${projet.aspect_ratio}, une seule photo réaliste qui remplit tout le cadre : pas de planche, pas de grille, pas de texte, pas de bordure.
 - Suis le prompt du plan à la lettre (cadrage, angle, lieu, pose de départ, lumière).
 - Un même lieu = exactement la même pièce sur toutes les images (murs, meubles, objets à la même place, même lumière) : seuls le cadrage, l'angle et la pose changent. Si une photo du lieu est jointe, recopie ce décor.
+- Un produit à promouvoir = exactement le même objet que sur ses photos (forme, couleurs, boutons, logo et étiquette), bien visible et net.
 - Nom du fichier : celui indiqué au-dessus du prompt (${nom(debut)}, …), sans le changer.
 
 À LA FIN DU LOT
