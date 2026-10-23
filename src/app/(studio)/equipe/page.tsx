@@ -53,6 +53,7 @@ const EVENEMENTS: Record<string, string> = {
   "connexion-reussie": "connexion réussie",
   "lien-cree-par-responsable": "lien à copier créé par",
   "lien-envoye-par-responsable": "lien renvoyé par e-mail par",
+  "compte-cree-sans-email": "compte créé sans e-mail (limite atteinte) par",
 };
 
 const date = (d?: string | null) =>
@@ -104,6 +105,8 @@ export default async function Equipe({
     supprime?: string;
     cache?: string;
     "passe-cache"?: string;
+    "sans-email"?: string;
+    membre?: string;
   }>;
 }) {
   const sp = await searchParams;
@@ -179,6 +182,12 @@ export default async function Equipe({
         <p className="message-ok">
           Stockage du modèle ajouté. Le prochain clip remplit ce disque (un peu plus long), ensuite les démarrages sont
           plus rapides.
+        </p>
+      )}
+      {sp["sans-email"] && (
+        <p className="message-ok">
+          Limite des e-mails gratuits atteinte : le compte de {sp["sans-email"]} est créé sans e-mail. Dans sa fiche
+          ci-dessous, cliquez sur « Créer un lien de connexion à copier » et envoyez-lui ce lien (WhatsApp, Messenger…).
         </p>
       )}
       {sp["passe-cache"] && (
@@ -364,7 +373,7 @@ export default async function Equipe({
         <h2 className="text-lg font-bold">Membres</h2>
         <ul className="divide-y divide-ligne">
           {((membres ?? []) as Profile[]).map((m) => (
-            <li key={m.id} className="flex flex-wrap items-center gap-3 py-3">
+            <li key={m.id} id={`membre-${m.id}`} className="flex flex-wrap items-center gap-3 py-3">
               <span className="font-semibold">{m.display_name}</span>
               <span className="text-sm text-sourdine">{m.role === "responsable" ? "Responsable" : "Membre"}</span>
               {!m.active && <span className="rounded bg-fond px-2 py-0.5 text-xs font-semibold">Désactivé</span>}
@@ -383,6 +392,7 @@ export default async function Equipe({
                 </div>
               )}
               <FicheMembre
+                ouverte={sp.membre === m.id}
                 m={m}
                 moi={m.id === profile.id}
                 u={compte.get(m.id)}
@@ -466,12 +476,14 @@ function Tentative({ t }: { t: TentativeConnexion }) {
 
 // Détails et dépannage d'un membre, pour le responsable
 function FicheMembre({
+  ouverte,
   m,
   moi,
   u,
   s,
   tentatives,
 }: {
+  ouverte: boolean;
   m: Profile;
   moi: boolean;
   u?: { email?: string; invited_at?: string; email_confirmed_at?: string; last_sign_in_at?: string; created_at: string };
@@ -479,7 +491,7 @@ function FicheMembre({
   tentatives: TentativeConnexion[];
 }) {
   return (
-    <details className="w-full text-sm">
+    <details className="w-full text-sm" open={ouverte}>
       <summary className="cursor-pointer text-sourdine">Détails et dépannage</summary>
       <div className="mt-3 flex flex-col gap-3 rounded-lg bg-surface-2 p-3">
         {u ? (
