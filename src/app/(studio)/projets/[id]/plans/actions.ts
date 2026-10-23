@@ -372,3 +372,15 @@ export async function importerTableau(projectId: string, lignes: LigneTableau[],
   ]);
   retour(projectId, `?importe=${Math.min(lignes.length, 300)}`);
 }
+
+// Garde la voix off dans le projet (et une copie dans l'historique), sans créer de plans
+export async function enregistrerScript(projectId: string, script: string) {
+  const { supabase, profile } = await requireProfile();
+  const texte = script.trim().slice(0, 50_000);
+  await Promise.all([
+    supabase.from("projects").update({ scenario_text: texte }).eq("id", projectId),
+    supabase
+      .from("project_versions")
+      .insert({ project_id: projectId, kind: "scenario", data: { scenario_text: texte }, created_by: profile.id }),
+  ]);
+}
