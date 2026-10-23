@@ -67,30 +67,66 @@ export function promptPhoto(p: FichePlan & { numero: number; total: number; form
     .join("\n");
 }
 
-// Prompts de toutes les photos de départ, pour les créer ailleurs (ChatGPT, ordinateur avec carte graphique…).
-// Chaque image doit être enregistrée sous plan_NN.png pour être réimportée d'un coup dans le bon plan.
-export function promptsPhotos(
+// Prompts des photos de départ, pour les créer ailleurs (ChatGPT, ordinateur avec carte graphique…), par lots de 10 :
+// au-delà, ChatGPT oublie les consignes ou mélange les plans. Chaque image s'appelle plan_NN.png et les 10 images
+// reviennent dans un fichier ZIP, réimporté d'un coup dans le bon plan.
+export const TAILLE_LOT = 10;
+
+export function lotsPromptsPhotos(
   plans: (FichePlan & { numero: number })[],
   projet: { aspect_ratio: string; style_text: string },
   refs: Reference[],
 ) {
   const avec = plans.filter((p) => p.description.trim());
   const nom = (n: number) => `plan_${String(n).padStart(2, "0")}.png`;
-  const entete = `Crée une image par plan ci-dessous, une à la fois, au format ${projet.aspect_ratio}. Je te joins les photos de référence citées (${refs.map((r) => r.nom).join(", ") || "aucune"}) : garde exactement les mêmes visages, tenues et décors.
-Enregistre chaque image sous le nom indiqué (${nom(avec[0]?.numero ?? 1)}, …) : je les réimporterai toutes d'un coup dans mon studio.`;
-  return [
-    entete,
-    ...avec.map(
-      (p) =>
-        `=== ${nom(p.numero)} ===\n${promptPhoto({
-          ...p,
-          total: plans.length,
-          format: projet.aspect_ratio,
-          style: projet.style_text,
-          refs: referencesCitees(`${p.description} ${p.lieu ?? ""}`, refs),
-        })}`,
-    ),
-  ].join("\n\n");
+  const lots: { debut: number; fin: number; texte: string }[] = [];
+  for (let k = 0; k < avec.length; k += TAILLE_LOT) {
+    const lot = avec.slice(k, k + TAILLE_LOT);
+    const debut = lot[0].numero;
+    const fin = lot[lot.length - 1].numero;
+    const zip = `photos_plans_${String(debut).padStart(2, "0")}-${String(fin).padStart(2, "0")}.zip`;
+    const citees = [...new Set(lot.flatMap((p) => referencesCitees(`${p.description} ${p.lieu ?? ""}`, refs)).map((r) => r.nom))];
+    const entete = `Tu es directeur de la photographie et retoucheur pour un film. Crée les photos de départ des plans ${debut} à ${fin} (lot ${k / TAILLE_LOT + 1} sur ${Math.ceil(avec.length / TAILLE_LOT)}), une image par plan, dans l'ordre.
+
+AVANT DE COMMENCER
+- Je te joins les photos de référence : ${citees.join(", ") || "aucune"}. Garde exactement les mêmes visages, âges, coiffures, tenues et décors sur toutes les images. Si une photo citée manque, dis-le en une ligne et attends-la.
+- Ne me pose pas d'autre question : commence tout de suite.
+
+POUR CHAQUE IMAGE
+- Format ${projet.aspect_ratio}, une seule photo réaliste qui remplit tout le cadre : pas de planche, pas de grille, pas de texte, pas de bordure.
+- Suis le prompt du plan à la lettre (cadrage, angle, lieu, pose de départ, lumière).
+- Nom du fichier : celui indiqué au-dessus du prompt (${nom(debut)}, …), sans le changer.
+
+À LA FIN DU LOT
+- Mets les ${lot.length} images dans un seul fichier ZIP nommé ${zip} et donne-moi le lien pour le télécharger.
+- Si tu ne peux pas faire de ZIP, donne chaque image séparément avec son nom exact.
+- Termine par la liste des plans faits et, s'il y en a, ceux à refaire et pourquoi (visage différent, mains, texte dans l'image).`;
+    lots.push({
+      debut,
+      fin,
+      texte: [
+        entete,
+        ...lot.map(
+          (p) =>
+            `=== ${nom(p.numero)} ===\n${promptPhoto({
+              ...p,
+              total: plans.length,
+              format: projet.aspect_ratio,
+              style: projet.style_text,
+              refs: referencesCitees(`${p.description} ${p.lieu ?? ""}`, refs),
+            })}`,
+        ),
+      ].join("\n\n"),
+    });
+  }
+  return lots;
+}
+
+// Tous les lots à la suite (outil d'images sur l'ordinateur)
+export function promptsPhotos(...args: Parameters<typeof lotsPromptsPhotos>) {
+  return lotsPromptsPhotos(...args)
+    .map((l) => l.texte)
+    .join("\n\n");
 }
 
 // Lance la création de la photo d'un plan. Renvoie un code d'erreur, ou null si c'est parti.
