@@ -15,6 +15,8 @@ export type PlanControle = {
 
 // Débit moyen d'une voix posée, en mots par seconde
 export const MOTS_PAR_SECONDE = 2.5;
+// Le modèle vidéo (Wan 2.2) est fait pour des clips de 5 s : plus long, l'image se dégrade
+export const DUREE_MAX = 5;
 const VOISINS = 10; // ChatGPT répétait les gestes par cycles de 10 scènes
 
 const mots = (t: string) =>
@@ -83,7 +85,9 @@ export function alertesPlans(plans: PlanControle[], mouvementParDefaut = "") {
 
     const voix = dureeVoix(p.voiceover_text);
     const duree = Number(p.duration_s || 5);
-    if (voix > duree + 0.5)
+    if (duree > DUREE_MAX)
+      ajouter(p.id, `Plan de ${duree} s : au-delà de ${DUREE_MAX} s la vidéo se dégrade, coupez la réplique en deux plans.`);
+    else if (voix > duree + 0.5)
       ajouter(p.id, `Voix off d'environ ${Math.ceil(voix)} s pour un plan de ${duree} s : raccourcissez le texte ou coupez en deux plans.`);
 
     if (mouvementParDefaut && p.motion_prompt === mouvementParDefaut)
