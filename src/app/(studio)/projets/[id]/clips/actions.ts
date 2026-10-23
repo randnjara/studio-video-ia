@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { journaliser } from "@/lib/journal";
+import { CONTROLES_CLIP } from "@/lib/libelles";
 import { lancerPlan, suivreEssais } from "@/lib/production";
 import { endpointEco, estMoteur, moteurParDefaut } from "@/lib/runpod";
 import { mettreAJourServeur } from "@/lib/runpod-admin";
@@ -35,9 +36,17 @@ export async function actualiserEssais(projectId: string): Promise<number> {
 }
 
 // Le clip choisi devient celui du plan : il pourra entrer dans un montage
-export async function validerClip(projectId: string, sceneId: string, takeId: string) {
+export async function validerClip(projectId: string, sceneId: string, takeId: string, formData: FormData) {
   const { supabase, profile } = await requireProfile();
+  // Grille de contrôle : chaque point doit être coché (leçon du Projet Mama, aucune validation implicite)
+  const controle = Object.fromEntries(Object.keys(CONTROLES_CLIP).map((c) => [c, formData.get(c) === "on"]));
+  if (Object.values(controle).some((v) => !v)) retour(projectId, `?erreur=controle#plan-${sceneId}`);
   await Promise.all([
+    supabase
+      .from("takes")
+      .update({ controle, validated_by: profile.id, validated_at: new Date().toISOString() })
+      .eq("id", takeId)
+      .eq("scene_id", sceneId),
     supabase
       .from("scenes")
       .update({ validated_take_id: takeId, status: "validee" })

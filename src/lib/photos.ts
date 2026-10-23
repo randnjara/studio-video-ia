@@ -30,24 +30,38 @@ export function referencesCitees(description: string, refs: Reference[]) {
     .slice(0, MAX_REFERENCES);
 }
 
-export function promptPhoto(p: {
+export type FichePlan = {
   description: string;
-  numero: number;
-  total: number;
-  format: string;
-  style: string;
-  refs: Reference[];
-}) {
+  cadrage?: string;
+  angle?: string;
+  lieu?: string;
+  intention?: string;
+  pose_debut?: string;
+};
+
+// Consigne envoyée à Qwen-Image-Edit, qui comprend mieux l'anglais : les parties fixes sont en anglais,
+// les textes de la personne (souvent en français) sont repris tels quels.
+// Les règles fixes viennent des erreurs vues sur le Projet Mama (planches, texte, mains, visage qui change).
+export function promptPhoto(p: FichePlan & { numero: number; total: number; format: string; style: string; refs: Reference[] }) {
   const images = p.refs
-    .map((r, i) => `image ${i + 1} = ${r.nom} (${(GENRES[r.genre] ?? r.genre).toLowerCase()}${r.description ? ` : ${r.description}` : ""})`)
-    .join(" ; ");
+    .map((r, i) => `image ${i + 1} = ${r.nom} (${r.genre}${r.description ? `: ${r.description}` : ""})`)
+    .join("; ");
+  const fiche = [
+    p.cadrage && `shot size: ${p.cadrage}`,
+    p.angle && `camera angle: ${p.angle}`,
+    p.lieu && `location: ${p.lieu}`,
+    p.intention && `emotion: ${p.intention}`,
+    p.pose_debut && `starting pose: ${p.pose_debut}`,
+  ].filter(Boolean);
   return [
-    `Photo de film réaliste, plan ${p.numero} sur ${p.total}, format ${p.format}.`,
-    `Scène : ${p.description.trim()}`,
-    `Images de référence : ${images}.`,
-    "Garder exactement le visage, la coiffure, la morphologie et les vêtements des personnages des images de référence, et le décor des lieux de référence.",
-    p.style.trim() ? `Style du film : ${p.style.trim()}.` : "",
-    "Cadrage et lumière de cinéma, une seule scène, aucune écriture, aucun logo, aucun filigrane.",
+    `Photorealistic cinematic film still, shot ${p.numero} of ${p.total}, ${p.format} frame.`,
+    `Scene: ${p.description.trim()}`,
+    fiche.length ? `Shot sheet: ${fiche.join("; ")}.` : "",
+    `Reference images: ${images}.`,
+    "Keep exactly the same person as the reference images: same face, facial proportions, apparent age, wrinkles, skin tone, hairstyle, body shape and clothing. Do not beautify, rejuvenate or reshape the face. Keep the reference locations unchanged.",
+    p.style.trim() ? `Film style: ${p.style.trim()}.` : "",
+    "One single natural photographic moment that can be the first frame of a five-second video. Full-frame image filling the whole format: no collage, no storyboard sheet, no grid, no split screen, no blurred side bars, no border, no text, no caption, no logo, no watermark.",
+    "Natural anatomy: exactly two arms and two hands, five fingers per hand, realistic contact with objects. Cinematic lighting, realistic depth of field, natural skin texture.",
   ]
     .filter(Boolean)
     .join("\n");
@@ -58,12 +72,13 @@ export async function lancerPhoto(
   supabase: SupabaseClient,
   auteurId: string,
   projet: { id: string; aspect_ratio: string; style_text: string },
-  plan: { id: string; image_description: string; numero: number },
+  plan: { id: string; image_description: string; numero: number; cadrage?: string; angle?: string; lieu?: string; intention?: string; pose_debut?: string },
   total: number,
   refs: Reference[],
 ) {
   if (!plan.image_description.trim()) return "sans-description";
-  const choisies = referencesCitees(plan.image_description, refs);
+  // Le lieu de la fiche compte comme une citation : la référence du lieu part avec la photo
+  const choisies = referencesCitees(`${plan.image_description} ${plan.lieu ?? ""}`, refs);
   if (choisies.length === 0) return "sans-reference";
 
   const seed = Math.floor(Math.random() * 2_000_000_000);
@@ -97,6 +112,11 @@ export async function lancerPhoto(
     const jobId = await lancerPhotoRunPod({
       prompt: promptPhoto({
         description: plan.image_description,
+        cadrage: plan.cadrage,
+        angle: plan.angle,
+        lieu: plan.lieu,
+        intention: plan.intention,
+        pose_debut: plan.pose_debut,
         numero: plan.numero,
         total,
         format: projet.aspect_ratio,

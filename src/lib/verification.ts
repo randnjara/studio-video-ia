@@ -1,12 +1,29 @@
 // Prompt de vérification du script et des plans, à coller dans un assistant gratuit (ChatGPT, Claude, Gemini…).
 // Rien n'est envoyé par le studio : la personne copie le texte et le colle elle-même.
-type PlanVerif = { position: number; motion_prompt: string; voiceover_text: string; duration_s: number };
+type PlanVerif = {
+  position: number;
+  motion_prompt: string;
+  voiceover_text: string;
+  duration_s: number;
+  image_description?: string;
+  cadrage?: string;
+  angle?: string;
+  lieu?: string;
+  intention?: string;
+  pose_debut?: string;
+  pose_fin?: string;
+};
 
 export function promptVerification(projet: { title: string; aspect_ratio: string; scenario_text: string }, plans: PlanVerif[]) {
   const liste = plans
     .map(
       (p, i) =>
         `PLAN ${i + 1} (${Number(p.duration_s || 5)} s)\n` +
+        (p.image_description?.trim() ? `- Photo de départ : ${p.image_description.trim()}\n` : "") +
+        ([p.cadrage, p.angle, p.lieu, p.intention].some(Boolean)
+          ? `- Fiche : ${[p.cadrage, p.angle, p.lieu, p.intention].filter(Boolean).join(" · ")}\n`
+          : "") +
+        (p.pose_debut || p.pose_fin ? `- Pose début → fin : ${p.pose_debut || "?"} → ${p.pose_fin || "?"}\n` : "") +
         `- Mouvement / consigne vidéo : ${p.motion_prompt.trim() || "(vide)"}\n` +
         `- Voix off : ${p.voiceover_text.trim() || "(aucune)"}`,
     )
@@ -32,11 +49,14 @@ ${liste || "(aucun plan)"}
    - sujet, action, ambiance et lumière décrits en mots simples et concrets ;
    - rien qui contredise ce que montre la photo de départ (personne absente, décor différent) ;
    - pas de texte à afficher à l'écran, pas de visage qui change, pas de foule détaillée inutile.
-4. Voix off : longueur compatible avec la durée du plan (environ 2,5 mots par seconde), ton cohérent d'un plan à l'autre.
-5. Si je te joins les photos de départ (dans l'ordre des plans), compare-les entre elles et avec les consignes : signale tout ce qui casse la continuité.
+4. Variété : aucun geste, cadrage ou angle ne doit revenir en boucle (comparer chaque plan aux 10 précédents et aux 10 suivants) ; chaque geste doit correspondre au sens de la réplique, pas à un cycle répété.
+5. Raccords : la pose de fin d'un plan doit pouvoir enchaîner avec la pose de début du suivant (regard, tête, mains, côté du corps) ; sinon proposer une coupe motivée (changement net de cadrage).
+6. Langue : les consignes de mouvement doivent être en anglais ; les répliques restent dans leur langue d'origine, sans modification.
+7. Voix off : longueur compatible avec la durée du plan (environ 2,5 mots par seconde), ton cohérent d'un plan à l'autre.
+8. Si je te joins les photos de départ (dans l'ordre des plans), compare-les entre elles et avec les consignes : signale tout ce qui casse la continuité.
 
 === RÉPONSE ATTENDUE (en français simple) ===
-A. Un tableau : Plan | Verdict (OK / À corriger) | Problème en une phrase | Consigne de mouvement corrigée, prête à copier.
+A. Un tableau : Plan | Verdict (OK / À corriger) | Problème en une phrase | Consigne de mouvement corrigée en anglais, découpée 0–1 s / 1–3 s / 3–4 s / 4–5 s, prête à copier.
 B. La liste des problèmes de continuité entre plans voisins, du plus grave au moins grave, avec la correction proposée (consigne à changer, ou photo de départ à refaire et ce qu'elle doit montrer).
 C. Les moments du script qui manquent, et les plans à ajouter (consigne + voix off).
 D. Une « fiche de continuité » courte à garder pour tout le film : personnages, tenues, lieux, palette de couleurs, lumière et style de caméra à répéter dans chaque consigne.

@@ -42,6 +42,10 @@ export async function marquerEnProduction(supabase: SupabaseClient, projectId: s
   await supabase.from("projects").update({ status: "production" }).eq("id", projectId).eq("status", "scenario");
 }
 
+// Ajouté à chaque consigne de mouvement : le visage et la tenue ne doivent pas changer pendant l'animation
+const STABILITE =
+  "Same person, same face and clothing throughout, subtle natural movements, natural blinking and breathing, no morphing, no sudden change of position.";
+
 type Plan = {
   id: string;
   motion_prompt: string;
@@ -101,7 +105,7 @@ export async function lancerPlan(
 
     const jobId = await lancerGeneration({
       moteur,
-      prompt: plan.motion_prompt,
+      prompt: `${plan.motion_prompt.trim().replace(/[.\s]+$/, "")}. ${STABILITE}`,
       imageUrl: signee.signedUrl,
       format,
       duree,

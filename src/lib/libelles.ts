@@ -62,3 +62,26 @@ export const GENRES: Record<string, string> = {
   objet: "Objet",
   style: "Style",
 };
+
+// Fiche de tournage d'un plan : listes proposées (on peut aussi écrire autre chose)
+export const CADRAGES = [
+  "très gros plan",
+  "gros plan",
+  "plan rapproché",
+  "plan poitrine",
+  "plan taille",
+  "plan américain",
+  "plan moyen",
+  "plan large",
+  "plan d'ensemble",
+];
+export const ANGLES = ["face", "3/4 gauche", "3/4 droit", "profil gauche", "profil droit", "dos", "plongée", "contre-plongée"];
+
+// Grille de contrôle obligatoire avant de valider un clip
+export const CONTROLES_CLIP: Record<string, string> = {
+  visage: "Visage, âge et tenue fidèles aux références",
+  mains: "Deux mains, doigts naturels, pas de membre en trop",
+  mouvement: "Mouvement naturel, pas figé, sans déformation (morphing)",
+  cadre: "Image entière au bon format, sans texte ni bord flou",
+  raccord: "Raccord correct avec le plan précédent et le suivant",
+};
