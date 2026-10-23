@@ -1,18 +1,11 @@
 import Link from "next/link";
 import { BoutonEnvoi } from "@/components/bouton-envoi";
 import { STATUTS_MONTAGE, couleurStatut, dateCourte, dureeLisible } from "@/lib/libelles";
+import { type Media, lireTimeline, placer, timelineParDefaut } from "@/lib/montage";
 import { signerLiens } from "@/lib/production";
 import { getClient } from "@/lib/session";
-import {
-  ajouterClip,
-  changerStatutMontage,
-  creerMontage,
-  deplacerClip,
-  renommerMontage,
-  retirerClip,
-  supprimerMontage,
-} from "./actions";
-import { LecteurMontage } from "./lecteur";
+import { changerStatutMontage, creerMontage, renommerMontage, supprimerMontage } from "./actions";
+import { Editeur } from "./editeur";
 import { ControleRaccords } from "./raccords";
 
 type Montage = {
@@ -22,12 +15,13 @@ type Montage = {
   status: "brouillon" | "a_valider" | "valide" | "a_corriger";
   comment: string | null;
   updated_at: string;
+  timeline?: unknown;
 };
 
 type Clip = { takeId: string; planNumero: number; duree: number; videoPath: string | null; voix: string };
 
 const MESSAGES: Record<string, string> = {
-  cree: "Montage créé. Vérifiez l'ordre, regardez l'aperçu, puis envoyez-le à valider.",
+  cree: "Montage créé. Ajoutez voix off et musique, réglez les plans, regardez l'aperçu, puis envoyez-le à valider.",
   supprime: "Montage supprimé. Les clips restent disponibles.",
 };
 const STATUT_MESSAGE: Record<string, string> = {
@@ -48,24 +42,23 @@ export default async function PageMontage({
   const sp = await searchParams;
   const supabase = await getClient();
 
-  const [{ data: scenes }, { data: brut }] = await Promise.all([
+  const [{ data: scenes }, { data: projet }, montages] = await Promise.all([
     supabase
       .from("scenes")
-      .select("id, position, duration_s, voiceover_text, validated_take_id, takes!takes_scene_id_fkey(id, video_path)")
+      .select("id, position, duration_s, voiceover_text, image_path, validated_take_id, takes!takes_scene_id_fkey(id, video_path)")
       .eq("project_id", id)
       .order("position"),
-    supabase
-      .from("montages")
-      .select("id, title, take_ids, status, comment, updated_at")
-      .eq("project_id", id)
-      .order("created_at", { ascending: false }),
+    supabase.from("projects").select("aspect_ratio").eq("id", id).single(),
+    lireMontages(supabase, id),
   ]);
-  const montages = (brut ?? []) as Montage[];
+  const format = (projet?.aspect_ratio as string) ?? "9:16";
 
   // Tous les clips du projet, repérés par leur essai ; les clips validés sont ceux proposés pour un montage
   const clips = new Map<string, Clip>();
   const disponibles: Clip[] = [];
+  const photos: Media[] = [];
   (scenes ?? []).forEach((s, i) => {
+    if (s.image_path) photos.push({ chemin: s.image_path, nature: "image", nom: `Photo plan ${i + 1}`, duree: null });
     for (const t of s.takes as { id: string; video_path: string | null }[]) {
       const clip = {
         takeId: t.id,
@@ -78,10 +71,25 @@ export default async function PageMontage({
       if (t.id === s.validated_take_id && t.video_path) disponibles.push(clip);
     }
   });
-  const liens = await signerLiens(
-    supabase,
-    [...disponibles.map((c) => c.videoPath), ...montages.flatMap((m) => m.take_ids.map((t) => clips.get(t)?.videoPath))],
-  );
+  const enMedia = (c: Clip): Media => ({ chemin: c.videoPath!, nature: "video", nom: `Plan ${c.planNumero}`, duree: c.duree, takeId: c.takeId });
+  const medias = disponibles.map(enMedia);
+
+  // L'éditeur s'ouvre sur un montage à la fois (le plus récent par défaut)
+  const ouvert = montages.find((m) => m.id === sp.ouvert) ?? montages[0];
+  const timeline = ouvert
+    ? (lireTimeline(ouvert.timeline) ??
+      timelineParDefaut(
+        ouvert.take_ids.flatMap((t) => {
+          const c = clips.get(t);
+          return c?.videoPath ? [enMedia(c)] : [];
+        }),
+      ))
+    : null;
+  const liens = await signerLiens(supabase, [
+    ...disponibles.map((c) => c.videoPath),
+    ...photos.map((p) => p.chemin),
+    ...(timeline ? [...timeline.bibliotheque.map((m) => m.chemin), ...timeline.pistes.flatMap((p) => p.elements.map((e) => e.chemin))] : []),
+  ]);
   const message = Object.keys(MESSAGES).find((k) => sp[k]);
 
   return (
@@ -141,105 +149,83 @@ export default async function PageMontage({
         )}
       </section>
 
-      {/* 2. Les montages, à revoir, valider ou corriger */}
+      {/* 2. Les montages, à monter, valider ou corriger */}
       {montages.map((m) => {
-        const liste = m.take_ids.map((t) => clips.get(t)).filter((c): c is Clip => Boolean(c));
-        const clipsLus = liste.flatMap((c) => {
-          const url = c.videoPath ? liens.get(c.videoPath) : undefined;
-          return url ? [{ url, libelle: `Plan ${c.planNumero}` }] : [];
+        const estOuvert = m.id === ouvert?.id;
+        const tl = estOuvert && timeline ? timeline : lireTimeline(m.timeline);
+        const duree = tl ? placer(tl).duree : m.take_ids.reduce((n, t) => n + (clips.get(t)?.duree ?? 0), 0);
+        const principale = tl ? tl.pistes[0].elements : [];
+        const clipsLus = principale.flatMap((e) => {
+          const url = liens.get(e.chemin);
+          return e.nature === "video" && url ? [{ url, libelle: e.nom }] : [];
         });
-        const duree = liste.reduce((n, c) => n + c.duree, 0);
-        const absents = disponibles.filter((c) => !m.take_ids.includes(c.takeId));
         const modifiable = m.status === "brouillon" || m.status === "a_corriger";
+        const vide = tl ? tl.pistes.every((p) => p.elements.length === 0) : m.take_ids.length === 0;
         return (
           <section key={m.id} id={`montage-${m.id}`} className="carte flex scroll-mt-24 flex-col gap-4">
             <div className="flex flex-wrap items-center gap-3">
               <h2 className="text-lg font-bold">{m.title}</h2>
               <span className={`pastille ${couleurStatut(m.status)}`}>{STATUTS_MONTAGE[m.status]}</span>
               <span className="text-sm text-sourdine">
-                {liste.length} clip{liste.length > 1 ? "s" : ""} · {dureeLisible(duree)} · modifié le {dateCourte(m.updated_at)}
+                {dureeLisible(duree)} · modifié le {dateCourte(m.updated_at)}
               </span>
-              <form action={supprimerMontage.bind(null, id, m.id)} className="ml-auto">
-                <BoutonEnvoi className="bouton-danger" enCours="…" confirmer={`Supprimer le montage « ${m.title} » ?`}>
-                  Supprimer
-                </BoutonEnvoi>
-              </form>
+              <div className="ml-auto flex items-center gap-2">
+                {!estOuvert && (
+                  <Link href={`/projets/${id}/montage?ouvert=${m.id}#montage-${m.id}`} className="bouton-discret">
+                    Ouvrir dans l'éditeur
+                  </Link>
+                )}
+                <form action={supprimerMontage.bind(null, id, m.id)}>
+                  <BoutonEnvoi className="bouton-danger" enCours="…" confirmer={`Supprimer le montage « ${m.title} » ?`}>
+                    Supprimer
+                  </BoutonEnvoi>
+                </form>
+              </div>
             </div>
 
             {m.status === "a_corriger" && (
-              <p className="message-erreur">À corriger{m.comment ? ` : ${m.comment}` : "."} Modifiez les clips ci-dessous, puis renvoyez à valider.</p>
+              <p className="message-erreur">À corriger{m.comment ? ` : ${m.comment}` : "."} Modifiez le montage ci-dessous, puis renvoyez à valider.</p>
             )}
 
-            <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
-              <div className="flex min-w-0 flex-col gap-4">
-                <LecteurMontage clips={clipsLus} />
-                <ControleRaccords clips={clipsLus} />
-              </div>
-
-              <div className="flex flex-col gap-3">
-                <p className="etiquette">Ordre des clips</p>
-                <ol className="flex flex-col divide-y divide-ligne rounded-lg border border-ligne text-sm">
-                  {liste.map((c, i) => (
-                    <li key={`${c.takeId}-${i}`} className="flex items-center gap-2 px-3 py-2">
-                      <span className="w-5 text-sourdine">{i + 1}.</span>
-                      <span className="min-w-0 flex-1 truncate">
-                        <b>Plan {c.planNumero}</b> <span className="text-sourdine">{c.voix}</span>
-                      </span>
-                      {modifiable && (
-                        <>
-                          {i > 0 && (
-                            <form action={deplacerClip.bind(null, id, m.id, i, -1)}>
-                              <BoutonEnvoi className="bouton-discret px-2 py-0.5" enCours="…">
-                                ↑
-                              </BoutonEnvoi>
-                            </form>
-                          )}
-                          {i < liste.length - 1 && (
-                            <form action={deplacerClip.bind(null, id, m.id, i, 1)}>
-                              <BoutonEnvoi className="bouton-discret px-2 py-0.5" enCours="…">
-                                ↓
-                              </BoutonEnvoi>
-                            </form>
-                          )}
-                          <form action={retirerClip.bind(null, id, m.id, i)}>
-                            <BoutonEnvoi className="bouton-danger px-2 py-0.5" enCours="…">
-                              ✗
-                            </BoutonEnvoi>
-                          </form>
-                        </>
-                      )}
-                    </li>
-                  ))}
-                </ol>
-                {modifiable && absents.length > 0 && (
-                  <form action={ajouterClip.bind(null, id, m.id)} className="flex gap-2">
-                    <select name="clip" className="champ text-sm" aria-label="Clip à ajouter">
-                      {absents.map((c) => (
-                        <option key={c.takeId} value={c.takeId}>
-                          Plan {c.planNumero} ({c.duree} s)
-                        </option>
-                      ))}
-                    </select>
-                    <BoutonEnvoi className="bouton-discret shrink-0 px-3" enCours="…">
-                      Ajouter
-                    </BoutonEnvoi>
-                  </form>
-                )}
-                {modifiable && (
-                  <form action={renommerMontage.bind(null, id, m.id)} className="flex gap-2">
-                    <input name="title" defaultValue={m.title} className="champ text-sm" aria-label="Nom du montage" />
-                    <BoutonEnvoi className="bouton-discret shrink-0 px-3" enCours="…">
-                      Renommer
-                    </BoutonEnvoi>
-                  </form>
-                )}
-              </div>
-            </div>
+            {estOuvert && timeline && (
+              <>
+                <Editeur
+                  key={m.id}
+                  projectId={id}
+                  montageId={m.id}
+                  titre={m.title}
+                  format={format}
+                  modifiable={modifiable}
+                  initiale={timeline}
+                  clips={medias}
+                  photos={photos}
+                  liensInitiaux={Object.fromEntries(liens)}
+                />
+                <div className="flex flex-wrap items-start gap-4">
+                  {modifiable && (
+                    <form action={renommerMontage.bind(null, id, m.id)} className="flex gap-2">
+                      <input name="title" defaultValue={m.title} className="champ text-sm" aria-label="Nom du montage" />
+                      <BoutonEnvoi className="bouton-discret shrink-0 px-3" enCours="…">
+                        Renommer
+                      </BoutonEnvoi>
+                    </form>
+                  )}
+                  {clipsLus.length > 1 && (
+                    <details className="min-w-64 flex-1 text-sm">
+                      <summary className="cursor-pointer font-semibold">🔍 Contrôler les raccords entre les plans</summary>
+                      <div className="mt-3">
+                        <ControleRaccords clips={clipsLus} />
+                      </div>
+                    </details>
+                  )}
+                </div>
+              </>
+            )}
 
             <div className="flex flex-wrap items-start gap-3 border-t border-ligne pt-4">
               {modifiable && (
                 <form action={changerStatutMontage.bind(null, id, m.id, "a_valider")}>
-                  <BoutonEnvoi enCours="Envoi…" disabled={liste.length === 0}>
+                  <BoutonEnvoi enCours="Envoi…" disabled={vide}>
                     Envoyer à valider →
                   </BoutonEnvoi>
                 </form>
@@ -259,10 +245,7 @@ export default async function PageMontage({
               )}
               {m.status === "valide" && (
                 <>
-                  <p className="text-sm text-succes">
-                    Validé. L'export en un seul fichier MP4 (avec voix off et musique) arrive à la prochaine étape du studio ; en
-                    attendant, chaque clip se télécharge depuis « Clips ».
-                  </p>
+                  <p className="text-sm text-succes">Validé. Téléchargez le film en 480p ou 720p HD dans l'éditeur ci-dessus.</p>
                   <form action={changerStatutMontage.bind(null, id, m.id, "brouillon")}>
                     <BoutonEnvoi className="bouton-discret" enCours="…">
                       Rouvrir pour modifier
@@ -276,4 +259,22 @@ export default async function PageMontage({
       })}
     </div>
   );
+}
+
+type Supabase = Awaited<ReturnType<typeof getClient>>;
+
+// La colonne « timeline » arrive avec la migration 0012 : sans elle, la page reste utilisable
+async function lireMontages(supabase: Supabase, projectId: string): Promise<Montage[]> {
+  const avec = await supabase
+    .from("montages")
+    .select("id, title, take_ids, status, comment, updated_at, timeline")
+    .eq("project_id", projectId)
+    .order("created_at", { ascending: false });
+  if (!avec.error) return (avec.data ?? []) as Montage[];
+  const { data } = await supabase
+    .from("montages")
+    .select("id, title, take_ids, status, comment, updated_at")
+    .eq("project_id", projectId)
+    .order("created_at", { ascending: false });
+  return (data ?? []) as Montage[];
 }

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { journaliser } from "@/lib/journal";
+import { lireTimeline } from "@/lib/montage";
 import { majStatutProjet } from "@/lib/production";
 import { requireProfile } from "@/lib/session";
 
@@ -14,16 +15,6 @@ async function retour(supabase: Supabase, projectId: string, params = "", statut
   revalidatePath(`/projets/${projectId}`, "layout");
   revalidatePath("/");
   redirect(`/projets/${projectId}/montage${params}`);
-}
-
-async function lireMontage(supabase: Supabase, projectId: string, montageId: string) {
-  const { data } = await supabase
-    .from("montages")
-    .select("id, take_ids, status")
-    .eq("id", montageId)
-    .eq("project_id", projectId)
-    .single();
-  return data as { id: string; take_ids: string[]; status: string } | null;
 }
 
 // Un montage = des clips validés mis bout à bout, dans l'ordre choisi
@@ -57,33 +48,26 @@ export async function creerMontage(projectId: string, formData: FormData) {
   await retour(supabase, projectId, `?cree=1#montage-${montage.id}`, true);
 }
 
-export async function deplacerClip(projectId: string, montageId: string, index: number, sens: -1 | 1) {
+// Enregistrement automatique de l'éditeur : la timeline entière, et les clips de la piste principale dans take_ids
+export async function enregistrerTimeline(projectId: string, montageId: string, brut: unknown) {
   const { supabase } = await requireProfile();
-  const m = await lireMontage(supabase, projectId, montageId);
-  if (m && m.take_ids[index + sens]) {
-    const ids = [...m.take_ids];
-    [ids[index], ids[index + sens]] = [ids[index + sens], ids[index]];
-    await supabase.from("montages").update({ take_ids: ids }).eq("id", montageId);
+  const timeline = lireTimeline(brut);
+  if (!timeline) return { erreur: "Montage illisible." };
+  const take_ids = timeline.pistes[0].elements.flatMap((e) => (e.takeId ? [e.takeId] : []));
+  const { error } = await supabase
+    .from("montages")
+    .update({ timeline, take_ids })
+    .eq("id", montageId)
+    .eq("project_id", projectId)
+    .in("status", ["brouillon", "a_corriger"]);
+  if (error) {
+    return {
+      erreur: error.message.includes("timeline")
+        ? "La base n'est pas encore à jour (migration 0012 à appliquer)."
+        : `Enregistrement impossible : ${error.message}`,
+    };
   }
-  await retour(supabase, projectId, `#montage-${montageId}`);
-}
-
-export async function retirerClip(projectId: string, montageId: string, index: number) {
-  const { supabase } = await requireProfile();
-  const m = await lireMontage(supabase, projectId, montageId);
-  if (m) await supabase.from("montages").update({ take_ids: m.take_ids.filter((_, i) => i !== index) }).eq("id", montageId);
-  await retour(supabase, projectId, `#montage-${montageId}`);
-}
-
-export async function ajouterClip(projectId: string, montageId: string, formData: FormData) {
-  const { supabase } = await requireProfile();
-  const takeId = String(formData.get("clip") ?? "");
-  const [m, { data: plan }] = await Promise.all([
-    lireMontage(supabase, projectId, montageId),
-    supabase.from("scenes").select("id").eq("project_id", projectId).eq("validated_take_id", takeId).maybeSingle(),
-  ]);
-  if (m && plan) await supabase.from("montages").update({ take_ids: [...m.take_ids, takeId] }).eq("id", montageId);
-  await retour(supabase, projectId, `#montage-${montageId}`);
+  return { erreur: null };
 }
 
 export async function renommerMontage(projectId: string, montageId: string, formData: FormData) {
