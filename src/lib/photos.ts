@@ -40,10 +40,15 @@ export type FichePlan = {
   pose_debut?: string;
 };
 
+// Remarques laissées avec « Re-générer » : ce qui n'allait pas sur la photo précédente et ce que l'on veut
+export type Remarques = { a_eviter?: string; voulu?: string };
+
 // Consigne envoyée à Qwen-Image-Edit, qui comprend mieux l'anglais : les parties fixes sont en anglais,
 // les textes de la personne (souvent en français) sont repris tels quels.
 // Les règles fixes viennent des erreurs vues sur le Projet Mama (planches, texte, mains, visage qui change).
-export function promptPhoto(p: FichePlan & { numero: number; total: number; format: string; style: string; refs: Reference[] }) {
+export function promptPhoto(
+  p: FichePlan & Remarques & { numero: number; total: number; format: string; style: string; refs: Reference[] },
+) {
   const images = p.refs
     .map((r, i) => `image ${i + 1} = ${r.nom} (${r.genre}${r.description ? `: ${r.description}` : ""})`)
     .join("; ");
@@ -58,6 +63,10 @@ export function promptPhoto(p: FichePlan & { numero: number; total: number; form
     `Photorealistic cinematic film still, shot ${p.numero} of ${p.total}, ${p.format} frame.`,
     `Scene: ${p.description.trim()}`,
     fiche.length ? `Shot sheet: ${fiche.join("; ")}.` : "",
+    // Placées juste après la scène pour peser plus lourd. Le serveur n'utilise pas le prompt négatif (true_cfg_scale 1) :
+    // ce qu'il faut éviter est donc écrit dans le prompt lui-même.
+    p.voulu?.trim() ? `Correction requested after a previous failed attempt (top priority, apply it exactly): ${p.voulu.trim()}` : "",
+    p.a_eviter?.trim() ? `Problems of the previous attempt that must NOT appear again: ${p.a_eviter.trim()}` : "",
     `Reference images: ${images}.`,
     "Keep exactly the same person as the reference images: same face, facial proportions, apparent age, wrinkles, skin tone, hairstyle, body shape and clothing. Do not beautify, rejuvenate or reshape the face. Keep the reference locations unchanged.",
     ...p.refs
@@ -155,6 +164,7 @@ export async function demanderPhotos(
   auteurId: string,
   plans: { id: string; image_description: string; lieu?: string | null }[],
   refs: Reference[],
+  remarques: Remarques = {},
 ): Promise<{ inscrites: number; sansReference: number; erreur: "budget" | "photo" | null }> {
   const lignes = plans.flatMap((plan) => {
     if (!plan.image_description.trim()) return [];
@@ -169,6 +179,9 @@ export async function demanderPhotos(
         ref_ids: choisies.map((r) => r.id),
         cost_usd: PRIX_PHOTO_ESTIME_USD,
         created_by: auteurId,
+        // Seulement quand il y en a : une demande normale reste valable même si la colonne n'existe pas encore
+        ...(remarques.a_eviter?.trim() ? { a_eviter: remarques.a_eviter.trim() } : {}),
+        ...(remarques.voulu?.trim() ? { voulu: remarques.voulu.trim() } : {}),
       },
     ];
   });
@@ -205,7 +218,8 @@ async function envoyerPhotos(supabase: SupabaseClient, projectId: string, enAtte
       .update({ runpod_job_id: ENVOI })
       .eq("id", photo.id)
       .is("runpod_job_id", null)
-      .select("id, seed, ref_ids")
+      // Toutes les colonnes : les remarques (a_eviter, voulu) sont lues si elles existent dans la base
+      .select("*")
       .maybeSingle();
     if (!prise) continue; // déjà prise par une autre actualisation
     const numero = scenes.findIndex((s) => s.id === photo.scene_id) + 1;
@@ -232,6 +246,8 @@ async function envoyerPhotos(supabase: SupabaseClient, projectId: string, enAtte
           lieu: plan.lieu ?? undefined,
           intention: plan.intention ?? undefined,
           pose_debut: plan.pose_debut ?? undefined,
+          a_eviter: prise.a_eviter ?? undefined,
+          voulu: prise.voulu ?? undefined,
           numero,
           total: scenes.length,
           format: projet.aspect_ratio,

@@ -339,6 +339,39 @@ export async function creerPhotos(projectId: string, formData: FormData) {
   );
 }
 
+// « Re-générer » : une nouvelle photo pour un seul plan, avec ce qui n'allait pas et ce que l'on veut à la place.
+// Les remarques sont ajoutées au prompt ; une nouvelle graine donne aussi une autre image.
+export async function regenererPhoto(projectId: string, sceneId: string, formData: FormData) {
+  const { supabase, profile } = await requireProfile();
+  const ancre = `#plan-${sceneId}`;
+  const serveur = await endpointPhoto();
+  if (!serveur) retour(projectId, `?erreur=sans-serveur${ancre}`);
+  if ((await lireEtatFile(supabase, projectId)).serveurArrete) retour(projectId, `?erreur=serveur-arrete${ancre}`);
+  const remarques = {
+    a_eviter: String(formData.get("a_eviter") ?? "").trim().slice(0, 600),
+    voulu: String(formData.get("voulu") ?? "").trim().slice(0, 600),
+  };
+  if (!remarques.a_eviter && !remarques.voulu) retour(projectId, `?erreur=sans-remarque&plan=${sceneId}&ouvert=1${ancre}`);
+  await mettreAJourServeur(supabase, serveur).catch(() => undefined);
+
+  const [{ data: plan }, { data: refs }] = await Promise.all([
+    supabase
+      .from("scenes")
+      .select("id, image_description, lieu, photos(status)")
+      .eq("id", sceneId)
+      .eq("project_id", projectId)
+      .single(),
+    supabase.from("film_refs").select("id, nom, genre, description, image_path").eq("project_id", projectId).order("created_at"),
+  ]);
+  if (!plan?.image_description.trim()) retour(projectId, `?erreur=photo&ouvert=1${ancre}`);
+  if ((plan.photos as { status: string }[]).some((p) => p.status === "en_cours")) retour(projectId, `?ouvert=1${ancre}`);
+
+  const { inscrites, erreur } = await demanderPhotos(supabase, profile.id, [plan], refs ?? [], remarques);
+  if (inscrites > 0) await journaliser(supabase, profile.id, "photos", "projet", projectId, { nombre: 1, regeneree: true });
+  const code = erreur ?? (inscrites === 0 ? "sans-reference" : null);
+  retour(projectId, `?photos=${inscrites}${code ? `&erreur=${code}` : ""}&ouvert=1${ancre}`);
+}
+
 // Appelée toutes les 10 s par la page tant que des photos sont en cours ; renvoie le nombre restant
 export async function actualiserPhotos(projectId: string): Promise<number> {
   const { supabase } = await requireProfile();
