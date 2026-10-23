@@ -13,7 +13,7 @@ Le cahier des charges complet et le guide pas à pas sont dans le document du pr
   2. **ChatGPT** : télécharger le fichier vide et copier la consigne ; ChatGPT découpe la voix off en plans et remplit le fichier (prompts photo et vidéo compris) ; importer le fichier rempli.
   3. **Plans** : vérifier les alertes, photos de départ de 2 façons (créées par notre serveur RunPod, ou faites ailleurs avec les prompts copiés puis importées d'un coup, plan_01.png, plan_02.png…), cocher les plans à envoyer à la génération. Ajout à la main toujours possible (un plan, ou script + photos d'un coup).
   4. **Clips** : suivre les générations (notification quand c'est prêt), valider un clip, le refuser (le plan repart en modification) ou regénérer.
-  5. **Montage** : assembler les clips validés dans l'ordre voulu, aperçu enchaîné, envoyer à valider, valider ou renvoyer en correction avec un commentaire.
+  5. **Montage** : un vrai banc de montage à pistes (vidéo principale, images par-dessus, voix off, musique), couper / raccourcir / réordonner les plans, durée des images fixes, volume par piste, fondu enchaîné, fondu au noir, zoom lent ; aperçu en direct ; export MP4 480p ou 720p HD calculé dans le navigateur (gratuit). Puis envoyer à valider, valider ou renvoyer en correction.
 - Page « Équipe et budget » (responsable) : inviter, changer le rôle, désactiver un membre, fixer le budget GPU du mois, voir l'activité récente.
 - Base de données protégée : chacun ne voit que ses espaces, et la génération se bloque quand le budget du mois est atteint.
 
@@ -25,6 +25,7 @@ Le cahier des charges complet et le guide pas à pas sont dans le document du pr
 | Comptes et base | Supabase |
 | Stockage des photos et vidéos | Supabase Storage (puis Cloudflare R2 pour les gros volumes) |
 | Photos de départ | Qwen-Image-Edit sur notre serveur RunPod, à partir des références du film |
+| Montage et export | Mediabunny (libre, WebCodecs) : le film est calculé par le navigateur, sans serveur |
 | Génération vidéo | Wan 2.2 image → vidéo : notre serveur RunPod (dossier `worker/`, version rapide 4 étapes) ou le service tout prêt RunPod (qualité max) |
 
 ## Mise en route
