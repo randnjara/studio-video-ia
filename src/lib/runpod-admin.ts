@@ -1,9 +1,13 @@
 import "server-only";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { cle } from "@/lib/runpod";
 
 // Création de notre serveur de génération chez RunPod, avec la clé déjà enregistrée dans Cloudflare.
 // L'image est construite par GitHub à chaque changement du dossier worker/ (.github/workflows/serveur-video.yml).
 export const IMAGE_SERVEUR = "ghcr.io/randnjara/studio-video-ia-worker:latest";
+// À augmenter avec worker/VERSION : le studio fait passer notre serveur sur cette image au prochain envoi
+export const VERSION_SERVEUR = "2";
+const CLE_IMAGE = "runpod_image";
 const NOM = "studio-video-eco";
 
 async function rest(chemin: string, init?: RequestInit) {
@@ -173,4 +177,13 @@ export async function depenseRunPodMois(): Promise<{ total: number; serveur: num
   } catch {
     return null;
   }
+}
+
+// RunPod garde l'image en cache : on lui indique la version exacte quand le dossier worker/ a changé
+export async function mettreAJourServeur(supabase: SupabaseClient, endpointId: string) {
+  const image = `ghcr.io/randnjara/studio-video-ia-worker:v${VERSION_SERVEUR}`;
+  const { data } = await supabase.from("reglages").select("valeur").eq("cle", CLE_IMAGE).maybeSingle();
+  if (data?.valeur === image) return;
+  await v2(`/v2/serverless/${encodeURIComponent(endpointId)}`, { method: "PATCH", body: JSON.stringify({ image }) });
+  await supabase.from("reglages").upsert({ cle: CLE_IMAGE, valeur: image });
 }

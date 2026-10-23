@@ -29,6 +29,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/setup-buildx-action@v3
+      # Numéro de version lu par le studio, qui bascule notre serveur RunPod sur la nouvelle image
+      - name: Version
+        id: version
+        run: echo "v=$(cat worker/VERSION)" >> "$GITHUB_OUTPUT"
       - uses: docker/build-push-action@v6
         with:
           context: worker
@@ -36,4 +40,5 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository }}-worker:latest
             ghcr.io/${{ github.repository }}-worker:${{ github.sha }}
+            ghcr.io/${{ github.repository }}-worker:v${{ steps.version.outputs.v }}
           labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}

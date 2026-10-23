@@ -6,7 +6,7 @@ import { journaliser } from "@/lib/journal";
 import { MOUVEMENT_PAR_DEFAUT } from "@/lib/libelles";
 import { lancerPlan, marquerEnProduction } from "@/lib/production";
 import { lancerPhoto, suivrePhotos } from "@/lib/photos";
-import { agrandirStockage } from "@/lib/runpod-admin";
+import { agrandirStockage, mettreAJourServeur } from "@/lib/runpod-admin";
 import { endpointEco, estMoteur, moteursDisponibles } from "@/lib/runpod";
 import { requireProfile } from "@/lib/session";
 
@@ -173,6 +173,8 @@ export async function envoyerALaGeneration(projectId: string, formData: FormData
   const demande = formData.get("moteur");
   const disponibles = await moteursDisponibles();
   const moteur = estMoteur(demande) && disponibles.includes(demande) ? demande : disponibles[0];
+  const serveur = moteur === "qualite" ? null : await endpointEco();
+  if (serveur) await mettreAJourServeur(supabase, serveur).catch(() => undefined);
 
   const [{ data: projet }, { data: scenes }] = await Promise.all([
     supabase.from("projects").select("aspect_ratio").eq("id", projectId).single(),
@@ -255,9 +257,13 @@ export async function enregistrerStyle(projectId: string, formData: FormData) {
 
 export async function creerPhotos(projectId: string, formData: FormData) {
   const { supabase, profile } = await requireProfile();
-  if (!(await endpointEco())) retour(projectId, "?erreur=sans-serveur");
-  // Le disque du serveur doit tenir les deux modèles (vidéo et photo)
-  await agrandirStockage().catch(() => undefined);
+  const serveur = await endpointEco();
+  if (!serveur) retour(projectId, "?erreur=sans-serveur");
+  // Le disque du serveur doit tenir les deux modèles (vidéo et photo), et le serveur doit avoir la dernière image
+  await Promise.all([
+    agrandirStockage().catch(() => undefined),
+    mettreAJourServeur(supabase, serveur).catch(() => undefined),
+  ]);
   const choisis = new Set(formData.getAll("plans").map(String));
 
   const [{ data: projet }, { data: scenes }, { data: refs }] = await Promise.all([

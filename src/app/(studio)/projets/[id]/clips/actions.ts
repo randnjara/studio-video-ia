@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { journaliser } from "@/lib/journal";
 import { lancerPlan, suivreEssais } from "@/lib/production";
-import { estMoteur, moteurParDefaut } from "@/lib/runpod";
+import { endpointEco, estMoteur, moteurParDefaut } from "@/lib/runpod";
+import { mettreAJourServeur } from "@/lib/runpod-admin";
 import { requireProfile } from "@/lib/session";
 
 function retour(projectId: string, params = ""): never {
@@ -107,6 +108,8 @@ export async function regenerer(projectId: string, sceneId: string) {
   ]);
   if (!plan) retour(projectId, "?erreur=plan");
   const moteur = estMoteur(dernier?.moteur) ? dernier.moteur : await moteurParDefaut();
+  const serveur = moteur === "qualite" ? null : await endpointEco();
+  if (serveur) await mettreAJourServeur(supabase, serveur).catch(() => undefined);
   const erreur = await lancerPlan(supabase, profile.id, plan, projet?.aspect_ratio ?? "16:9", moteur);
   retour(projectId, erreur ? `?erreur=${erreur}#plan-${sceneId}` : `?lances=1#plan-${sceneId}`);
 }
