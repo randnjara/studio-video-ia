@@ -1,5 +1,6 @@
 "use client";
 
+import { unzip } from "fflate";
 import { unstable_rethrow } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { Roue } from "@/components/bouton-envoi";
@@ -13,6 +14,20 @@ const numeroDuNom = (nom: string) => {
   const m = nom.replace(/\.[a-z0-9]+$/i, "").match(/\d+/);
   return m ? Number(m[0]) : null;
 };
+
+const TYPES: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp" };
+
+// Photos contenues dans un fichier ZIP (celui que ChatGPT donne à télécharger), dossiers et fichiers cachés ignorés
+async function photosDuZip(zip: File): Promise<File[]> {
+  const octetsZip = new Uint8Array(await zip.arrayBuffer());
+  const contenu = await new Promise<Record<string, Uint8Array>>((ok, ko) => unzip(octetsZip, (e, d) => (e ? ko(e) : ok(d))));
+  return Object.entries(contenu).flatMap(([chemin, octets]) => {
+    const nom = chemin.split("/").pop() ?? "";
+    const type = TYPES[nom.split(".").pop()?.toLowerCase() ?? ""];
+    if (!type || nom.startsWith(".") || chemin.includes("__MACOSX")) return [];
+    return [new File([octets.slice()], nom, { type })];
+  });
+}
 
 // Associe chaque photo à un plan : par le numéro dans son nom, sinon dans l'ordre, aux plans encore sans photo
 function associer(fichiers: File[], plans: PlanCourt[]) {
@@ -68,16 +83,31 @@ export function ImportPhotos({ projectId, plans }: { projectId: string; plans: P
   return (
     <div className="flex flex-col gap-3 text-sm">
       <p className="text-sourdine">
-        Nommez chaque photo avec le numéro de son plan (par exemple plan_01.png, plan_02.png…) et choisissez-les toutes d'un
-        coup. Une photo sans numéro va au premier plan qui n'a pas encore de photo.
+        2. Choisissez les fichiers ZIP donnés par ChatGPT (un ou plusieurs lots à la fois), ou directement les photos. Chaque
+        photo va au plan dont le numéro est dans son nom (plan_01.png, plan_02.png…) ; une photo sans numéro va au premier
+        plan qui n'a pas encore de photo. Les fichiers RAR ne sont pas lus : demandez un ZIP.
       </p>
       <input
         type="file"
-        accept="image/*"
+        accept="image/*,.zip,application/zip"
         multiple
         aria-label="Photos de départ"
         className="text-sm"
-        onChange={(e) => setFichiers([...(e.target.files ?? [])])}
+        onChange={async (e) => {
+          setErreur(null);
+          const choisis = [...(e.target.files ?? [])];
+          try {
+            const rar = choisis.filter((f) => /\.rar$/i.test(f.name));
+            if (rar.length) setErreur(`${rar.map((f) => f.name).join(", ")} : format RAR non lu, demandez un fichier ZIP.`);
+            const listes = await Promise.all(
+              choisis.map((f) => (/\.zip$/i.test(f.name) ? photosDuZip(f) : f.type.startsWith("image/") ? [f] : [])),
+            );
+            setFichiers(listes.flat());
+          } catch {
+            setErreur("Ce fichier ZIP n'a pas pu être ouvert. Téléchargez-le de nouveau.");
+            setFichiers([]);
+          }
+        }}
       />
       {liens.length > 0 && (
         <ul className="max-h-60 overflow-auto rounded-lg border border-ligne text-xs">

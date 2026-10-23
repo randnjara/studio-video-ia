@@ -2,7 +2,7 @@ import Link from "next/link";
 import { BoutonEnvoi } from "@/components/bouton-envoi";
 import { MOUVEMENT_PAR_DEFAUT, STATUTS_PLAN, couleurStatut, dureeLisible } from "@/lib/libelles";
 import { alertesPlans } from "@/lib/controles";
-import { promptsPhotos, suivrePhotos } from "@/lib/photos";
+import { lotsPromptsPhotos, suivrePhotos } from "@/lib/photos";
 import { signerLiens } from "@/lib/production";
 import { MOTEURS, PRIX_PHOTO_ESTIME_USD, endpointEco, moteursDisponibles } from "@/lib/runpod";
 import { getClient } from "@/lib/session";
@@ -19,6 +19,7 @@ import { FormulairePlan } from "./formulaire-plan";
 import { ImportPhotos } from "./import-photos";
 import { ImportGroupe } from "./import-groupe";
 import { BarreSelection } from "./selection";
+import { CopierLots } from "./copier-lots";
 import { CopierVerification } from "./copier-verification";
 import { SuiviPhotos } from "./suivi-photos";
 
@@ -249,12 +250,8 @@ export default async function PagePlans({
           <summary className="cursor-pointer font-semibold">📥 B. Faites ailleurs (ChatGPT, votre ordinateur…) puis importées</summary>
           <div className="mt-3 flex flex-col gap-4">
             {decrits > 0 && projet && (
-              <CopierVerification
-                carte={false}
-                titre="1. Copier les prompts des photos"
-                explication="Le bouton copie le prompt de chaque photo (description, cadrage, lieu, pose, règles du studio), avec le nom de fichier à utiliser : plan_01.png, plan_02.png… Collez-le dans votre outil d'images avec les photos de référence."
-                bouton="📋 Copier les prompts des photos"
-                texte={promptsPhotos(
+              <CopierLots
+                lots={lotsPromptsPhotos(
                   plans.map((p, i) => ({
                     numero: i + 1,
                     description: p.image_description,
