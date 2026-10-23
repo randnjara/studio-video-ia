@@ -13,6 +13,7 @@ import {
   supprimerMontage,
 } from "./actions";
 import { LecteurMontage } from "./lecteur";
+import { ControleRaccords } from "./raccords";
 
 type Montage = {
   id: string;
@@ -143,6 +144,10 @@ export default async function PageMontage({
       {/* 2. Les montages, à revoir, valider ou corriger */}
       {montages.map((m) => {
         const liste = m.take_ids.map((t) => clips.get(t)).filter((c): c is Clip => Boolean(c));
+        const clipsLus = liste.flatMap((c) => {
+          const url = c.videoPath ? liens.get(c.videoPath) : undefined;
+          return url ? [{ url, libelle: `Plan ${c.planNumero}` }] : [];
+        });
         const duree = liste.reduce((n, c) => n + c.duree, 0);
         const absents = disponibles.filter((c) => !m.take_ids.includes(c.takeId));
         const modifiable = m.status === "brouillon" || m.status === "a_corriger";
@@ -166,12 +171,10 @@ export default async function PageMontage({
             )}
 
             <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
-              <LecteurMontage
-                clips={liste.flatMap((c) => {
-                  const url = c.videoPath ? liens.get(c.videoPath) : undefined;
-                  return url ? [{ url, libelle: `Plan ${c.planNumero}` }] : [];
-                })}
-              />
+              <div className="flex min-w-0 flex-col gap-4">
+                <LecteurMontage clips={clipsLus} />
+                <ControleRaccords clips={clipsLus} />
+              </div>
 
               <div className="flex flex-col gap-3">
                 <p className="etiquette">Ordre des clips</p>
