@@ -1,5 +1,6 @@
 import type { EmailOtpType } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
+import { noterConnexion } from "@/lib/journal-connexion";
 import { createClient } from "@/lib/supabase/server";
 
 // Lien d'invitation ou de connexion qui fonctionne même ouvert sur un autre appareil
@@ -11,7 +12,8 @@ export async function GET(request: NextRequest) {
 
   if (tokenHash && type) {
     const supabase = await createClient();
-    const { error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type });
+    const { data, error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type });
+    await noterConnexion(data.user?.email ?? null, error ? "lien-refuse" : "connexion-reussie", error ? `confirm : ${error.message}` : "confirm");
     if (!error) return NextResponse.redirect(`${origin}/`);
   }
   return NextResponse.redirect(`${origin}/connexion?erreur=lien-invalide`);

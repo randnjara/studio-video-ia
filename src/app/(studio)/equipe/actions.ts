@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { journaliser } from "@/lib/journal";
+import { noterConnexion } from "@/lib/journal-connexion";
 import { CLE_ENDPOINT, CLE_VOLUME, endpointEco } from "@/lib/runpod";
 import { ajouterStockage, creerServeur } from "@/lib/runpod-admin";
 import { requireProfile } from "@/lib/session";
@@ -100,4 +101,71 @@ export async function ajouterStockageEco() {
   await journaliser(supabase, profile.id, "creation-stockage", "reglage", null, volume);
   revalidatePath("/equipe");
   redirect("/equipe?stockage=1");
+}
+
+async function emailDe(userId: string) {
+  const { data, error } = await createAdminClient().auth.admin.getUserById(userId);
+  if (error || !data.user?.email) redirect(`/equipe?erreur=membre&detail=${encodeURIComponent(error?.message ?? "")}`);
+  return data.user;
+}
+
+// Lien de connexion à copier et envoyer soi-même (WhatsApp, Messenger…) : aucun e-mail, donc pas de limite d'envoi.
+// Valable une heure et une seule fois ; il fonctionne sur n'importe quel appareil.
+export async function creerLienConnexion(userId: string): Promise<{ lien?: string; erreur?: string }> {
+  const { supabase, profile } = await requireResponsable();
+  const admin = createAdminClient();
+  const { data: u } = await admin.auth.admin.getUserById(userId);
+  if (!u.user?.email) return { erreur: "Membre introuvable." };
+  const { data, error } = await admin.auth.admin.generateLink({ type: "magiclink", email: u.user.email });
+  if (error || !data.properties?.hashed_token) return { erreur: error?.message ?? "Lien non créé." };
+  await journaliser(supabase, profile.id, "lien-connexion", "membre", userId, { email: u.user.email });
+  await noterConnexion(u.user.email, "lien-cree-par-responsable", profile.display_name);
+  return { lien: `${await siteUrl()}/auth/confirm?token_hash=${data.properties.hashed_token}&type=magiclink` };
+}
+
+// Renvoie par e-mail l'invitation (compte jamais ouvert) ou un lien de connexion
+export async function renvoyerLien(userId: string) {
+  const { supabase, profile } = await requireResponsable();
+  const user = await emailDe(userId);
+  const email = user.email!;
+  const admin = createAdminClient();
+  const { error } = user.email_confirmed_at
+    ? await admin.auth.signInWithOtp({
+        email,
+        options: { shouldCreateUser: false, emailRedirectTo: `${await siteUrl()}/connexion` },
+      })
+    : await admin.auth.admin.inviteUserByEmail(email, { redirectTo: `${await siteUrl()}/connexion` });
+  await noterConnexion(
+    email,
+    error ? "erreur-envoi-lien" : "lien-envoye-par-responsable",
+    error ? `${error.status ?? ""} ${error.code ?? ""} ${error.message}`.trim() : profile.display_name,
+  );
+  if (error) {
+    const quota = error.status === 429 || error.code === "over_email_send_rate_limit";
+    redirect(`/equipe?erreur=${quota ? "quota" : "renvoi"}&detail=${encodeURIComponent(quota ? "" : error.message)}`);
+  }
+  await journaliser(supabase, profile.id, "renvoi-lien", "membre", userId, { email });
+  redirect(`/equipe?renvoye=${encodeURIComponent(email)}`);
+}
+
+// Déconnecte le membre de tous ses appareils : il repart de zéro avec un nouveau lien
+export async function reinitialiserConnexion(userId: string) {
+  const { supabase, profile } = await requireResponsable();
+  const { error } = await supabase.rpc("reinitialiser_sessions", { uid: userId });
+  if (error) redirect(`/equipe?erreur=reinitialisation&detail=${encodeURIComponent(error.message)}`);
+  await journaliser(supabase, profile.id, "reinitialisation", "membre", userId);
+  redirect("/equipe?reinitialise=1");
+}
+
+// Supprime le compte. Ses projets, plans et vidéos restent dans le studio.
+export async function supprimerMembre(userId: string, formData: FormData) {
+  const { supabase, profile } = await requireResponsable();
+  if (userId === profile.id) redirect("/equipe?erreur=soi-meme");
+  if (formData.get("confirmer") !== "oui") redirect("/equipe?erreur=confirmer");
+  const user = await emailDe(userId);
+  const { error } = await createAdminClient().auth.admin.deleteUser(userId);
+  if (error) redirect(`/equipe?erreur=suppression&detail=${encodeURIComponent(error.message)}`);
+  await journaliser(supabase, profile.id, "suppression", "membre", null, { email: user.email });
+  revalidatePath("/equipe");
+  redirect(`/equipe?supprime=${encodeURIComponent(user.email ?? "")}`);
 }
