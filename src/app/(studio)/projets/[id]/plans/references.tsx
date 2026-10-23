@@ -65,7 +65,7 @@ export function AjoutReference({ projectId }: { projectId: string }) {
         <input
           name="description"
           maxLength={300}
-          placeholder="Détails à garder (ex. : femme de 30 ans, robe rouge, cheveux tressés)"
+          placeholder="Détails à garder, facultatif (ex. : femme de 30 ans, robe rouge, cheveux tressés)"
           className="champ text-sm"
         />
         {erreur && <p className="message-erreur">{erreur}</p>}
