@@ -4,7 +4,7 @@ import { EtapesProjet, type Etape } from "@/components/etapes-projet";
 import { STATUTS_PROJET, couleurStatut } from "@/lib/libelles";
 import { getClient, requireProfile } from "@/lib/session";
 
-// Cadre commun aux pages d'un projet : titre et les 4 étapes Infos → Plans → Clips → Montage
+// Cadre commun aux pages d'un projet : titre et les 5 étapes Infos → ChatGPT → Plans → Clips → Montage
 export default async function CadreProjet({
   children,
   params,
@@ -16,7 +16,7 @@ export default async function CadreProjet({
   const supabase = await getClient();
 
   // La vérification du profil et les requêtes du projet partent en même temps
-  const [, { data: projet }, { data: scenes }, { data: montages }] = await Promise.all([
+  const [, { data: projet }, { data: scenes }, { data: montages }, { count: personnages }] = await Promise.all([
     requireProfile(),
     supabase
       .from("projects")
@@ -26,6 +26,7 @@ export default async function CadreProjet({
       .maybeSingle(),
     supabase.from("scenes").select("status, image_path").eq("project_id", id),
     supabase.from("montages").select("status").eq("project_id", id),
+    supabase.from("film_refs").select("id", { count: "exact", head: true }).eq("project_id", id).eq("genre", "personnage"),
   ]);
   if (!projet) notFound();
 
@@ -37,18 +38,25 @@ export default async function CadreProjet({
   const liste = montages ?? [];
   const montageValide = liste.some((m) => m.status === "valide");
 
-  const fait = [true, plans.length > 0 && avecPhoto === plans.length, plans.length > 0 && valides === plans.length, montageValide];
-  const actuelle = fait.findIndex((f, i) => i > 0 && !f);
+  const fait = [
+    (personnages ?? 0) > 0 || plans.length > 0,
+    plans.length > 0,
+    plans.length > 0 && avecPhoto === plans.length,
+    plans.length > 0 && valides === plans.length,
+    montageValide,
+  ];
+  const actuelle = fait.findIndex((f) => !f);
   const etat = (i: number): Etape["etat"] => (i === actuelle ? "actuelle" : fait[i] ? "fait" : "a_venir");
   const base = `/projets/${id}`;
 
   const etapes: Etape[] = [
-    { href: base, titre: "Infos", detail: projet.client_name || "Client, format, date", etat: etat(0) },
+    { href: base, titre: "Infos", detail: personnages ? "Voix off, personnages" : "Photo du personnage à ajouter", etat: etat(0) },
+    { href: `${base}/chatgpt`, titre: "ChatGPT", detail: plans.length ? "Tableau importé" : "Tableau des plans", etat: etat(1) },
     {
       href: `${base}/plans`,
       titre: "Plans",
       detail: plans.length ? `${plans.length} plan${plans.length > 1 ? "s" : ""}, ${avecPhoto} avec photo` : "À créer",
-      etat: etat(1),
+      etat: etat(2),
     },
     {
       href: `${base}/clips`,
@@ -58,13 +66,13 @@ export default async function CadreProjet({
         : aValider
           ? `${aValider} à valider`
           : `${valides} validé${valides > 1 ? "s" : ""}`,
-      etat: etat(2),
+      etat: etat(3),
     },
     {
       href: `${base}/montage`,
       titre: "Montage",
       detail: liste.length ? `${liste.length} montage${liste.length > 1 ? "s" : ""}` : "À assembler",
-      etat: actuelle === -1 ? "fait" : etat(3),
+      etat: actuelle === -1 ? "fait" : etat(4),
     },
   ];
 

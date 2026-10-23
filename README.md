@@ -8,11 +8,12 @@ Le cahier des charges complet et le guide pas à pas sont dans le document du pr
 
 - Connexion par lien envoyé par e-mail, sans mot de passe, **sur invitation uniquement**. Rôles responsable / membre modifiables.
 - Chaque membre a son espace personnel. Tout le monde partage l'espace « Équipe ».
-- Chaque projet suit 4 étapes, en onglets (l'étape actuelle est en couleur) :
-  1. **Infos** : client, format, date, prochaine étape, historique, corbeille.
-  2. **Plans** : créer les plans un par un, ou tout le script et les photos d'un coup (autant de fois que voulu, scripts gardés en historique). Cocher les plans à envoyer à la génération.
-  3. **Clips** : suivre les générations (notification quand c'est prêt), valider un clip, le refuser (le plan repart en modification) ou regénérer.
-  4. **Montage** : assembler les clips validés dans l'ordre voulu, aperçu enchaîné, envoyer à valider, valider ou renvoyer en correction avec un commentaire.
+- Chaque projet suit 5 étapes, en onglets (l'étape actuelle est en couleur) :
+  1. **Infos** : titre, format, résumé, voix off, style, photos de référence (au minimum le personnage principal), puis « Valider les informations ». Aussi : prochaine étape, historique, corbeille.
+  2. **ChatGPT** : télécharger le fichier vide et copier la consigne ; ChatGPT découpe la voix off en plans et remplit le fichier (prompts photo et vidéo compris) ; importer le fichier rempli.
+  3. **Plans** : vérifier les alertes, créer les photos de départ, cocher les plans à envoyer à la génération. Ajout à la main toujours possible (un plan, ou script + photos d'un coup).
+  4. **Clips** : suivre les générations (notification quand c'est prêt), valider un clip, le refuser (le plan repart en modification) ou regénérer.
+  5. **Montage** : assembler les clips validés dans l'ordre voulu, aperçu enchaîné, envoyer à valider, valider ou renvoyer en correction avec un commentaire.
 - Page « Équipe et budget » (responsable) : inviter, changer le rôle, désactiver un membre, fixer le budget GPU du mois, voir l'activité récente.
 - Base de données protégée : chacun ne voit que ses espaces, et la génération se bloque quand le budget du mois est atteint.
 

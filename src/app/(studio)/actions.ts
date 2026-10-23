@@ -30,7 +30,7 @@ export async function creerProjet(formData: FormData) {
 
   await journaliser(supabase, profile.id, "creation", "projet", data.id, { title });
   revalidatePath("/");
-  redirect(`/projets/${data.id}/plans`);
+  redirect(`/projets/${data.id}`);
 }
 
 export async function supprimerProjet(projectId: string) {

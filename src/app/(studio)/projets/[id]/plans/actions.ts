@@ -10,6 +10,12 @@ import { agrandirStockage, mettreAJourServeur } from "@/lib/runpod-admin";
 import { endpointEco, estMoteur, moteursDisponibles } from "@/lib/runpod";
 import { requireProfile } from "@/lib/session";
 
+// Les références du film se gèrent à l'étape 1 (Infos)
+function versInfos(projectId: string, params = ""): never {
+  revalidatePath(`/projets/${projectId}`, "layout");
+  redirect(`/projets/${projectId}${params}`);
+}
+
 function retour(projectId: string, params = ""): never {
   revalidatePath(`/projets/${projectId}`, "layout");
   redirect(`/projets/${projectId}/plans${params}`);
@@ -234,7 +240,7 @@ export async function ajouterReference(projectId: string, formData: FormData) {
   const { supabase, profile } = await requireProfile();
   const nom = String(formData.get("nom") ?? "").trim();
   const image = cheminPhoto(projectId, formData.get("image_path"));
-  if (!nom || !image) retour(projectId, "?erreur=reference#references");
+  if (!nom || !image) versInfos(projectId, "?erreur=reference#references");
   const genre = String(formData.get("genre") ?? "personnage");
   const { error } = await supabase.from("film_refs").insert({
     project_id: projectId,
@@ -244,23 +250,14 @@ export async function ajouterReference(projectId: string, formData: FormData) {
     image_path: image,
     created_by: profile.id,
   });
-  if (error) retour(projectId, "?erreur=reference#references");
-  retour(projectId, "?reference=1#references");
+  if (error) versInfos(projectId, "?erreur=reference#references");
+  versInfos(projectId, "?reference=1#references");
 }
 
 export async function supprimerReference(projectId: string, refId: string) {
   const { supabase } = await requireProfile();
   await supabase.from("film_refs").delete().eq("id", refId).eq("project_id", projectId);
-  retour(projectId, "#references");
-}
-
-export async function enregistrerStyle(projectId: string, formData: FormData) {
-  const { supabase } = await requireProfile();
-  await supabase
-    .from("projects")
-    .update({ style_text: String(formData.get("style_text") ?? "").trim().slice(0, 600) })
-    .eq("id", projectId);
-  retour(projectId, "?style=1#references");
+  versInfos(projectId, "#references");
 }
 
 export async function creerPhotos(projectId: string, formData: FormData) {
@@ -373,15 +370,3 @@ export async function importerTableau(projectId: string, lignes: LigneTableau[],
   retour(projectId, `?importe=${Math.min(lignes.length, 300)}`);
 }
 
-// Garde la voix off dans le projet (et une copie dans l'historique), sans créer de plans
-export async function enregistrerScript(projectId: string, script: string, resume?: string) {
-  const { supabase, profile } = await requireProfile();
-  const texte = script.trim().slice(0, 50_000);
-  const champs = resume === undefined ? { scenario_text: texte } : { scenario_text: texte, resume: resume.trim().slice(0, 5_000) };
-  await Promise.all([
-    supabase.from("projects").update(champs).eq("id", projectId),
-    supabase
-      .from("project_versions")
-      .insert({ project_id: projectId, kind: "scenario", data: { scenario_text: texte }, created_by: profile.id }),
-  ]);
-}

@@ -164,9 +164,9 @@ function convertir(lignes: string[][], personnage: string): { plans: LigneTablea
   };
 }
 
-export function ImportTableau({ projectId }: { projectId: string }) {
+export function ImportTableau({ projectId, personnageParDefaut = "" }: { projectId: string; personnageParDefaut?: string }) {
   const [texte, setTexte] = useState("");
-  const [personnage, setPersonnage] = useState("");
+  const [personnage, setPersonnage] = useState(personnageParDefaut);
   const [accord, setAccord] = useState(true);
   const [erreur, setErreur] = useState<string | null>(null);
   const [enCours, demarrer] = useTransition();
@@ -181,7 +181,7 @@ export function ImportTableau({ projectId }: { projectId: string }) {
   return (
     <div className="flex flex-col gap-3">
       <p className="text-sm text-sourdine">
-        Un tableau préparé ailleurs (par exemple avec le prompt de préparation ci-dessus), en CSV : une ligne par scène.
+        Le fichier rempli par ChatGPT, ou un autre tableau en CSV : une ligne par plan.
         Colonnes reconnues : voix ou dialogue, mouvement, description, action, cadrage, angle, lieu ou décor, intention, pose
         de début et de fin, durée. Un scénario Markdown « ## SCÈNE 01 … » est aussi accepté.
       </p>
@@ -196,7 +196,7 @@ export function ImportTableau({ projectId }: { projectId: string }) {
       />
       <div>
         <label className="etiquette" htmlFor="personnage-tableau">
-          Nom du personnage à citer dans chaque description (doit être le nom d'une référence du film)
+          Personnage ajouté aux descriptions qui ne citent personne (nom d'une photo de référence)
         </label>
         <input
           id="personnage-tableau"
