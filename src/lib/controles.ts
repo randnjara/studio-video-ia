@@ -27,14 +27,28 @@ const mots = (t: string) =>
     .split(/[^a-z0-9]+/)
     .filter((m) => m.length > 2);
 
-// Part de mots en commun entre deux textes (0 à 1)
-export function ressemblance(a: string, b: string) {
-  const A = new Set(mots(a));
-  const B = new Set(mots(b));
+// Part de mots en commun entre deux textes (0 à 1), sans compter les mots de « communs »
+export function ressemblance(a: string, b: string, communs: Set<string> = new Set()) {
+  let A = new Set(mots(a).filter((m) => !communs.has(m)));
+  let B = new Set(mots(b).filter((m) => !communs.has(m)));
+  // Presque rien de propre au plan : c'est le même texte recopié partout, on compare alors les textes entiers
+  if (A.size < 3 || B.size < 3) {
+    A = new Set(mots(a));
+    B = new Set(mots(b));
+  }
   if (A.size < 3 || B.size < 3) return 0;
-  let communs = 0;
-  for (const m of A) if (B.has(m)) communs++;
-  return communs / (A.size + B.size - communs);
+  let partages = 0;
+  for (const m of A) if (B.has(m)) partages++;
+  return partages / (A.size + B.size - partages);
+}
+
+// Mots présents dans plus d'un tiers des textes : description du personnage et du lieu, règles recopiées dans chaque
+// prompt. Ils sont voulus (continuité) et ne disent rien du geste propre au plan, on les laisse de côté pour comparer.
+function motsCommuns(textes: string[]) {
+  const compte = new Map<string, number>();
+  for (const t of textes) for (const m of new Set(mots(t))) compte.set(m, (compte.get(m) ?? 0) + 1);
+  const seuil = Math.max(3, textes.length / 3);
+  return new Set([...compte].filter(([, n]) => n > seuil).map(([m]) => m));
 }
 
 export function dureeVoix(texte: string) {
@@ -63,6 +77,8 @@ export function pasEnAnglais(texte: string) {
 export function alertesPlans(plans: PlanControle[], mouvementParDefaut = "") {
   const alertes = new Map<string, string[]>();
   const ajouter = (id: string, texte: string) => alertes.set(id, [...(alertes.get(id) ?? []), texte]);
+  const communsMvt = motsCommuns(plans.map((p) => p.motion_prompt));
+  const communsPhoto = motsCommuns(plans.map((p) => p.image_description));
 
   plans.forEach((p, i) => {
     // Répétitions avec les plans précédents proches : on signale le plus proche, une fois par sorte de répétition
@@ -71,13 +87,13 @@ export function alertesPlans(plans: PlanControle[], mouvementParDefaut = "") {
       for (let j = i - 1; j >= Math.max(0, i - VOISINS); j--) if (pareil(plans[j])) return j + 1;
       return 0;
     };
-    const mvt = p.motion_prompt !== mouvementParDefaut ? proche((q) => ressemblance(p.motion_prompt, q.motion_prompt) >= 0.8) : 0;
+    const mvt = p.motion_prompt !== mouvementParDefaut ? proche((q) => ressemblance(p.motion_prompt, q.motion_prompt, communsMvt) >= 0.8) : 0;
     if (mvt) ajouter(p.id, `Même mouvement que le plan ${mvt} : variez le geste ou la caméra.`);
     const fin = p.pose_fin
       ? proche((q) => Boolean(q.pose_fin) && (p.pose_fin === q.pose_fin || ressemblance(p.pose_fin!, q.pose_fin!) >= 0.9))
       : 0;
     if (fin) ajouter(p.id, `Même pose de fin que le plan ${fin} : chaque fin doit préparer le plan suivant.`);
-    const photo = proche((q) => ressemblance(p.image_description, q.image_description) >= 0.8);
+    const photo = proche((q) => ressemblance(p.image_description, q.image_description, communsPhoto) >= 0.8);
     if (photo) ajouter(p.id, `Photo presque identique à celle du plan ${photo} : changez le cadrage, l'angle ou l'action.`);
     const prec = plans[i - 1];
     if (prec && p.cadrage && p.angle && p.cadrage === prec.cadrage && p.angle === prec.angle)
