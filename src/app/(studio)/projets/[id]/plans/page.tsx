@@ -82,7 +82,7 @@ export default async function PagePlans({
 
   // Le cadre du projet vérifie déjà la connexion et l'existence du projet : tout part en même temps
   const [{ data: projet }, { data }, { data: versions }, moteurs, { data: refsLues }, serveur] = await Promise.all([
-    supabase.from("projects").select("title, aspect_ratio, scenario_text, style_text").eq("id", id).maybeSingle(),
+    supabase.from("projects").select("title, aspect_ratio, scenario_text, style_text, resume").eq("id", id).maybeSingle(),
     supabase
       .from("scenes")
       .select(
@@ -211,6 +211,7 @@ export default async function PagePlans({
           format={projet?.aspect_ratio ?? "16:9"}
           style={projet?.style_text ?? ""}
           script={projet?.scenario_text ?? ""}
+          resume={projet?.resume ?? ""}
           refs={refs}
         />
         <details className="rounded-lg border border-ligne p-4">
@@ -267,7 +268,7 @@ export default async function PagePlans({
         </details>
         <form action={enregistrerStyle.bind(null, id)} className="flex flex-col gap-2">
           <label className="etiquette" htmlFor="style-film">
-            Style du film (ajouté à chaque photo)
+            Style du film (facultatif, ajouté à chaque photo ; ChatGPT peut le proposer)
           </label>
           <textarea
             id="style-film"

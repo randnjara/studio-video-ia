@@ -30,6 +30,7 @@ export function promptPreparation(p: {
   format: string;
   style: string;
   script: string;
+  resume?: string;
   refs: Ref[];
 }) {
   const parGenre = (g: string) =>
@@ -44,9 +45,11 @@ Je te joins : la ou les photos de référence du personnage principal, la voix o
 Ta mission : remplir ce fichier avec TOUT ce dont mon studio a besoin pour fabriquer le film, en une seule fois, avec un niveau de qualité professionnel. Je l'importerai tel quel : rien ne sera corrigé à la main après toi.
 
 FILM : « ${p.titre} » — format ${p.format}
+RÉSUMÉ / BUT DU FILM : ${p.resume?.trim() || "(non donné : déduis-le de la voix off)"}
 STYLE DU FILM (le studio l'ajoute lui-même à chaque photo : ne le répète jamais dans les cellules) : ${p.style.trim() || "(à proposer en partie A)"}
 PERSONNAGES (noms à écrire exactement ainsi) : ${parGenre("personnage")}
 LIEUX AUTORISÉS (noms à écrire exactement ainsi, aucun autre lieu) : ${parGenre("lieu")}
+Si aucun lieu n'est donné : choisis toi-même 2 à 5 lieux qui servent l'histoire et le résumé, donne-leur un nom court, et utilise uniquement ces noms dans tout le tableau.
 OBJETS : ${parGenre("objet")}
 
 === VOIX OFF ===
@@ -60,7 +63,7 @@ ${p.script.trim() || "Je te la donne juste après cette consigne (ou en fichier 
 - Après l'import, le studio signale automatiquement : gestes ou poses de fin répétés sur 10 plans voisins, même cadrage + angle deux plans de suite, voix trop longue pour la durée, consignes vidéo pas en anglais. Vise zéro alerte.
 
 === ÉTAPE 1 — ANALYSE (dans ta tête, avant d'écrire) ===
-Lis toute la voix off. Repère l'histoire, les moments forts, les changements d'émotion et les séquences (groupes de plans dans un même lieu et une même lumière). Décide la carte des lieux et l'ordre des séquences. Ce plan d'ensemble guide tout le tableau : un film, pas une suite de plans isolés.
+Lis le résumé et toute la voix off. Repère l'histoire, les moments forts, les changements d'émotion et les séquences (groupes de plans dans un même lieu et une même lumière). Décide la carte des lieux et l'ordre des séquences. Ce plan d'ensemble guide tout le tableau : un film, pas une suite de plans isolés.
 
 === ÉTAPE 2 — RÈGLES DU TABLEAU ===
 1. DÉCOUPAGE. Découpe toi-même la voix off en plans, dans l'ordre : un plan = une réplique, ou un morceau de réplique coupé à une pause naturelle (fin de phrase, virgule, respiration). Chaque mot prononcé apparaît une seule fois dans « voix », sans traduction, correction ni oubli, dans sa langue d'origine. Les titres, numéros, noms de locuteur et indications de mise en scène ne sont pas des paroles : ne les mets pas dans « voix », sers-t'en pour l'intention et les gestes. Un plan sans parole (respiration, regard, transition) est permis : « voix » vide.

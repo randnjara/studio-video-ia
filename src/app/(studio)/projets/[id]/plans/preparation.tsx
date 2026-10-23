@@ -8,13 +8,23 @@ type Ref = { nom: string; genre: string; description: string };
 
 // Préparation du tableau des plans avec ChatGPT : le studio donne la consigne et le fichier vide au format standard,
 // ChatGPT découpe la voix off en plans et remplit le fichier, qui se réimporte tel quel. La voix off collée ici est facultative.
-export function PreparationTableau(p: { projectId: string; titre: string; format: string; style: string; script: string; refs: Ref[] }) {
+export function PreparationTableau(p: {
+  projectId: string;
+  titre: string;
+  format: string;
+  style: string;
+  script: string;
+  resume: string;
+  refs: Ref[];
+}) {
   const [voix, setVoix] = useState(p.script);
+  const [resume, setResume] = useState(p.resume);
   const [etat, setEtat] = useState<"" | "copie" | "manuel">("");
-  const texte = promptPreparation({ titre: p.titre, format: p.format, style: p.style, script: voix, refs: p.refs });
+  const texte = promptPreparation({ titre: p.titre, format: p.format, style: p.style, script: voix, resume, refs: p.refs });
 
   const garder = () => {
-    if (voix.trim() !== p.script.trim()) enregistrerScript(p.projectId, voix).catch(() => undefined);
+    if (voix.trim() !== p.script.trim() || resume.trim() !== p.resume.trim())
+      enregistrerScript(p.projectId, voix, resume).catch(() => undefined);
   };
 
   // Fichier .csv à joindre dans ChatGPT (avec un BOM pour qu'Excel lise bien les accents)
@@ -42,7 +52,7 @@ export function PreparationTableau(p: { projectId: string; titre: string; format
       <summary className="cursor-pointer font-semibold">🤖 Préparer le tableau des plans avec ChatGPT (gratuit)</summary>
       <div className="mt-3 flex flex-col gap-3">
         <div className="space-y-1 text-sourdine">
-          <p>1. Ajoutez d'abord les références du film (personnage principal, lieux) et le style, plus bas.</p>
+          <p>1. Plus bas, dans « Références du film », ajoutez au moins la photo du personnage principal avec son nom. Le reste est facultatif.</p>
           <p>2. Téléchargez le fichier vide et copiez la consigne.</p>
           <p>
             3.
@@ -50,6 +60,19 @@ export function PreparationTableau(p: { projectId: string; titre: string; format
             fichier). ChatGPT découpe la voix off en plans et remplit le fichier.
           </p>
           <p>4. Téléchargez le fichier rempli et importez-le juste en dessous, sans rien changer.</p>
+        </div>
+        <div>
+          <label className="etiquette" htmlFor="resume-preparation">
+            Résumé ou but du film (facultatif, quelques phrases)
+          </label>
+          <textarea
+            id="resume-preparation"
+            rows={3}
+            value={resume}
+            onChange={(e) => setResume(e.target.value)}
+            placeholder="Ex. : Mama, grand-mère malgache, parle avec tendresse à ses petits-enfants partis loin. Film d'environ 5 minutes."
+            className="champ text-sm"
+          />
         </div>
         <div>
           <label className="etiquette" htmlFor="voix-preparation">
