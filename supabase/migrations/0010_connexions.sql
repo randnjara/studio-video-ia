@@ -24,18 +24,11 @@ as $$
   group by s.user_id
 $$;
 
--- Déconnecte un membre de tous ses appareils
+-- Déconnecte un membre de tous ses appareils (rien n'est supprimé si l'appelant n'est pas responsable)
 create function public.reinitialiser_sessions(uid uuid)
-returns void
-language plpgsql security definer set search_path = ''
-as $$
-begin
-  if not public.is_responsable() then
-    raise exception 'Réservé au responsable';
-  end if;
-  delete from auth.sessions where user_id = uid;
-end
-$$;
+returns bigint
+language sql security definer set search_path = ''
+as 'with d as (delete from auth.sessions where user_id = uid and public.is_responsable() returning 1) select count(*) from d';
 
 revoke execute on function public.sessions_membres() from public, anon;
 revoke execute on function public.reinitialiser_sessions(uuid) from public, anon;
