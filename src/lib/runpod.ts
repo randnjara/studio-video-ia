@@ -122,6 +122,31 @@ export async function lancerGeneration(p: {
   return String(data.id);
 }
 
+// Photo de départ créée par Qwen-Image-Edit sur notre serveur (métier « image »), à partir de 1 à 3 références.
+// Estimation prudente, recalculée ensuite à partir du temps de GPU.
+export const PRIX_PHOTO_ESTIME_USD = 0.02;
+
+export async function lancerPhotoRunPod(p: {
+  prompt: string;
+  referenceUrls: string[];
+  format: string;
+  seed: number;
+  imagePath: string;
+  uploadUrl: string;
+}): Promise<string> {
+  const input = {
+    mode: "image",
+    prompt: p.prompt,
+    reference_urls: p.referenceUrls,
+    format: p.format,
+    seed: p.seed,
+    image_path: p.imagePath,
+    upload_url: p.uploadUrl,
+  };
+  const data = await appel("eco-480", "/run", { method: "POST", body: JSON.stringify({ input }) });
+  return String(data.id);
+}
+
 export type StatutRunPod =
   | { etat: "en_cours" }
   | {
@@ -129,6 +154,7 @@ export type StatutRunPod =
       // Service tout prêt : vidéo à télécharger. Notre serveur : vidéo déjà rangée dans le stockage.
       videoUrl?: string;
       videoPath?: string;
+      imagePath?: string;
       coutUsd: number | null;
       secondes: number | null;
     }
@@ -141,13 +167,10 @@ export async function lireStatut(moteur: Moteur, jobId: string): Promise<StatutR
       const secondes = typeof data.executionTime === "number" ? data.executionTime / 1000 : null;
       if (data.output?.error) return { etat: "echouee", erreur: String(data.output.error).slice(0, 500) };
       if (moteur !== "qualite") {
+        const coutUsd = secondes !== null ? Math.round(secondes * PRIX_SECONDE_GPU * 10000) / 10000 : null;
+        if (data.output?.image_path) return { etat: "terminee", imagePath: String(data.output.image_path), secondes, coutUsd };
         if (!data.output?.video_path) return { etat: "echouee", erreur: "Le serveur n'a pas renvoyé de vidéo." };
-        return {
-          etat: "terminee",
-          videoPath: String(data.output.video_path),
-          secondes,
-          coutUsd: secondes !== null ? Math.round(secondes * PRIX_SECONDE_GPU * 10000) / 10000 : null,
-        };
+        return { etat: "terminee", videoPath: String(data.output.video_path), secondes, coutUsd };
       }
       const url = data.output?.video_url ?? data.output?.result ?? data.output?.url;
       if (!url) return { etat: "echouee", erreur: "RunPod n'a pas renvoyé de vidéo." };

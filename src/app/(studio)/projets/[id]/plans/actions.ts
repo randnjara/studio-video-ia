@@ -5,7 +5,9 @@ import { redirect } from "next/navigation";
 import { journaliser } from "@/lib/journal";
 import { MOUVEMENT_PAR_DEFAUT } from "@/lib/libelles";
 import { lancerPlan, marquerEnProduction } from "@/lib/production";
-import { estMoteur, moteursDisponibles } from "@/lib/runpod";
+import { lancerPhoto, suivrePhotos } from "@/lib/photos";
+import { agrandirStockage } from "@/lib/runpod-admin";
+import { endpointEco, estMoteur, moteursDisponibles } from "@/lib/runpod";
 import { requireProfile } from "@/lib/session";
 
 function retour(projectId: string, params = ""): never {
@@ -43,6 +45,7 @@ export async function ajouterPlan(projectId: string, formData: FormData) {
       position: await prochainePosition(supabase, projectId),
       motion_prompt: String(formData.get("motion_prompt") ?? "").trim(),
       voiceover_text: String(formData.get("voiceover_text") ?? "").trim(),
+      image_description: String(formData.get("image_description") ?? "").trim(),
       consent_confirmed: formData.get("consent_confirmed") === "on",
       image_path: cheminPhoto(projectId, formData.get("image_path")),
     })
@@ -109,6 +112,7 @@ export async function modifierPlan(projectId: string, sceneId: string, formData:
       .update({
         motion_prompt: String(formData.get("motion_prompt") ?? "").trim(),
         voiceover_text: String(formData.get("voiceover_text") ?? "").trim(),
+        image_description: String(formData.get("image_description") ?? "").trim(),
         consent_confirmed: formData.get("consent_confirmed") === "on",
         ...(photo ? { image_path: photo } : {}),
       })
@@ -212,4 +216,95 @@ export async function restaurerScript(projectId: string, versionId: number) {
   const texte = String((version.data as { scenario_text?: string }).scenario_text ?? "");
   await supabase.from("projects").update({ scenario_text: texte }).eq("id", projectId);
   retour(projectId, "?script-restaure=1#script");
+}
+
+// --- Références du film et photos de départ (Qwen-Image-Edit sur notre serveur) ---
+
+export async function ajouterReference(projectId: string, formData: FormData) {
+  const { supabase, profile } = await requireProfile();
+  const nom = String(formData.get("nom") ?? "").trim();
+  const image = cheminPhoto(projectId, formData.get("image_path"));
+  if (!nom || !image) retour(projectId, "?erreur=reference#references");
+  const genre = String(formData.get("genre") ?? "personnage");
+  const { error } = await supabase.from("film_refs").insert({
+    project_id: projectId,
+    nom: nom.slice(0, 60),
+    genre: ["personnage", "lieu", "objet", "style"].includes(genre) ? genre : "personnage",
+    description: String(formData.get("description") ?? "").trim().slice(0, 300),
+    image_path: image,
+    created_by: profile.id,
+  });
+  if (error) retour(projectId, "?erreur=reference#references");
+  retour(projectId, "?reference=1#references");
+}
+
+export async function supprimerReference(projectId: string, refId: string) {
+  const { supabase } = await requireProfile();
+  await supabase.from("film_refs").delete().eq("id", refId).eq("project_id", projectId);
+  retour(projectId, "#references");
+}
+
+export async function enregistrerStyle(projectId: string, formData: FormData) {
+  const { supabase } = await requireProfile();
+  await supabase
+    .from("projects")
+    .update({ style_text: String(formData.get("style_text") ?? "").trim().slice(0, 600) })
+    .eq("id", projectId);
+  retour(projectId, "?style=1#references");
+}
+
+export async function creerPhotos(projectId: string, formData: FormData) {
+  const { supabase, profile } = await requireProfile();
+  if (!(await endpointEco())) retour(projectId, "?erreur=sans-serveur");
+  // Le disque du serveur doit tenir les deux modèles (vidéo et photo)
+  await agrandirStockage().catch(() => undefined);
+  const choisis = new Set(formData.getAll("plans").map(String));
+
+  const [{ data: projet }, { data: scenes }, { data: refs }] = await Promise.all([
+    supabase.from("projects").select("id, aspect_ratio, style_text").eq("id", projectId).single(),
+    supabase
+      .from("scenes")
+      .select("id, image_description, photos(status)")
+      .eq("project_id", projectId)
+      .order("position"),
+    supabase.from("film_refs").select("id, nom, genre, description, image_path").eq("project_id", projectId),
+  ]);
+  if (!projet) retour(projectId, "?erreur=photo");
+  const tous = scenes ?? [];
+  const aLancer = tous
+    .map((s, i) => ({ ...s, numero: i + 1 }))
+    .filter((s) => choisis.has(s.id) && s.image_description.trim() && !(s.photos as { status: string }[]).some((p) => p.status === "en_cours"));
+  if (aLancer.length === 0) retour(projectId, "?erreur=selection-vide");
+
+  // Toutes les photos partent en même temps : le serveur les enchaîne sans recharger le modèle
+  const codes = await Promise.all(
+    aLancer.map((s) =>
+      lancerPhoto(supabase, profile.id, projet, { id: s.id, image_description: s.image_description, numero: s.numero }, tous.length, refs ?? []),
+    ),
+  );
+  const lancees = codes.filter((c) => c === null).length;
+  const sansRef = codes.filter((c) => c === "sans-reference").length;
+  if (lancees > 0) await journaliser(supabase, profile.id, "photos", "projet", projectId, { nombre: lancees });
+  const erreur =
+    codes.find((c) => c === "budget") ?? (lancees === 0 ? (codes.includes("photo") ? "photo" : "sans-reference") : null);
+  retour(projectId, `?photos=${lancees}${sansRef ? `&sansref=${sansRef}` : ""}${erreur ? `&erreur=${erreur}` : ""}&ouvert=1`);
+}
+
+// Appelée toutes les 10 s par la page tant que des photos sont en cours ; renvoie le nombre restant
+export async function actualiserPhotos(projectId: string): Promise<number> {
+  const { supabase } = await requireProfile();
+  const { data } = await supabase
+    .from("photos")
+    .select("id, scene_id, runpod_job_id, scenes!inner(project_id)")
+    .eq("status", "en_cours")
+    .eq("scenes.project_id", projectId);
+  const enCours = data ?? [];
+  if (enCours.length === 0) return 0;
+  await suivrePhotos(supabase, projectId, enCours);
+  const { count } = await supabase
+    .from("photos")
+    .select("id, scenes!inner(project_id)", { count: "exact", head: true })
+    .eq("status", "en_cours")
+    .eq("scenes.project_id", projectId);
+  return count ?? 0;
 }

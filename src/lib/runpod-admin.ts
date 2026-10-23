@@ -73,7 +73,8 @@ export async function creerServeur(): Promise<string> {
 // Stockage du modèle chez RunPod (« network volume ») : le modèle reste sur ce disque entre deux pauses,
 // au lieu d'être retéléchargé à chaque démarrage. Le serveur ne tourne alors que dans le centre de ce disque.
 const NOM_VOLUME = "studio-video-modele";
-export const TAILLE_VOLUME_GO = 120; // Wan 2.2 14B + accélérateurs ≈ 80 Go, avec de la marge
+// Wan 2.2 en version allégée (≈ 70 Go) + Qwen-Image-Edit pour les photos de départ (≈ 60 Go), avec de la marge
+export const TAILLE_VOLUME_GO = 150;
 export const PRIX_VOLUME_MOIS_USD = Math.round(TAILLE_VOLUME_GO * 0.07 * 100) / 100;
 const NIVEAUX: Record<string, number> = { HIGH: 3, MEDIUM: 2, LOW: 1 };
 
@@ -119,7 +120,8 @@ export async function ajouterStockage(endpointId: string): Promise<{ id: string;
     networkVolumes?: { id: string; name: string; dataCenter: string }[];
   };
   let volume = networkVolumes.find((v) => v.name === NOM_VOLUME);
-  if (!volume) {
+  if (volume) await agrandirStockage();
+  else {
     volume = await v2("/v2/network-volumes", {
       method: "POST",
       body: JSON.stringify({ name: NOM_VOLUME, size: TAILLE_VOLUME_GO, dataCenter: await meilleurCentre() }),
@@ -136,6 +138,19 @@ export async function ajouterStockage(endpointId: string): Promise<{ id: string;
     }),
   });
   return { id: volume.id, centre: volume.dataCenter };
+}
+
+// Agrandit le disque s'il a été créé plus petit (avant l'ajout des photos de départ). Le disque ne peut que grandir.
+export async function agrandirStockage() {
+  const { networkVolumes = [] } = ((await v2("/v2/network-volumes")) ?? {}) as {
+    networkVolumes?: { id: string; name: string; size: number }[];
+  };
+  const volume = networkVolumes.find((v) => v.name === NOM_VOLUME);
+  if (!volume || volume.size >= TAILLE_VOLUME_GO) return;
+  await v2(`/v2/network-volumes/${encodeURIComponent(volume.id)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ size: TAILLE_VOLUME_GO }),
+  });
 }
 
 // Dépense réelle facturée par RunPod depuis le début du mois (serveur, démarrages, attente et disque compris)

@@ -1,28 +1,45 @@
 import Link from "next/link";
 import { BoutonEnvoi } from "@/components/bouton-envoi";
-import { STATUTS_PLAN, couleurStatut, dureeLisible } from "@/lib/libelles";
+import { GENRES, STATUTS_PLAN, couleurStatut, dureeLisible } from "@/lib/libelles";
+import { suivrePhotos } from "@/lib/photos";
 import { signerLiens } from "@/lib/production";
-import { MOTEURS, moteursDisponibles } from "@/lib/runpod";
+import { MOTEURS, PRIX_PHOTO_ESTIME_USD, endpointEco, moteursDisponibles } from "@/lib/runpod";
 import { getClient } from "@/lib/session";
 import { promptVerification } from "@/lib/verification";
-import { deplacerPlan, envoyerALaGeneration, restaurerScript, supprimerPlan, supprimerPlans } from "./actions";
+import {
+  creerPhotos,
+  deplacerPlan,
+  enregistrerStyle,
+  envoyerALaGeneration,
+  restaurerScript,
+  supprimerPlan,
+  supprimerPlans,
+  supprimerReference,
+} from "./actions";
 import { FormulairePlan } from "./formulaire-plan";
 import { ImportGroupe } from "./import-groupe";
 import { BarreSelection } from "./selection";
 import { CopierVerification } from "./copier-verification";
+import { AjoutReference } from "./references";
+import { SuiviPhotos } from "./suivi-photos";
 
 type Plan = {
   id: string;
   position: number;
   motion_prompt: string;
   voiceover_text: string;
+  image_description: string;
   image_path: string | null;
   consent_confirmed: boolean;
   duration_s: number;
   status: string;
   validated_take_id: string | null;
   takes: { status: string }[];
+  photos: Photo[];
 };
+
+type Photo = { id: string; status: string; error: string | null; runpod_job_id: string | null; created_at: string };
+type Ref = { id: string; nom: string; genre: string; description: string; image_path: string };
 
 type Version = { id: number; created_at: string; data: { scenario_text?: string } };
 
@@ -36,6 +53,11 @@ const ERREURS: Record<string, string> = {
   import: "Les plans n'ont pas pu être créés. Réessayez.",
   "import-vide": "Ajoutez un script ou des photos avant de créer les plans.",
   "selection-vide": "Aucun plan à envoyer : cochez des plans qui ne sont pas déjà en génération.",
+  "sans-reference":
+    "Aucune photo lancée : chaque description doit citer le nom d'au moins une référence du film (ex. : « Rova marche sur la Plage »).",
+  "sans-serveur": "Créez d'abord notre serveur RunPod dans « Équipe et budget ».",
+  photo: "La création des photos n'a pas pu démarrer. Réessayez.",
+  reference: "La référence n'a pas pu être ajoutée : donnez-lui un nom et une photo.",
 };
 
 export default async function PagePlans({
@@ -50,12 +72,12 @@ export default async function PagePlans({
   const supabase = await getClient();
 
   // Le cadre du projet vérifie déjà la connexion et l'existence du projet : tout part en même temps
-  const [{ data: projet }, { data }, { data: versions }, moteurs] = await Promise.all([
-    supabase.from("projects").select("title, aspect_ratio, scenario_text").eq("id", id).maybeSingle(),
+  const [{ data: projet }, { data }, { data: versions }, moteurs, { data: refsLues }, serveur] = await Promise.all([
+    supabase.from("projects").select("title, aspect_ratio, scenario_text, style_text").eq("id", id).maybeSingle(),
     supabase
       .from("scenes")
       .select(
-        "id, position, motion_prompt, voiceover_text, image_path, consent_confirmed, duration_s, status, validated_take_id, takes!takes_scene_id_fkey(status)",
+        "id, position, motion_prompt, voiceover_text, image_description, image_path, consent_confirmed, duration_s, status, validated_take_id, takes!takes_scene_id_fkey(status), photos(id, status, error, runpod_job_id, created_at)",
       )
       .eq("project_id", id)
       .order("position"),
@@ -67,12 +89,31 @@ export default async function PagePlans({
       .order("created_at", { ascending: false })
       .limit(8),
     moteursDisponibles(),
+    supabase.from("film_refs").select("id, nom, genre, description, image_path").eq("project_id", id).order("created_at"),
+    endpointEco(),
   ]);
   const plans = (data ?? []) as Plan[];
-  const liens = await signerLiens(
-    supabase,
-    plans.map((p) => p.image_path),
+  const refs = (refsLues ?? []) as Ref[];
+  // Dernière demande de photo de chaque plan
+  const dernierePhoto = (p: Plan) =>
+    [...p.photos].sort((a, b) => b.created_at.localeCompare(a.created_at))[0] as Photo | undefined;
+  // Photos en cours : on demande des nouvelles au serveur à chaque affichage
+  const photosEnCours = plans.flatMap((p) =>
+    p.photos.filter((ph) => ph.status === "en_cours").map((ph) => ({ ...ph, scene_id: p.id })),
   );
+  if (photosEnCours.length > 0) {
+    await suivrePhotos(supabase, id, photosEnCours);
+    const { data: maj } = await supabase
+      .from("scenes")
+      .select("id, image_path, photos(id, status, error, runpod_job_id, created_at)")
+      .eq("project_id", id);
+    for (const m of maj ?? []) {
+      const p = plans.find((x) => x.id === m.id);
+      if (p) Object.assign(p, { image_path: m.image_path, photos: m.photos });
+    }
+  }
+  const nbPhotosEnCours = plans.reduce((n, p) => n + p.photos.filter((ph) => ph.status === "en_cours").length, 0);
+  const liens = await signerLiens(supabase, [...plans.map((p) => p.image_path), ...refs.map((r) => r.image_path)]);
 
   const pret = (p: Plan) => Boolean(p.image_path && p.motion_prompt && p.consent_confirmed);
   const enCours = (p: Plan) => p.takes.some((t) => t.status === "en_cours");
@@ -85,6 +126,7 @@ export default async function PagePlans({
   );
   const apercu = parStatut.map(([st, n]) => `${n} ${(STATUTS_PLAN[st] ?? st).toLowerCase()}`).join(" · ");
   const ouvert = Boolean(sp.ajoute || sp.enregistre || sp.importe || sp.refuse || sp.ouvert);
+  const decrits = plans.filter((p) => p.image_description.trim()).length;
 
   return (
     <div className="flex flex-col gap-6">
@@ -94,6 +136,15 @@ export default async function PagePlans({
       {sp.supprime && (
         <p className="message-ok">{Number(sp.supprime) > 1 ? `${sp.supprime} plans supprimés.` : "Plan supprimé."}</p>
       )}
+      {sp.photos && Number(sp.photos) > 0 && (
+        <p className="message-ok">
+          {Number(sp.photos) > 1 ? `${sp.photos} photos de départ en création.` : "1 photo de départ en création."}
+          {sp.sansref ? ` ${sp.sansref} plan(s) ignoré(s) : leur description ne cite aucune référence.` : ""}
+        </p>
+      )}
+      {sp.reference && <p className="message-ok">Référence ajoutée.</p>}
+      {sp.style && <p className="message-ok">Style du film enregistré.</p>}
+      <SuiviPhotos projectId={id} enCours={nbPhotosEnCours} />
       {sp["script-restaure"] && <p className="message-ok">Ancien script remis dans la zone de texte.</p>}
       {sp.importe && (
         <p className="message-ok">
@@ -150,6 +201,76 @@ export default async function PagePlans({
         </details>
       </section>
 
+      {/* Références du film : les photos de départ sont créées à partir d'elles, toutes avec les mêmes visages et décors */}
+      <section className="carte flex flex-col gap-4" id="references">
+        <div>
+          <h2 className="text-lg font-bold">Références du film</h2>
+          <p className="text-sm text-sourdine">
+            Une photo par personnage, lieu ou objet important, avec un nom court. Dans la description de la photo de chaque plan,
+            citez ces noms : notre serveur crée alors toutes les photos de départ d'un coup, avec les mêmes visages, vêtements et
+            décors (3 références au plus par photo).
+          </p>
+        </div>
+        {refs.length > 0 && (
+          <ul className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {refs.map((r) => (
+              <li key={r.id} className="flex flex-col gap-1 text-sm">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={liens.get(r.image_path)} alt={r.nom} className="aspect-square w-full rounded-lg border border-ligne object-cover" />
+                <div className="flex items-center gap-1">
+                  <span className="min-w-0 flex-1 truncate font-semibold">{r.nom}</span>
+                  <form action={supprimerReference.bind(null, id, r.id)}>
+                    <BoutonEnvoi className="lien text-xs" enCours="…" confirmer={`Retirer la référence « ${r.nom} » ?`}>
+                      Retirer
+                    </BoutonEnvoi>
+                  </form>
+                </div>
+                <span className="text-xs text-sourdine">
+                  {GENRES[r.genre] ?? r.genre}
+                  {r.description ? ` · ${r.description}` : ""}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+        <details className="rounded-lg border border-ligne p-4" open={refs.length === 0}>
+          <summary className="cursor-pointer font-semibold">＋ Ajouter une référence</summary>
+          <div className="mt-4">
+            <AjoutReference projectId={id} />
+          </div>
+        </details>
+        <form action={enregistrerStyle.bind(null, id)} className="flex flex-col gap-2">
+          <label className="etiquette" htmlFor="style-film">
+            Style du film (ajouté à chaque photo)
+          </label>
+          <textarea
+            id="style-film"
+            name="style_text"
+            rows={2}
+            maxLength={600}
+            defaultValue={projet?.style_text ?? ""}
+            placeholder="Ex. : Madagascar années 1990, lumière chaude de fin de journée, couleurs douces, caméra 35 mm"
+            className="champ text-sm"
+          />
+          <div>
+            <BoutonEnvoi className="bouton-discret" enCours="Enregistrement…">
+              Enregistrer le style
+            </BoutonEnvoi>
+          </div>
+        </form>
+        {!serveur && (
+          <p className="text-sm text-sourdine">
+            La création des photos utilise notre serveur RunPod : créez-le d'abord dans « Équipe et budget ».
+          </p>
+        )}
+        {serveur && decrits === 0 && plans.length > 0 && (
+          <p className="text-sm text-sourdine">
+            Ajoutez une description de photo à vos plans (« Modifier ce plan »), puis cochez-les et cliquez sur « 🖼 Créer les
+            photos ».
+          </p>
+        )}
+      </section>
+
       {/* 2. Le tableau des plans, et l'envoi à la génération */}
       <section className="flex flex-col gap-4">
         <div className="flex flex-wrap items-baseline gap-2">
@@ -170,6 +291,8 @@ export default async function PagePlans({
                 moteurs={moteurs.map((m) => ({ id: m, ...MOTEURS[m] }))}
                 prets={nouveaux}
                 supprimer={supprimerPlans.bind(null, id)}
+                creerPhotos={serveur ? creerPhotos.bind(null, id) : undefined}
+                prixPhoto={PRIX_PHOTO_ESTIME_USD}
               />
             </form>
             {/* Au-delà de 4 plans, le tableau se replie (menu déroulant) pour garder la page lisible */}
@@ -186,6 +309,7 @@ export default async function PagePlans({
               {plans.map((plan, i) => {
                 const photo = plan.image_path ? liens.get(plan.image_path) : undefined;
                 const nbClips = plan.takes.filter((t) => t.status === "terminee").length;
+                const derniere = dernierePhoto(plan);
                 const manque = !plan.image_path ? "photo" : !plan.motion_prompt ? "mouvement" : !plan.consent_confirmed ? "accord" : null;
                 return (
                   <li
@@ -203,6 +327,7 @@ export default async function PagePlans({
                         form="selection"
                         disabled={enCours(plan)}
                         data-pret={pret(plan) ? "1" : undefined}
+                        data-description={plan.image_description.trim() ? "1" : undefined}
                         aria-label={`Sélectionner le plan ${i + 1}`}
                         className="size-4 accent-[var(--accent)]"
                       />
@@ -249,6 +374,13 @@ export default async function PagePlans({
                     <div className="flex flex-wrap items-center gap-3 text-xs text-sourdine">
                       {manque && <span className="text-alerte">À compléter : {manque}</span>}
                       {enCours(plan) && <span className="text-accent">Génération en cours…</span>}
+                      {derniere?.status === "en_cours" && <span className="text-accent">🖼 Photo en création…</span>}
+                      {derniere?.status === "echouee" && (
+                        <span className="text-alerte" title={derniere.error ?? undefined}>
+                          🖼 Photo ratée{derniere.error ? ` : ${derniere.error.slice(0, 120)}` : ""}
+                        </span>
+                      )}
+                      {derniere?.status === "terminee" && <span>🖼 Photo créée par le studio</span>}
                       {nbClips > 0 && (
                         <Link href={`/projets/${id}/clips#plan-${plan.id}`} className="lien">
                           {nbClips} clip{nbClips > 1 ? "s" : ""}

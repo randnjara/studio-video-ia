@@ -1,4 +1,5 @@
-# Serveur de génération vidéo du studio : Wan 2.2 image → vidéo, version rapide en 4 étapes (Lightning)
+# Serveur de génération du studio, version rapide en 4 étapes (Lightning) :
+# vidéos avec Wan 2.2 image → vidéo, photos de départ avec Qwen-Image-Edit (les deux sous licence Apache 2.0)
 FROM pytorch/pytorch:2.13.0-cuda12.6-cudnn9-runtime
 
 ENV PYTHONUNBUFFERED=1 \

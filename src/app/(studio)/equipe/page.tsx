@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { requireProfile, type Profile } from "@/lib/session";
 import { BoutonEnvoi } from "@/components/bouton-envoi";
 import { CLE_VOLUME, endpointEco } from "@/lib/runpod";
-import { depenseRunPodMois, PRIX_VOLUME_MOIS_USD } from "@/lib/runpod-admin";
+import { depenseRunPodMois, PRIX_VOLUME_MOIS_USD, TAILLE_VOLUME_GO } from "@/lib/runpod-admin";
 import { ajouterStockageEco, changerAcces, changerRole, creerServeurEco, fixerBudget, inviterMembre } from "./actions";
 
 const ERREURS: Record<string, string> = {
@@ -145,8 +145,9 @@ export default async function Equipe({
             </p>
             {volume ? (
               <p className="text-sm">
-                <span className="pastille bg-succes-doux text-succes">Modèle stocké</span> Disque RunPod{" "}
-                <code>{volume.valeur}</code>, environ {PRIX_VOLUME_MOIS_USD.toFixed(2)} $ par mois.
+                <span className="pastille bg-succes-doux text-succes">Modèles stockés</span> Disque RunPod{" "}
+                <code>{volume.valeur}</code> de {TAILLE_VOLUME_GO} Go (vidéo Wan 2.2 et photos Qwen-Image-Edit), environ{" "}
+                {PRIX_VOLUME_MOIS_USD.toFixed(2)} $ par mois.
               </p>
             ) : (
               <>
