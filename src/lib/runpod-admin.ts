@@ -16,7 +16,7 @@ async function rest(chemin: string, init?: RequestInit) {
     headers: { Authorization: `Bearer ${cle()}`, "Content-Type": "application/json" },
   });
   const texte = await res.text();
-  if (!res.ok) throw new Error(`RunPod ${chemin} : ${res.status} ${texte.slice(0, 300)}`);
+  if (!res.ok) throw new Error(`RunPod ${chemin} : ${res.status} ${texte.slice(0, 1200)}`);
   return texte ? JSON.parse(texte) : null;
 }
 
@@ -32,17 +32,17 @@ async function cartes80Go(): Promise<string[]> {
   return ids.length > 0 ? ids : ["NVIDIA A100 80GB PCIe", "NVIDIA A100-SXM4-80GB", "NVIDIA H100 80GB HBM3", "NVIDIA H100 PCIe"];
 }
 
-// Le studio voix tient sur une petite carte (16 à 24 Go), bien moins chère
-async function cartesVoix(): Promise<string[]> {
-  const res = await fetch("https://api.runpod.io/graphql", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${cle()}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ query: "query { gpuTypes { id memoryInGb } }" }),
-  });
-  const data = (await res.json().catch(() => null)) as { data?: { gpuTypes?: { id: string; memoryInGb: number }[] } } | null;
-  const ids = (data?.data?.gpuTypes ?? []).filter((g) => g.memoryInGb >= 16 && g.memoryInGb <= 24).map((g) => g.id);
-  return ids.length > 0 ? ids : ["NVIDIA RTX A4000", "NVIDIA RTX A4500", "NVIDIA RTX A5000", "NVIDIA GeForce RTX 4090", "NVIDIA L4"];
-}
+// Le studio voix tient sur une petite carte (16 à 24 Go), bien moins chère. Liste fixe : l'API de création
+// n'accepte que certains noms de cartes, et la liste complète de RunPod en contient d'autres.
+const CARTES_VOIX = [
+  "NVIDIA RTX A4000",
+  "NVIDIA RTX A4500",
+  "NVIDIA RTX 4000 Ada Generation",
+  "NVIDIA RTX A5000",
+  "NVIDIA L4",
+  "NVIDIA GeForce RTX 3090",
+  "NVIDIA GeForce RTX 4090",
+];
 
 export async function creerServeur(
   nom = NOM,
@@ -99,7 +99,7 @@ const NOM_VOIX = "studio-voix";
 
 export async function creerServeurVoix(): Promise<string> {
   // Les modèles de voix sont déjà dans l'image : un petit disque suffit
-  return creerServeur(NOM_VOIX, NOM_VOIX, IMAGE_VOIX, { cartes: await cartesVoix(), disqueGo: 30, maxMachines: 1 });
+  return creerServeur(NOM_VOIX, NOM_VOIX, IMAGE_VOIX, { cartes: CARTES_VOIX, disqueGo: 30, maxMachines: 1 });
 }
 
 export async function mettreAJourServeurVoix(supabase: SupabaseClient, endpointId: string) {
