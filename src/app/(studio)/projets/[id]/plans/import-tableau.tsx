@@ -116,7 +116,9 @@ const IGNORER = ["inventoriee", "officielle", "existante", "geste original"];
 const vide = (v: string) => /^(a definir|a mesurer|a verifier|non verifie)/.test(norm(v));
 
 function convertir(lignes: string[][], personnage: string): { plans: LigneTableau[]; reconnues: string[]; retire: string[] } {
-  const [entetes = [], ...corps] = lignes;
+  const [entetes = [], ...toutes] = lignes;
+  // La ligne d'exemple du fichier à remplir n'est pas un plan
+  const corps = toutes.filter((l) => !norm(l[0] ?? "").startsWith("exemple"));
   const titres = entetes.map(norm);
   const index: Partial<Record<keyof LigneTableau, number>> = {};
   const reconnues: string[] = [];

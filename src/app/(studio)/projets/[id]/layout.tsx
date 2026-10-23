@@ -51,7 +51,7 @@ export default async function CadreProjet({
 
   const etapes: Etape[] = [
     { href: base, titre: "Infos", detail: personnages ? "Voix off, personnages" : "Photo du personnage à ajouter", etat: etat(0) },
-    { href: `${base}/chatgpt`, titre: "ChatGPT", detail: plans.length ? "Tableau importé" : "Tableau des plans", etat: etat(1) },
+    { href: `${base}/chatgpt`, titre: "ChatGPT / Claude", detail: plans.length ? "Tableau importé" : "Tableau des plans", etat: etat(1) },
     {
       href: `${base}/plans`,
       titre: "Plans",
