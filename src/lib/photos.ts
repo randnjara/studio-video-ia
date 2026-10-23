@@ -68,7 +68,17 @@ export function promptPhoto(
     p.voulu?.trim() ? `Correction requested after a previous failed attempt (top priority, apply it exactly): ${p.voulu.trim()}` : "",
     p.a_eviter?.trim() ? `Problems of the previous attempt that must NOT appear again: ${p.a_eviter.trim()}` : "",
     `Reference images: ${images}.`,
-    "Keep exactly the same person as the reference images: same face, facial proportions, apparent age, wrinkles, skin tone, hairstyle, body shape and clothing. Do not beautify, rejuvenate or reshape the face. Keep the reference locations unchanged.",
+    "Keep exactly the same person as the reference images: same face, facial proportions, apparent age, wrinkles, skin tone, hairstyle, body shape and clothing. Do not beautify, rejuvenate or reshape the face.",
+    // Le décor changeait d'un plan à l'autre dans un même lieu (Projet Mama : ciel, fleurs, bancs, colonnes réinventés) :
+    // la photo du lieu devient le plateau fixe, et ce que la description ajoute au décor passe après elle.
+    ...p.refs
+      .map((r, i) => ({ r, n: i + 1 }))
+      .filter(({ r }) => r.genre === "lieu")
+      .slice(0, 1)
+      .map(
+        ({ r, n }) =>
+          `Image ${n} is the fixed film set "${r.nom}": use only its background and ignore any person in it. Reproduce the same place exactly, as the same continuous scene: same architecture, balustrade, columns, furniture, plants and flowers at the same places, same sky, same time of day, same light direction and colours. Do not add, remove or move set elements (no new bench, flowers, building or sky colour); if the scene text describes the background differently, follow image ${n}. Only the camera framing and angle, the person's pose, hand gesture and facial expression change.`,
+      ),
     ...p.refs
       .filter((r) => r.genre === "produit")
       .slice(0, 1)
