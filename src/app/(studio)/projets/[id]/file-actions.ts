@@ -72,18 +72,21 @@ async function requireResponsable() {
 export async function arreterServeur(chemin: string) {
   const { supabase, profile } = await requireResponsable();
   const etat = await lireEtatFile(supabase, "");
-  const ids = [...new Set([etat.serveurVideo, etat.serveurPhoto].filter((x): x is string => Boolean(x)))];
+  const ids = [...new Set([etat.serveurVideo, etat.serveurPhoto, etat.serveurVoix].filter((x): x is string => Boolean(x)))];
   if (ids.length === 0) retourServeur(chemin, "file=sans-serveur");
 
   // Calculs en cours chez RunPod, tous projets confondus (clé secrète : le responsable ne voit pas tous les espaces)
   const admin = createAdminClient();
-  const [{ data: essais }, { data: photos }] = await Promise.all([
+  const [{ data: essais }, { data: photos }, { data: voix }] = await Promise.all([
     admin.from("takes").select("runpod_job_id").eq("status", "en_cours").neq("moteur", "qualite").not("runpod_job_id", "is", null).neq("runpod_job_id", "envoi").limit(20),
     admin.from("photos").select("runpod_job_id").eq("status", "en_cours").not("runpod_job_id", "is", null).neq("runpod_job_id", "envoi").limit(20),
+    // Sans la migration 0014, la table n'existe pas : la liste reste vide
+    admin.from("voix_creations").select("runpod_job_id").eq("status", "en_cours").not("runpod_job_id", "is", null).limit(20),
   ]);
   const jobs = [
     ...(etat.serveurVideo ? (essais ?? []).map((e) => ({ serveur: etat.serveurVideo!, jobId: String(e.runpod_job_id) })) : []),
     ...(etat.serveurPhoto ? (photos ?? []).map((p) => ({ serveur: etat.serveurPhoto!, jobId: String(p.runpod_job_id) })) : []),
+    ...(etat.serveurVoix ? (voix ?? []).map((v) => ({ serveur: etat.serveurVoix!, jobId: String(v.runpod_job_id) })) : []),
   ];
 
   let max: Record<string, number>;

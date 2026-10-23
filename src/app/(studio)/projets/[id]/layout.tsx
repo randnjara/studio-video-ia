@@ -86,11 +86,16 @@ export default async function CadreProjet({
           <h1 className="text-2xl font-bold tracking-tight">{projet.title}</h1>
           <span className={`pastille ${couleurStatut(projet.status)}`}>{STATUTS_PROJET[projet.status]}</span>
           <span className="text-sm text-sourdine">Format {projet.aspect_ratio}</span>
-          {avecPhoto > 0 && (
-            <Link href={`${base}/galerie`} className="lien ml-auto text-sm">
-              🖼 Galerie des photos ({avecPhoto})
+          <span className="ml-auto flex flex-wrap items-center gap-4 text-sm">
+            <Link href={`${base}/voix`} className="lien">
+              🎙 Studio voix
             </Link>
-          )}
+            {avecPhoto > 0 && (
+              <Link href={`${base}/galerie`} className="lien">
+                🖼 Galerie des photos ({avecPhoto})
+              </Link>
+            )}
+          </span>
         </div>
       </div>
       <EtapesProjet etapes={etapes} />

@@ -15,6 +15,7 @@ Le cahier des charges complet et le guide pas à pas sont dans le document du pr
   4. **Clips** : suivre les générations (notification quand c'est prêt), valider un clip, le refuser (le plan repart en modification) ou regénérer.
      Pendant un lot de photos ou de vidéos (onglets Plans et Clips) : **Pause** pour tester ce qui est fait puis **Reprendre**, **Arrêter le lot** (non facturé), et pour le responsable **Arrêter le serveur** RunPod (plus rien n'est facturé) puis le redémarrer.
   5. **Montage** : un vrai banc de montage à pistes (vidéo principale, images par-dessus, voix off, musique), couper / raccourcir / réordonner les plans, durée des images fixes, volume par piste, fondu enchaîné, fondu au noir, zoom lent ; aperçu en direct ; export MP4 480p ou 720p HD calculé dans le navigateur (gratuit). Puis envoyer à valider, valider ou renvoyer en correction.
+- **Studio voix** (menu Voix, et lien en haut de chaque projet) : texte → voix en malgache et dans plus de 25 autres langues, voix d'une personne copiée à partir de 10 à 30 s d'enregistrement (avec son accord), transformation d'un enregistrement, et une **table de mixage** (hauteur, vitesse, âge, égaliseur, écho, réverbération, radio, téléphone, robot…) calculée par le navigateur. La voix finie va dans le montage (Médias → Voix). Les voix non commerciales sont signalées ⚠.
 - Page « Équipe et budget » (responsable) : inviter, changer le rôle, désactiver un membre, fixer le budget GPU du mois, voir l'activité récente.
 - Base de données protégée : chacun ne voit que ses espaces, et la génération se bloque quand le budget du mois est atteint.
 
@@ -27,6 +28,7 @@ Le cahier des charges complet et le guide pas à pas sont dans le document du pr
 | Stockage des photos et vidéos | Supabase Storage (puis Cloudflare R2 pour les gros volumes) |
 | Photos de départ | Qwen-Image-Edit sur notre serveur RunPod, à partir des références du film |
 | Montage et export | Mediabunny (libre, WebCodecs) : le film est calculé par le navigateur, sans serveur |
+| Voix | Meta MMS (malgache), Kokoro et Chatterbox sur un petit serveur RunPod à part (dossier `worker-voix/`) ; table de mixage Web Audio dans le navigateur |
 | Génération vidéo | Wan 2.2 image → vidéo : notre serveur RunPod (dossier `worker/`, version rapide 4 étapes) ou le service tout prêt RunPod (qualité max) |
 
 ## Mise en route

@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { requireProfile, type Profile } from "@/lib/session";
 import { BoutonEnvoi } from "@/components/bouton-envoi";
-import { CLE_ENDPOINT_PHOTO, CLE_VOLUME, endpointEco } from "@/lib/runpod";
+import { CLE_ENDPOINT_PHOTO, CLE_ENDPOINT_VOIX, CLE_VOLUME, PRIX_SECONDE_VOIX, endpointEco } from "@/lib/runpod";
 import {
   CLE_CACHE_PHOTO,
   CLE_CACHE_VIDEO,
@@ -20,6 +20,7 @@ import {
   passerAuCache,
   changerRole,
   creerServeurEco,
+  creerServeurVoixAction,
   fixerBudget,
   inviterMembre,
   reinitialiserConnexion,
@@ -34,6 +35,7 @@ const ERREURS: Record<string, string> = {
   "soi-meme": "Vous ne pouvez pas changer votre propre accès ni votre propre rôle.",
   budget: "Saisissez un montant en dollars, par exemple 25.",
   serveur: "Le serveur RunPod n'a pas pu être créé.",
+  "serveur-voix": "Le serveur voix n'a pas pu être créé.",
   stockage: "Le stockage du modèle n'a pas pu être ajouté.",
   membre: "Membre introuvable.",
   renvoi: "Le lien n'a pas pu être envoyé.",
@@ -110,6 +112,7 @@ export default async function Equipe({
     "sans-email"?: string;
     membre?: string;
     file?: string;
+    voix?: string;
   }>;
 }) {
   const sp = await searchParams;
@@ -148,11 +151,12 @@ export default async function Equipe({
   const { data: reglagesCache } = await supabase
     .from("reglages")
     .select("cle, valeur")
-    .in("cle", [CLE_CACHE_VIDEO, CLE_CACHE_PHOTO, CLE_ENDPOINT_PHOTO, CLE_ARRET_SERVEUR]);
+    .in("cle", [CLE_CACHE_VIDEO, CLE_CACHE_PHOTO, CLE_ENDPOINT_PHOTO, CLE_ENDPOINT_VOIX, CLE_ARRET_SERVEUR]);
   const reglage = (c: string) => reglagesCache?.find((x) => x.cle === c)?.valeur ?? null;
   const cacheVideo = reglage(CLE_CACHE_VIDEO);
   const cachePhoto = reglage(CLE_CACHE_PHOTO);
   const serveurPhoto = reglage(CLE_ENDPOINT_PHOTO);
+  const serveurVoix = reglage(CLE_ENDPOINT_VOIX);
   const serveurArrete = Boolean(lireArretServeur(reglage(CLE_ARRET_SERVEUR))?.arrete);
 
   const compte = new Map(comptes.map((u) => [u.id, u]));
@@ -335,6 +339,39 @@ export default async function Equipe({
             <form action={creerServeurEco}>
               <BoutonEnvoi enCours="Création chez RunPod…">Créer le serveur économique</BoutonEnvoi>
             </form>
+          </>
+        )}
+      </section>
+
+      <section id="voix" className="carte flex scroll-mt-24 flex-col gap-3">
+        <h2 className="text-lg font-bold">🎙 Serveur voix</h2>
+        {sp.voix && (
+          <p className="message-ok">
+            Serveur voix créé. La toute première voix peut prendre 2 à 5 minutes (RunPod télécharge le serveur), les suivantes
+            quelques secondes.
+          </p>
+        )}
+        {serveurVoix ? (
+          <p className="text-sm text-sourdine">
+            Le studio voix utilise le serveur <code>{serveurVoix}</code>, sur une petite carte graphique (environ{" "}
+            {(PRIX_SECONDE_VOIX * 60).toFixed(3)} $ par minute de calcul, rien quand il ne tourne pas). Il s&apos;arrête aussi avec
+            « Arrêter le serveur ».
+          </p>
+        ) : (
+          <>
+            <p className="text-sm text-sourdine">
+              Le studio voix (texte → voix en malgache et dans 25 autres langues, voix d&apos;une personne, transformation
+              d&apos;un enregistrement) a son propre serveur RunPod, sur une petite carte graphique bien moins chère que celle des
+              vidéos. Il ne coûte rien quand il ne tourne pas : une minute de voix revient à moins d&apos;un centime. La table de
+              mixage, elle, est calculée par le navigateur et ne coûte rien.
+            </p>
+            {process.env.RUNPOD_API_KEY ? (
+              <form action={creerServeurVoixAction}>
+                <BoutonEnvoi enCours="Création chez RunPod…">Créer le serveur voix</BoutonEnvoi>
+              </form>
+            ) : (
+              <p className="message-erreur">Ajoutez d&apos;abord la clé RUNPOD_API_KEY dans Cloudflare.</p>
+            )}
           </>
         )}
       </section>

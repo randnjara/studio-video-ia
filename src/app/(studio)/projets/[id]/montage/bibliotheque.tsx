@@ -48,6 +48,7 @@ export function Bibliotheque({
   projectId,
   clips,
   photos,
+  voix,
   fichiers,
   liens,
   modifiable,
@@ -57,16 +58,17 @@ export function Bibliotheque({
   projectId: string;
   clips: Media[];
   photos: Media[];
+  voix: Media[];
   fichiers: Media[];
   liens: Map<string, string>;
   modifiable: boolean;
   onAjouter: (m: Media) => void;
   onImporte: (m: Media) => void;
 }) {
-  const [onglet, setOnglet] = useState<"clips" | "photos" | "fichiers">("clips");
+  const [onglet, setOnglet] = useState<"clips" | "photos" | "voix" | "fichiers">("clips");
   const [envoi, setEnvoi] = useState<string | null>(null);
   const [erreur, setErreur] = useState<string | null>(null);
-  const liste = onglet === "clips" ? clips : onglet === "photos" ? photos : fichiers;
+  const liste = onglet === "clips" ? clips : onglet === "photos" ? photos : onglet === "voix" ? voix : fichiers;
 
   async function importer(files: FileList | null) {
     setErreur(null);
@@ -99,6 +101,7 @@ export function Bibliotheque({
           [
             ["clips", `Clips (${clips.length})`],
             ["photos", `Photos des plans (${photos.length})`],
+            ["voix", `Voix (${voix.length})`],
             ["fichiers", `Mes fichiers (${fichiers.length})`],
           ] as const
         ).map(([o, libelle]) => (
@@ -134,6 +137,8 @@ export function Bibliotheque({
             ? "Aucun clip validé."
             : onglet === "photos"
               ? "Aucune photo de départ."
+              : onglet === "voix"
+                ? "Aucune voix : créez-en dans le Studio voix du projet."
               : "Importez ici la voix off enregistrée, une musique libre de droits, ou d'autres images et vidéos."}
         </p>
       ) : (

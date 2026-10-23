@@ -25,10 +25,11 @@ type Props = {
   initiale: Timeline;
   clips: Media[];
   photos: Media[];
+  voix: Media[]; // voix du studio voix
   liensInitiaux: Record<string, string>;
 };
 
-export function Editeur({ projectId, montageId, titre, format, modifiable, initiale, clips, photos, liensInitiaux }: Props) {
+export function Editeur({ projectId, montageId, titre, format, modifiable, initiale, clips, photos, voix, liensInitiaux }: Props) {
   const [timeline, setTimeline] = useState(initiale);
   const passe = useRef<Timeline[]>([]);
   const futur = useRef<Timeline[]>([]);
@@ -111,11 +112,12 @@ export function Editeur({ projectId, montageId, titre, format, modifiable, initi
       ...new Set([
         ...clips.map((c) => c.chemin),
         ...photos.map((p) => p.chemin),
+        ...voix.map((v) => v.chemin),
         ...timeline.bibliotheque.map((m) => m.chemin),
         ...timeline.pistes.flatMap((p) => p.elements.map((e) => e.chemin)),
       ]),
     ],
-    [clips, photos, timeline],
+    [clips, photos, voix, timeline],
   );
   const cheminsRef = useRef(tousLesChemins);
   cheminsRef.current = tousLesChemins;
@@ -132,7 +134,7 @@ export function Editeur({ projectId, montageId, titre, format, modifiable, initi
   const [durees, setDurees] = useState(new Map<string, number>());
   const mesures = useRef(new Set<string>());
   useEffect(() => {
-    const aMesurer = [...clips, ...timeline.bibliotheque, ...timeline.pistes.flatMap((p) => p.elements)].filter(
+    const aMesurer = [...clips, ...voix, ...timeline.bibliotheque, ...timeline.pistes.flatMap((p) => p.elements)].filter(
       (m) => m.nature !== "image" && !mesures.current.has(m.chemin) && liens.has(m.chemin),
     );
     for (const m of aMesurer) {
@@ -145,7 +147,7 @@ export function Editeur({ projectId, montageId, titre, format, modifiable, initi
       };
       el.src = liens.get(m.chemin)!;
     }
-  }, [clips, timeline, liens]);
+  }, [clips, voix, timeline, liens]);
   useEffect(() => {
     if (durees.size) modifier((t) => corrigerDurees(t, durees), false);
   }, [durees, modifier]);
@@ -464,6 +466,7 @@ export function Editeur({ projectId, montageId, titre, format, modifiable, initi
               projectId={projectId}
               clips={clipsMesures}
               photos={photos}
+              voix={voix}
               fichiers={timeline.bibliotheque}
               liens={liens}
               modifiable={modifiable}
