@@ -305,7 +305,7 @@ export default async function PagePlans({
             explication="Le bouton copie une consigne complète avec votre script et le tableau de tous les plans. Collez-la dans ChatGPT ou Claude (joignez les photos de départ dans l'ordre si possible). L'assistant rend un fichier tableau_corrige.csv : importez-le juste en dessous pour mettre à jour les plans."
           />
         )}
-        {plans.length > 0 && <ImportCorrection projectId={id} nbPlans={plans.length} />}
+        {plans.length > 0 && <ImportCorrection projectId={id} nbPlans={plans.length} avecPhoto={plans.flatMap((p, i) => (p.image_path ? [i + 1] : []))} />}
 
         {plans.length === 0 ? (
           <p className="carte text-sm text-sourdine">Aucun plan pour l'instant. Créez-les ci-dessus.</p>
