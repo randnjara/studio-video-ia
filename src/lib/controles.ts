@@ -10,6 +10,7 @@ export type PlanControle = {
   duration_s: number;
   cadrage: string;
   angle: string;
+  pose_fin?: string;
 };
 
 // Débit moyen d'une voix posée, en mots par seconde
@@ -62,14 +63,20 @@ export function alertesPlans(plans: PlanControle[], mouvementParDefaut = "") {
   const ajouter = (id: string, texte: string) => alertes.set(id, [...(alertes.get(id) ?? []), texte]);
 
   plans.forEach((p, i) => {
-    // Répétitions avec les plans précédents proches (chaque paire n'est signalée qu'une fois, sur le second plan)
-    for (let j = Math.max(0, i - VOISINS); j < i; j++) {
-      const q = plans[j];
-      if (p.motion_prompt !== mouvementParDefaut && ressemblance(p.motion_prompt, q.motion_prompt) >= 0.8)
-        ajouter(p.id, `Même mouvement que le plan ${j + 1} : variez le geste ou la caméra.`);
-      if (ressemblance(p.image_description, q.image_description) >= 0.8)
-        ajouter(p.id, `Photo presque identique à celle du plan ${j + 1} : changez le cadrage, l'angle ou l'action.`);
-    }
+    // Répétitions avec les plans précédents proches : on signale le plus proche, une fois par sorte de répétition
+    // (chaque paire n'est signalée que sur le second plan)
+    const proche = (pareil: (q: PlanControle) => boolean) => {
+      for (let j = i - 1; j >= Math.max(0, i - VOISINS); j--) if (pareil(plans[j])) return j + 1;
+      return 0;
+    };
+    const mvt = p.motion_prompt !== mouvementParDefaut ? proche((q) => ressemblance(p.motion_prompt, q.motion_prompt) >= 0.8) : 0;
+    if (mvt) ajouter(p.id, `Même mouvement que le plan ${mvt} : variez le geste ou la caméra.`);
+    const fin = p.pose_fin
+      ? proche((q) => Boolean(q.pose_fin) && (p.pose_fin === q.pose_fin || ressemblance(p.pose_fin!, q.pose_fin!) >= 0.9))
+      : 0;
+    if (fin) ajouter(p.id, `Même pose de fin que le plan ${fin} : chaque fin doit préparer le plan suivant.`);
+    const photo = proche((q) => ressemblance(p.image_description, q.image_description) >= 0.8);
+    if (photo) ajouter(p.id, `Photo presque identique à celle du plan ${photo} : changez le cadrage, l'angle ou l'action.`);
     const prec = plans[i - 1];
     if (prec && p.cadrage && p.angle && p.cadrage === prec.cadrage && p.angle === prec.angle)
       ajouter(p.id, `Même cadrage et même angle que le plan ${i} : les deux plans vont sembler collés.`);
