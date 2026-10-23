@@ -23,6 +23,7 @@ Le cahier des charges complet et le guide pas à pas sont dans le document du pr
 | Site | Next.js 16 + Tailwind CSS, hébergé sur Cloudflare Workers (OpenNext) |
 | Comptes et base | Supabase |
 | Stockage des photos et vidéos | Supabase Storage (puis Cloudflare R2 pour les gros volumes) |
+| Photos de départ | Qwen-Image-Edit sur notre serveur RunPod, à partir des références du film |
 | Génération vidéo | Wan 2.2 image → vidéo : notre serveur RunPod (dossier `worker/`, version rapide 4 étapes) ou le service tout prêt RunPod (qualité max) |
 
 ## Mise en route

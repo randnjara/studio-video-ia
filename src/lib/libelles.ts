@@ -54,3 +54,11 @@ export const STATUTS_MONTAGE: Record<string, string> = {
   valide: "Validé",
   a_corriger: "À corriger",
 };
+
+// Genres des « références du film » utilisées pour créer les photos de départ
+export const GENRES: Record<string, string> = {
+  personnage: "Personnage",
+  lieu: "Lieu",
+  objet: "Objet",
+  style: "Style",
+};

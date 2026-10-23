@@ -11,13 +11,19 @@ export function BarreSelection({
   moteurs,
   prets,
   supprimer,
+  creerPhotos,
+  prixPhoto,
 }: {
   moteurs: ChoixMoteur[];
   prets: number;
   supprimer: (formData: FormData) => void | Promise<void>;
+  // Absent tant que notre serveur RunPod n'existe pas
+  creerPhotos?: (formData: FormData) => void | Promise<void>;
+  prixPhoto: number;
 }) {
   const [coches, setCoches] = useState(0);
   const [pretsCoches, setPretsCoches] = useState(0);
+  const [decrits, setDecrits] = useState(0);
   const [moteur, setMoteur] = useState(moteurs[0]);
   const prixParPlan = moteur.prix5s;
   const { pending } = useFormStatus();
@@ -28,6 +34,7 @@ export function BarreSelection({
       const cochees = cases().filter((c) => c.checked);
       setCoches(cochees.length);
       setPretsCoches(cochees.filter((c) => c.dataset.pret === "1").length);
+      setDecrits(cochees.filter((c) => c.dataset.description === "1").length);
     };
     document.addEventListener("change", compter);
     compter();
@@ -86,6 +93,21 @@ export function BarreSelection({
         {pending && <Roue />}
         {pending ? "Envoi…" : `▶ Envoyer la sélection (${pretsCoches}) ≈ ${(pretsCoches * prixParPlan).toFixed(2)} $`}
       </button>
+      {creerPhotos && (
+        <button
+          type="submit"
+          formAction={creerPhotos}
+          className="bouton-discret"
+          disabled={pending || decrits === 0}
+          title="Crée les photos de départ des plans cochés qui ont une description, à partir des références du film"
+          onClick={(e) => {
+            const texte = `Créer ${decrits} photo${decrits > 1 ? "s" : ""} de départ pour environ ${(decrits * prixPhoto).toFixed(2)} $ ? Les photos actuelles de ces plans seront remplacées.`;
+            if (!window.confirm(texte)) e.preventDefault();
+          }}
+        >
+          🖼 Créer les photos ({decrits}) ≈ {(decrits * prixPhoto).toFixed(2)} $
+        </button>
+      )}
       <button
         type="submit"
         formAction={supprimer}

@@ -10,6 +10,7 @@ type PlanExistant = {
   id: string;
   motion_prompt: string;
   voiceover_text: string;
+  image_description: string;
   consent_confirmed: boolean;
 };
 
@@ -78,6 +79,19 @@ export function FormulairePlan({
         />
       </div>
       <div className="flex flex-col gap-3">
+        <div>
+          <label className="etiquette" htmlFor={`desc-${suffixe}`}>
+            Description de la photo de départ (sans photo, elle sera créée à partir des références du film)
+          </label>
+          <textarea
+            id={`desc-${suffixe}`}
+            name="image_description"
+            rows={2}
+            defaultValue={plan?.image_description}
+            placeholder="Citez les noms des références. Ex. : plan large, Rova marche seule sur la Plage au coucher du soleil, vue de dos"
+            className="champ text-sm"
+          />
+        </div>
         <div>
           <label className="etiquette" htmlFor={`motion-${suffixe}`}>
             Mouvement voulu (en anglais de préférence)
