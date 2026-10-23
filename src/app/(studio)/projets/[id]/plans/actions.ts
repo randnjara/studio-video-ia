@@ -22,6 +22,12 @@ function cheminPhoto(projectId: string, valeur: FormDataEntryValue | string | nu
   return chemin.startsWith(`${projectId}/photos/`) && !chemin.includes("..") ? chemin : null;
 }
 
+// Champs de la fiche de tournage d'un plan, lus dans un formulaire
+const CHAMPS_FICHE = ["cadrage", "angle", "lieu", "intention", "pose_debut", "pose_fin"] as const;
+function fiche(formData: FormData) {
+  return Object.fromEntries(CHAMPS_FICHE.map((c) => [c, String(formData.get(c) ?? "").trim().slice(0, 300)]));
+}
+
 type Supabase = Awaited<ReturnType<typeof requireProfile>>["supabase"];
 
 async function prochainePosition(supabase: Supabase, projectId: string) {
@@ -46,6 +52,7 @@ export async function ajouterPlan(projectId: string, formData: FormData) {
       motion_prompt: String(formData.get("motion_prompt") ?? "").trim(),
       voiceover_text: String(formData.get("voiceover_text") ?? "").trim(),
       image_description: String(formData.get("image_description") ?? "").trim(),
+      ...fiche(formData),
       consent_confirmed: formData.get("consent_confirmed") === "on",
       image_path: cheminPhoto(projectId, formData.get("image_path")),
     })
@@ -113,6 +120,7 @@ export async function modifierPlan(projectId: string, sceneId: string, formData:
         motion_prompt: String(formData.get("motion_prompt") ?? "").trim(),
         voiceover_text: String(formData.get("voiceover_text") ?? "").trim(),
         image_description: String(formData.get("image_description") ?? "").trim(),
+        ...fiche(formData),
         consent_confirmed: formData.get("consent_confirmed") === "on",
         ...(photo ? { image_path: photo } : {}),
       })
@@ -270,10 +278,15 @@ export async function creerPhotos(projectId: string, formData: FormData) {
     supabase.from("projects").select("id, aspect_ratio, style_text").eq("id", projectId).single(),
     supabase
       .from("scenes")
-      .select("id, image_description, photos(status)")
+      .select("id, image_description, cadrage, angle, lieu, intention, pose_debut, photos(status)")
       .eq("project_id", projectId)
       .order("position"),
-    supabase.from("film_refs").select("id, nom, genre, description, image_path").eq("project_id", projectId),
+    // La première référence ajoutée pour un nom (la photo maîtresse) passe toujours en premier
+    supabase
+      .from("film_refs")
+      .select("id, nom, genre, description, image_path")
+      .eq("project_id", projectId)
+      .order("created_at"),
   ]);
   if (!projet) retour(projectId, "?erreur=photo");
   const tous = scenes ?? [];
@@ -285,7 +298,7 @@ export async function creerPhotos(projectId: string, formData: FormData) {
   // Toutes les photos partent en même temps : le serveur les enchaîne sans recharger le modèle
   const codes = await Promise.all(
     aLancer.map((s) =>
-      lancerPhoto(supabase, profile.id, projet, { id: s.id, image_description: s.image_description, numero: s.numero }, tous.length, refs ?? []),
+      lancerPhoto(supabase, profile.id, projet, { ...s, numero: s.numero }, tous.length, refs ?? []),
     ),
   );
   const lancees = codes.filter((c) => c === null).length;
@@ -313,4 +326,49 @@ export async function actualiserPhotos(projectId: string): Promise<number> {
     .eq("status", "en_cours")
     .eq("scenes.project_id", projectId);
   return count ?? 0;
+}
+
+export type LigneTableau = {
+  voix: string;
+  mouvement: string;
+  description: string;
+  cadrage: string;
+  angle: string;
+  lieu: string;
+  intention: string;
+  pose_debut: string;
+  pose_fin: string;
+  duree: number | null;
+};
+
+// Import d'un tableau de scènes (CSV, par exemple le tableau maître d'un projet préparé ailleurs) : un plan par ligne
+export async function importerTableau(projectId: string, lignes: LigneTableau[], accord: boolean) {
+  const { supabase, profile } = await requireProfile();
+  if (lignes.length === 0) retour(projectId, "?erreur=import-vide");
+  const debut = await prochainePosition(supabase, projectId);
+  const court = (t: string, n = 300) => String(t ?? "").trim().slice(0, n);
+  const { error } = await supabase.from("scenes").insert(
+    lignes.slice(0, 300).map((l, i) => ({
+      project_id: projectId,
+      position: debut + i,
+      voiceover_text: court(l.voix, 2000),
+      // Pas de mouvement passe-partout : chaque plan devra recevoir le sien (leçon du Projet Mama)
+      motion_prompt: court(l.mouvement, 2000),
+      image_description: court(l.description, 2000),
+      cadrage: court(l.cadrage),
+      angle: court(l.angle),
+      lieu: court(l.lieu),
+      intention: court(l.intention),
+      pose_debut: court(l.pose_debut),
+      pose_fin: court(l.pose_fin),
+      duration_s: l.duree && l.duree >= 2 && l.duree <= 10 ? l.duree : 5,
+      consent_confirmed: accord,
+    })),
+  );
+  if (error) retour(projectId, "?erreur=import");
+  await Promise.all([
+    journaliser(supabase, profile.id, "import", "plan", null, { project_id: projectId, nombre: lignes.length, source: "tableau" }),
+    marquerEnProduction(supabase, projectId),
+  ]);
+  retour(projectId, `?importe=${Math.min(lignes.length, 300)}`);
 }

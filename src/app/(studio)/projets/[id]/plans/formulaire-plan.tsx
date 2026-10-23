@@ -4,6 +4,7 @@ import { unstable_rethrow } from "next/navigation";
 import { useState, useTransition } from "react";
 import { Roue } from "@/components/bouton-envoi";
 import { envoyerPhoto } from "@/lib/envoi-photo";
+import { ANGLES, CADRAGES } from "@/lib/libelles";
 import { ajouterPlan, modifierPlan } from "./actions";
 
 type PlanExistant = {
@@ -12,23 +13,37 @@ type PlanExistant = {
   voiceover_text: string;
   image_description: string;
   consent_confirmed: boolean;
+  cadrage: string;
+  angle: string;
+  lieu: string;
+  intention: string;
+  pose_debut: string;
+  pose_fin: string;
 };
+
+// Modèle de consigne vidéo découpée seconde par seconde, en anglais (le modèle vidéo comprend surtout l'anglais)
+const MODELE_MOUVEMENT =
+  "Static camera. 0-1s: she smiles softly and blinks. 1-3s: [main gesture matching the line]. 3-4s: [emotional reaction]. 4-5s: [final pose, ready for the next shot].";
 
 // Formulaire d'un plan : la photo part directement dans le stockage, puis le plan est enregistré.
 export function FormulairePlan({
   projectId,
   plan,
   photoUrl,
+  lieux = [],
 }: {
   projectId: string;
   plan?: PlanExistant;
   photoUrl?: string;
+  // Noms des références « lieu » du film, proposés dans la fiche
+  lieux?: string[];
 }) {
   const [apercu, setApercu] = useState<string | undefined>(photoUrl);
   const [erreur, setErreur] = useState<string | null>(null);
   const [etape, setEtape] = useState<string | null>(null);
   const [enCours, demarrer] = useTransition();
   const suffixe = plan?.id ?? "nouveau";
+  const [mouvement, setMouvement] = useState(plan?.motion_prompt ?? "");
 
   function envoyer(formData: FormData) {
     setErreur(null);
@@ -92,15 +107,67 @@ export function FormulairePlan({
             className="champ text-sm"
           />
         </div>
+        <details className="rounded-lg border border-ligne p-3" open={Boolean(plan?.cadrage || plan?.intention)}>
+          <summary className="cursor-pointer text-sm font-semibold">Fiche de tournage (cadrage, angle, lieu, poses)</summary>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <div>
+              <label className="etiquette" htmlFor={`cadrage-${suffixe}`}>Cadrage</label>
+              <input id={`cadrage-${suffixe}`} name="cadrage" list="liste-cadrages" defaultValue={plan?.cadrage} className="champ text-sm" />
+            </div>
+            <div>
+              <label className="etiquette" htmlFor={`angle-${suffixe}`}>Angle</label>
+              <input id={`angle-${suffixe}`} name="angle" list="liste-angles" defaultValue={plan?.angle} className="champ text-sm" />
+            </div>
+            <div>
+              <label className="etiquette" htmlFor={`lieu-${suffixe}`}>Lieu (nom d'une référence)</label>
+              <input id={`lieu-${suffixe}`} name="lieu" list={`lieux-${suffixe}`} defaultValue={plan?.lieu} className="champ text-sm" />
+              <datalist id={`lieux-${suffixe}`}>
+                {lieux.map((l) => (
+                  <option key={l} value={l} />
+                ))}
+              </datalist>
+            </div>
+            <div>
+              <label className="etiquette" htmlFor={`intention-${suffixe}`}>Intention, émotion</label>
+              <input id={`intention-${suffixe}`} name="intention" defaultValue={plan?.intention} placeholder="Ex. : tendresse, fausse sévérité" className="champ text-sm" />
+            </div>
+            <div>
+              <label className="etiquette" htmlFor={`debut-${suffixe}`}>Pose au début (0 s)</label>
+              <input id={`debut-${suffixe}`} name="pose_debut" defaultValue={plan?.pose_debut} placeholder="Ex. : assise, mains sur les genoux, regard caméra" className="champ text-sm" />
+            </div>
+            <div>
+              <label className="etiquette" htmlFor={`fin-${suffixe}`}>Pose à la fin (raccord avec le plan suivant)</label>
+              <input id={`fin-${suffixe}`} name="pose_fin" defaultValue={plan?.pose_fin} placeholder="Ex. : main posée sur la poitrine, regard à droite" className="champ text-sm" />
+            </div>
+          </div>
+          <datalist id="liste-cadrages">
+            {CADRAGES.map((c) => (
+              <option key={c} value={c} />
+            ))}
+          </datalist>
+          <datalist id="liste-angles">
+            {ANGLES.map((a) => (
+              <option key={a} value={a} />
+            ))}
+          </datalist>
+        </details>
         <div>
-          <label className="etiquette" htmlFor={`motion-${suffixe}`}>
-            Mouvement voulu (en anglais de préférence)
-          </label>
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <label className="etiquette" htmlFor={`motion-${suffixe}`}>
+              Mouvement pendant le clip (en anglais)
+            </label>
+            {!mouvement.trim() && (
+              <button type="button" className="lien text-xs" onClick={() => setMouvement(MODELE_MOUVEMENT)}>
+                Utiliser le modèle seconde par seconde
+              </button>
+            )}
+          </div>
           <textarea
             id={`motion-${suffixe}`}
             name="motion_prompt"
             rows={3}
-            defaultValue={plan?.motion_prompt}
+            value={mouvement}
+            onChange={(e) => setMouvement(e.target.value)}
             placeholder="Ex. : slow zoom in, the woman smiles and turns her head toward the camera, soft morning light"
             className="champ text-sm"
           />

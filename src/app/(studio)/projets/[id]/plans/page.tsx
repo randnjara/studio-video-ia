@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { BoutonEnvoi } from "@/components/bouton-envoi";
-import { GENRES, STATUTS_PLAN, couleurStatut, dureeLisible } from "@/lib/libelles";
+import { GENRES, MOUVEMENT_PAR_DEFAUT, STATUTS_PLAN, couleurStatut, dureeLisible } from "@/lib/libelles";
+import { alertesPlans } from "@/lib/controles";
 import { suivrePhotos } from "@/lib/photos";
 import { signerLiens } from "@/lib/production";
 import { MOTEURS, PRIX_PHOTO_ESTIME_USD, endpointEco, moteursDisponibles } from "@/lib/runpod";
@@ -18,6 +19,7 @@ import {
 } from "./actions";
 import { FormulairePlan } from "./formulaire-plan";
 import { ImportGroupe } from "./import-groupe";
+import { ImportTableau } from "./import-tableau";
 import { BarreSelection } from "./selection";
 import { CopierVerification } from "./copier-verification";
 import { AjoutReference } from "./references";
@@ -30,6 +32,12 @@ type Plan = {
   voiceover_text: string;
   image_description: string;
   image_path: string | null;
+  cadrage: string;
+  angle: string;
+  lieu: string;
+  intention: string;
+  pose_debut: string;
+  pose_fin: string;
   consent_confirmed: boolean;
   duration_s: number;
   status: string;
@@ -77,7 +85,7 @@ export default async function PagePlans({
     supabase
       .from("scenes")
       .select(
-        "id, position, motion_prompt, voiceover_text, image_description, image_path, consent_confirmed, duration_s, status, validated_take_id, takes!takes_scene_id_fkey(status), photos(id, status, error, runpod_job_id, created_at)",
+        "id, position, motion_prompt, voiceover_text, image_description, image_path, cadrage, angle, lieu, intention, pose_debut, pose_fin, consent_confirmed, duration_s, status, validated_take_id, takes!takes_scene_id_fkey(status), photos(id, status, error, runpod_job_id, created_at)",
       )
       .eq("project_id", id)
       .order("position"),
@@ -127,6 +135,9 @@ export default async function PagePlans({
   const apercu = parStatut.map(([st, n]) => `${n} ${(STATUTS_PLAN[st] ?? st).toLowerCase()}`).join(" · ");
   const ouvert = Boolean(sp.ajoute || sp.enregistre || sp.importe || sp.refuse || sp.ouvert);
   const decrits = plans.filter((p) => p.image_description.trim()).length;
+  const alertes = alertesPlans(plans, MOUVEMENT_PAR_DEFAUT);
+  const nbAlertes = [...alertes.values()].reduce((n, a) => n + a.length, 0);
+  const lieux = refs.filter((r) => r.genre === "lieu").map((r) => r.nom);
 
   return (
     <div className="flex flex-col gap-6">
@@ -194,9 +205,15 @@ export default async function PagePlans({
           </div>
         </details>
         <details className="rounded-lg border border-ligne p-4">
+          <summary className="cursor-pointer font-semibold">📋 Importer un tableau de scènes (CSV)</summary>
+          <div className="mt-4">
+            <ImportTableau projectId={id} />
+          </div>
+        </details>
+        <details className="rounded-lg border border-ligne p-4">
           <summary className="cursor-pointer font-semibold">＋ Un seul plan</summary>
           <div className="mt-4">
-            <FormulairePlan projectId={id} />
+            <FormulairePlan projectId={id} lieux={lieux} />
           </div>
         </details>
       </section>
@@ -280,6 +297,12 @@ export default async function PagePlans({
           </span>
         </div>
 
+        {nbAlertes > 0 && (
+          <p className="rounded-lg bg-alerte/10 px-4 py-3 text-sm text-alerte">
+            ⚠ {nbAlertes} alerte{nbAlertes > 1 ? "s" : ""} sur les plans (répétitions, voix off trop longue, consigne pas en
+            anglais) : voyez le détail sous chaque plan avant de créer les photos ou les vidéos.
+          </p>
+        )}
         {plans.length > 0 && projet && <CopierVerification texte={promptVerification(projet, plans)} />}
 
         {plans.length === 0 ? (
@@ -368,9 +391,21 @@ export default async function PagePlans({
                       <div className="min-w-0 flex-1 text-sm">
                         <p className="line-clamp-3">{plan.voiceover_text || <span className="text-sourdine">(pas de voix off)</span>}</p>
                         <p className="mt-1 line-clamp-2 text-xs text-sourdine">🎥 {plan.motion_prompt || "mouvement à préciser"}</p>
+                        {(plan.cadrage || plan.angle || plan.lieu || plan.intention) && (
+                          <p className="mt-1 text-xs text-sourdine">
+                            🎬 {[plan.cadrage, plan.angle, plan.lieu, plan.intention].filter(Boolean).join(" · ")}
+                          </p>
+                        )}
                       </div>
                     </div>
 
+                    {alertes.get(plan.id) && (
+                      <ul className="flex flex-col gap-1 rounded-md bg-alerte/10 px-3 py-2 text-xs text-alerte">
+                        {alertes.get(plan.id)!.map((a) => (
+                          <li key={a}>⚠ {a}</li>
+                        ))}
+                      </ul>
+                    )}
                     <div className="flex flex-wrap items-center gap-3 text-xs text-sourdine">
                       {manque && <span className="text-alerte">À compléter : {manque}</span>}
                       {enCours(plan) && <span className="text-accent">Génération en cours…</span>}
@@ -392,7 +427,7 @@ export default async function PagePlans({
                     <details>
                       <summary className="cursor-pointer text-sm font-semibold text-accent">Modifier ce plan</summary>
                       <div className="mt-3">
-                        <FormulairePlan projectId={id} plan={plan} photoUrl={photo} />
+                        <FormulairePlan projectId={id} plan={plan} photoUrl={photo} lieux={lieux} />
                       </div>
                     </details>
                   </li>

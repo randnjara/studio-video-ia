@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { BoutonEnvoi } from "@/components/bouton-envoi";
-import { STATUTS_PLAN, couleurStatut } from "@/lib/libelles";
+import { CONTROLES_CLIP, STATUTS_PLAN, couleurStatut } from "@/lib/libelles";
 import { signerLiens, suivreEssais } from "@/lib/production";
 import { MOTEURS, type Moteur, estMoteur, moteurParDefaut } from "@/lib/runpod";
 import { getClient } from "@/lib/session";
@@ -29,6 +29,7 @@ type Plan = {
 };
 
 const ERREURS: Record<string, string> = {
+  controle: "Pour valider un clip, cochez les 5 points de contrôle. Sinon, refusez-le ou régénérez-le.",
   plan: "Plan introuvable.",
   "sans-photo": "Ce plan n'a pas de photo : complétez-le dans « Plans ».",
   "sans-prompt": "Ce plan n'a pas de mouvement : complétez-le dans « Plans ».",
@@ -225,11 +226,26 @@ export default async function PageClips({
                               </BoutonEnvoi>
                             </form>
                           ) : (
-                            <form action={validerClip.bind(null, id, plan.id, t.id)}>
-                              <BoutonEnvoi className="bouton px-3 py-1" enCours="Validation…">
-                                ✓ Valider
-                              </BoutonEnvoi>
-                            </form>
+                            <details className="w-full">
+                              <summary className="bouton inline-flex cursor-pointer list-none px-3 py-1 [&::-webkit-details-marker]:hidden">
+                                ✓ Valider…
+                              </summary>
+                              {/* Grille de contrôle : regardez le début, le milieu et la fin du clip avant de cocher */}
+                              <form action={validerClip.bind(null, id, plan.id, t.id)} className="mt-2 flex flex-col gap-1.5 rounded-md bg-surface-2 p-3">
+                                <p className="text-xs text-sourdine">Regardez le début, le milieu et la fin du clip, puis cochez :</p>
+                                {Object.entries(CONTROLES_CLIP).map(([cle, libelle]) => (
+                                  <label key={cle} className="flex items-start gap-2 text-sm">
+                                    <input type="checkbox" name={cle} required className="mt-1" />
+                                    {libelle}
+                                  </label>
+                                ))}
+                                <div className="mt-1">
+                                  <BoutonEnvoi className="bouton px-3 py-1" enCours="Validation…">
+                                    ✓ Valider ce clip
+                                  </BoutonEnvoi>
+                                </div>
+                              </form>
+                            </details>
                           ))}
                         {video && (
                           <a href={video} download className="lien">
