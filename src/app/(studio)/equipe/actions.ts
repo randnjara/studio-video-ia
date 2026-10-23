@@ -137,7 +137,7 @@ export async function creerLienConnexion(userId: string): Promise<{ lien?: strin
   if (error || !data.properties?.hashed_token) return { erreur: error?.message ?? "Lien non créé." };
   await journaliser(supabase, profile.id, "lien-connexion", "membre", userId, { email: u.user.email });
   await noterConnexion(u.user.email, "lien-cree-par-responsable", profile.display_name);
-  return { lien: `${await siteUrl()}/auth/confirm?token_hash=${data.properties.hashed_token}&type=${type}` };
+  return { lien: `${await siteUrl()}/connexion/lien?token_hash=${data.properties.hashed_token}&type=${type}` };
 }
 
 // Renvoie par e-mail l'invitation (compte jamais ouvert) ou un lien de connexion
