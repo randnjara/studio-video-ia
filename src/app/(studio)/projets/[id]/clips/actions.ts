@@ -39,9 +39,11 @@ export async function actualiserEssais(projectId: string): Promise<number> {
 // Le clip choisi devient celui du plan : il pourra entrer dans un montage
 export async function validerClip(projectId: string, sceneId: string, takeId: string, formData: FormData) {
   const { supabase, profile } = await requireProfile();
-  // Grille de contrôle : chaque point doit être coché (leçon du Projet Mama, aucune validation implicite)
-  const controle = Object.fromEntries(Object.keys(CONTROLES_CLIP).map((c) => [c, formData.get(c) === "on"]));
-  if (Object.values(controle).some((v) => !v)) retour(projectId, `?erreur=controle#plan-${sceneId}`);
+  // Points à améliorer la prochaine fois : facultatifs, gardés avec le clip
+  const controle = {
+    a_ameliorer: Object.keys(CONTROLES_CLIP).filter((c) => formData.get(c) === "on"),
+    note: String(formData.get("note") ?? "").trim().slice(0, 500),
+  };
   await Promise.all([
     supabase
       .from("takes")
