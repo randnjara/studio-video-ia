@@ -139,6 +139,22 @@ export async function modifierPlan(projectId: string, sceneId: string, formData:
   retour(projectId, `?enregistre=1#plan-${sceneId}`);
 }
 
+// Photos de départ faites ailleurs (ChatGPT, ordinateur personnel…) : chaque photo envoyée devient celle de son plan
+export async function attacherPhotos(projectId: string, photos: { sceneId: string; chemin: string }[]) {
+  const { supabase } = await requireProfile();
+  const valides = photos
+    .map((p) => ({ sceneId: p.sceneId, chemin: cheminPhoto(projectId, p.chemin) }))
+    .filter((p): p is { sceneId: string; chemin: string } => Boolean(p.chemin));
+  if (valides.length === 0) retour(projectId, "?erreur=photos-importees");
+  const resultats = await Promise.all(
+    valides.map((p) =>
+      supabase.from("scenes").update({ image_path: p.chemin }).eq("id", p.sceneId).eq("project_id", projectId),
+    ),
+  );
+  if (resultats.some((r) => r.error)) retour(projectId, "?erreur=photos-importees");
+  retour(projectId, `?photos-importees=${valides.length}&ouvert=1`);
+}
+
 export async function supprimerPlan(projectId: string, sceneId: string) {
   const { supabase, profile } = await requireProfile();
   await Promise.all([
