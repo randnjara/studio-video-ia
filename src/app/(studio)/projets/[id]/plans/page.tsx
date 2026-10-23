@@ -6,7 +6,6 @@ import { suivrePhotos } from "@/lib/photos";
 import { signerLiens } from "@/lib/production";
 import { MOTEURS, PRIX_PHOTO_ESTIME_USD, endpointEco, moteursDisponibles } from "@/lib/runpod";
 import { getClient } from "@/lib/session";
-import { promptPreparation } from "@/lib/preparation";
 import { promptVerification } from "@/lib/verification";
 import {
   creerPhotos,
@@ -21,6 +20,7 @@ import {
 import { FormulairePlan } from "./formulaire-plan";
 import { ImportGroupe } from "./import-groupe";
 import { ImportTableau } from "./import-tableau";
+import { PreparationTableau } from "./preparation";
 import { BarreSelection } from "./selection";
 import { CopierVerification } from "./copier-verification";
 import { AjoutReference } from "./references";
@@ -205,18 +205,13 @@ export default async function PagePlans({
             )}
           </div>
         </details>
-        <CopierVerification
-          carte={false}
-          titre="🤖 Préparer le tableau des plans avec ChatGPT (gratuit)"
-          explication="Ajoutez d'abord les références du film (personnage principal, lieux) et le style, plus bas. Le bouton copie une consigne complète avec votre voix off (le script ci-dessus) : collez-la dans ChatGPT avec la photo du personnage. Il répond avec un tableau au format du studio ; enregistrez le bloc CSV dans un fichier .csv et importez-le juste en dessous."
-          bouton="📋 Copier le prompt de préparation"
-          texte={promptPreparation({
-            titre: projet?.title ?? "",
-            format: projet?.aspect_ratio ?? "16:9",
-            style: projet?.style_text ?? "",
-            script: projet?.scenario_text ?? "",
-            refs,
-          })}
+        <PreparationTableau
+          projectId={id}
+          titre={projet?.title ?? ""}
+          format={projet?.aspect_ratio ?? "16:9"}
+          style={projet?.style_text ?? ""}
+          script={projet?.scenario_text ?? ""}
+          refs={refs}
         />
         <details className="rounded-lg border border-ligne p-4">
           <summary className="cursor-pointer font-semibold">📋 Importer un tableau de scènes (CSV ou scénario Markdown)</summary>
