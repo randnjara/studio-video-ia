@@ -25,6 +25,7 @@ import { CopierLots } from "./copier-lots";
 import { ImportCorrection } from "./import-correction";
 import { CopierVerification } from "./copier-verification";
 import { SuiviPhotos } from "./suivi-photos";
+import { RemplacerPhoto } from "./remplacer-photo";
 import { ControleFile } from "../controle-file";
 import { PhotoZoom } from "@/components/photo-zoom";
 
@@ -478,7 +479,18 @@ export default async function PagePlans({
                           🖼 Photo ratée{derniere.error ? ` : ${derniere.error.slice(0, 120)}` : ""}
                         </span>
                       )}
-                      {derniere?.status === "terminee" && <span>🖼 Photo créée par le studio</span>}
+                      {derniere?.status === "terminee" && (
+                        <span>
+                          🖼 Photo créée par le studio
+                          {/* Pour voir que chaque « Re-générer » a bien donné une nouvelle photo */}
+                          {(() => {
+                            const refaites = plan.photos.filter((ph) => ph.a_eviter || ph.voulu).length;
+                            return refaites
+                              ? ` · re-générée ${refaites} fois, la dernière à ${new Date(derniere.created_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Indian/Antananarivo" })}`
+                              : "";
+                          })()}
+                        </span>
+                      )}
                       {nbClips > 0 && (
                         <Link href={`/projets/${id}/clips#plan-${plan.id}`} className="lien">
                           {nbClips} clip{nbClips > 1 ? "s" : ""}
@@ -487,6 +499,7 @@ export default async function PagePlans({
                       )}
                     </div>
 
+                    {derniere?.status !== "en_cours" && <RemplacerPhoto projectId={id} sceneId={plan.id} />}
                     {serveur && (photo || derniere) && plan.image_description.trim() && derniere?.status !== "en_cours" && (
                       <details open={sp.erreur === "sans-remarque" && sp.plan === plan.id}>
                         <summary className="cursor-pointer text-sm font-semibold text-accent">🔁 Re-générer cette photo</summary>
