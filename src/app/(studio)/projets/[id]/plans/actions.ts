@@ -308,12 +308,11 @@ export async function creerPhotos(projectId: string, formData: FormData) {
     .filter((s) => choisis.has(s.id) && s.image_description.trim() && !(s.photos as { status: string }[]).some((p) => p.status === "en_cours"));
   if (aLancer.length === 0) retour(projectId, "?erreur=selection-vide");
 
-  // Toutes les photos partent en même temps : le serveur les enchaîne sans recharger le modèle
-  const codes = await Promise.all(
-    aLancer.map((s) =>
-      lancerPhoto(supabase, profile.id, projet, { ...s, numero: s.numero }, tous.length, refs ?? []),
-    ),
-  );
+  // Envoi une par une : dix envois en même temps dépassent les connexions permises à Cloudflare et la requête
+  // était coupée (photos restées « en création » sans numéro RunPod). Le serveur les enchaîne ensuite sans recharger le modèle.
+  const codes: (string | null)[] = [];
+  for (const s of aLancer)
+    codes.push(await lancerPhoto(supabase, profile.id, projet, { ...s, numero: s.numero }, tous.length, refs ?? []));
   const lancees = codes.filter((c) => c === null).length;
   const sansRef = codes.filter((c) => c === "sans-reference").length;
   if (lancees > 0) await journaliser(supabase, profile.id, "photos", "projet", projectId, { nombre: lancees });
@@ -327,7 +326,7 @@ export async function actualiserPhotos(projectId: string): Promise<number> {
   const { supabase } = await requireProfile();
   const { data } = await supabase
     .from("photos")
-    .select("id, scene_id, runpod_job_id, scenes!inner(project_id)")
+    .select("id, scene_id, runpod_job_id, created_at, scenes!inner(project_id)")
     .eq("status", "en_cours")
     .eq("scenes.project_id", projectId);
   const enCours = data ?? [];

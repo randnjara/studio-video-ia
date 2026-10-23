@@ -191,7 +191,8 @@ export async function lancerPhoto(
       imagePath,
       uploadUrl: envoi.signedUrl,
     });
-    await supabase.from("photos").update({ runpod_job_id: jobId }).eq("id", photo.id);
+    const { error: errJob } = await supabase.from("photos").update({ runpod_job_id: jobId }).eq("id", photo.id);
+    if (errJob) throw new Error(errJob.message);
     return null;
   } catch (e) {
     await supabase
@@ -202,15 +203,25 @@ export async function lancerPhoto(
   }
 }
 
+const LANCEMENT_MAX_MS = 3 * 60 * 1000;
+
 // Met à jour les photos en cours ; une photo réussie devient la photo de départ du plan
 export async function suivrePhotos(
   supabase: SupabaseClient,
   projectId: string,
-  photos: { id: string; scene_id: string; runpod_job_id: string | null }[],
+  photos: { id: string; scene_id: string; runpod_job_id: string | null; created_at: string }[],
 ) {
   await Promise.all(
     photos.map(async (p) => {
-      if (!p.runpod_job_id) return;
+      if (!p.runpod_job_id) {
+        // Lancement coupé avant d'avoir reçu le numéro de RunPod : la photo ne reviendra jamais
+        if (Date.now() - new Date(p.created_at).getTime() > LANCEMENT_MAX_MS)
+          await supabase
+            .from("photos")
+            .update({ status: "echouee", error: "Le lancement a été interrompu. Relancez cette photo.", cost_usd: 0, finished_at: new Date().toISOString() })
+            .eq("id", p.id);
+        return;
+      }
       const statut = await lireStatut("photo", p.runpod_job_id).catch(() => null);
       if (!statut || statut.etat === "en_cours") return;
       const fin = new Date().toISOString();
