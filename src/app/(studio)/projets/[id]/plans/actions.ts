@@ -6,7 +6,7 @@ import { lireEtatFile } from "@/lib/file-attente";
 import { journaliser } from "@/lib/journal";
 import { MOUVEMENT_PAR_DEFAUT } from "@/lib/libelles";
 import { demanderEssais, marquerEnProduction } from "@/lib/production";
-import { estSuite } from "@/lib/categories";
+import { enchainee, lireCategorie } from "@/lib/categories";
 import { demanderPhotos, propagerPhoto, suivrePhotos } from "@/lib/photos";
 import { agrandirStockage, mettreAJourServeur } from "@/lib/runpod-admin";
 import { endpointEco, endpointPhoto, estMoteur, moteursDisponibles } from "@/lib/runpod";
@@ -312,10 +312,10 @@ export async function creerPhotos(projectId: string, formData: FormData) {
   const choisis = new Set(formData.getAll("plans").map(String));
 
   const [{ data: projet }, { data: scenes }, { data: refs }] = await Promise.all([
-    supabase.from("projects").select("id, aspect_ratio, style_text").eq("id", projectId).single(),
+    // Toutes les colonnes : la catégorie et le plan continu sont lus si la migration 0016 est passée
+    supabase.from("projects").select("*").eq("id", projectId).single(),
     supabase
       .from("scenes")
-      // Toutes les colonnes : le plan continu est lu si la migration 0016 est passée
       .select("*, photos(status)")
       .eq("project_id", projectId)
       .order("position"),
@@ -330,11 +330,12 @@ export async function creerPhotos(projectId: string, formData: FormData) {
   const tous = scenes ?? [];
   const aLancer = tous
     .map((s, i) => ({ ...s, numero: i + 1 }))
-    // La suite d'un plan continu reprend la photo de la première ligne du plan : pas de photo à créer pour elle
+    // La suite d'un plan continu (en prise unique : toute ligne après la première) part de la photo ou de la dernière
+    // image d'avant : pas de photo à créer pour elle
     .filter(
       (s, i) =>
         choisis.has(s.id) &&
-        !estSuite(tous, i) &&
+        !enchainee(tous, i, lireCategorie(projet?.categorie)) &&
         s.image_description.trim() &&
         !(s.photos as { status: string }[]).some((p) => p.status === "en_cours"),
     );

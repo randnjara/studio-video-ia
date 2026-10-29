@@ -106,7 +106,8 @@ export async function regenerer(projectId: string, sceneId: string) {
     supabase.from("projects").select("aspect_ratio").eq("id", projectId).single(),
     supabase
       .from("scenes")
-      .select("id, motion_prompt, image_path, consent_confirmed, duration_s, status")
+      // Toutes les colonnes : le plan continu sert à partir de la dernière image du clip précédent
+      .select("*")
       .eq("id", sceneId)
       .eq("project_id", projectId)
       .single(),

@@ -102,7 +102,8 @@ export function alertesPlans(plans: PlanControle[], mouvementParDefaut = "", cat
       ? proche((q) => Boolean(q.pose_fin) && (p.pose_fin === q.pose_fin || ressemblance(p.pose_fin!, q.pose_fin!) >= 0.9), true)
       : 0;
     if (fin) ajouter(p.id, `Même pose de fin que le plan ${fin} : chaque fin doit préparer le plan suivant.`);
-    const photo = proche((q) => ressemblance(p.image_description, q.image_description, communsPhoto) >= 0.8, true);
+    // Prise unique : une seule photo pour tout le film, les descriptions sont donc les mêmes partout
+    const photo = cat.priseUnique ? 0 : proche((q) => ressemblance(p.image_description, q.image_description, communsPhoto) >= 0.8, true);
     if (photo) ajouter(p.id, `Photo presque identique à celle du plan ${photo} : changez le cadrage, l'angle ou l'action.`);
     const prec = plans[i - 1];
     const continu = continus[i];

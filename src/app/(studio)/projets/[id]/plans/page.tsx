@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { BoutonEnvoi } from "@/components/bouton-envoi";
 import { MOUVEMENT_PAR_DEFAUT, STATUTS_PLAN, couleurStatut, dureeLisible } from "@/lib/libelles";
-import { estSuite, lireCategorie, plansContinus } from "@/lib/categories";
+import { CATEGORIES, enchainee, lireCategorie, plansContinus } from "@/lib/categories";
 import { alertesPlans } from "@/lib/controles";
 import { lotsPromptsPhotos, suivrePhotos } from "@/lib/photos";
 import { signerLiens } from "@/lib/production";
@@ -162,6 +162,8 @@ export default async function PagePlans({
   const decrits = plans.filter((p) => p.image_description.trim()).length;
   const alertes = alertesPlans(plans, MOUVEMENT_PAR_DEFAUT, lireCategorie(projet?.categorie));
   const continus = plansContinus(plans);
+  const categorie = lireCategorie(projet?.categorie);
+  const priseUnique = CATEGORIES[categorie].priseUnique;
   const nbAlertes = [...alertes.values()].reduce((n, a) => n + a.length, 0);
   const lieux = refs.filter((r) => r.genre === "lieu").map((r) => r.nom);
   // Lieux des plans sans photo de référence : le décor sera réinventé à chaque photo
@@ -330,7 +332,7 @@ export default async function PagePlans({
                     pose_debut: p.pose_debut,
                   }))
                   // La suite d'un plan continu reprend la photo de la première ligne : pas de prompt à copier pour elle
-                  .filter((_, i) => !estSuite(plans, i)),
+                  .filter((_, i) => !enchainee(plans, i, categorie)),
                   projet,
                   refs,
                 )}
@@ -401,7 +403,7 @@ export default async function PagePlans({
                 const photo = plan.image_path ? liens.get(plan.image_path) : undefined;
                 const nbClips = plan.takes.filter((t) => t.status === "terminee").length;
                 const derniere = dernierePhoto(plan);
-                const suite = estSuite(plans, i);
+                const suite = enchainee(plans, i, categorie);
                 const continu = continus[i];
                 const manque = !plan.image_path ? "photo" : !plan.motion_prompt ? "mouvement" : !plan.consent_confirmed ? "accord" : null;
                 return (
@@ -518,8 +520,9 @@ export default async function PagePlans({
 
                     {suite && (
                       <p className="text-xs text-sourdine">
-                        Même photo de départ que le plan {continu.tete + 1}, au début de ce plan continu : pour la changer, changez
-                        celle du plan {continu.tete + 1}.
+                        {priseUnique
+                          ? "Prise unique : ce clip part de la dernière image du clip précédent. Seule la photo du plan 1 compte."
+                          : `Même photo de départ que le plan ${continu.tete + 1}, au début de ce plan continu : pour la changer, changez celle du plan ${continu.tete + 1}.`}
                       </p>
                     )}
                     {!suite && derniere?.status !== "en_cours" && <RemplacerPhoto projectId={id} sceneId={plan.id} />}

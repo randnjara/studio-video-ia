@@ -87,7 +87,11 @@ Chaque plan est un clip de 5 s au plus, créé par le modèle Wan 2.2 « image v
 FILM : « ${projet.title} » — format ${projet.aspect_ratio} — ${plans.length} lignes — catégorie : ${cat.libelle}
 
 === PLANS CONTINUS ===
-Une ligne = un clip de 5 s au plus. Les lignes qui se suivent avec le même « plan_continu » forment UN SEUL PLAN à l'écran : la première part de la photo du plan, chaque suivante part de la dernière image de la vidéo précédente, sans coupe visible. Dans un plan continu, le cadrage, l'angle, le lieu et le prompt_image sont identiques sur toutes les lignes, chaque pose_debut reprend la pose_fin précédente, et la caméra est fixe : c'est voulu, ne le « varie » pas. Ne change jamais la colonne plan_continu.
+${
+    cat.priseUnique
+      ? "PRISE UNIQUE : tout le film est une seule prise. Une ligne = un clip de 5 s au plus ; la ligne 1 part de l'unique photo du film, chaque ligne suivante part de la dernière image de la vidéo précédente, même d'un plan continu à l'autre : aucune coupe. Les lignes qui se suivent avec le même « plan_continu » gardent le même cadrage, caméra fixe. La première ligne d'un nouveau plan continu commence au cadrage précédent et son prompt_video commence par un lent mouvement de caméra (slow push-in, rarement slow pull-back) jusqu'au nouveau cadrage. Le prompt_image est le même sur tout le film, chaque pose_debut reprend la pose_fin précédente : c'est voulu, ne le « varie » pas. Ne change jamais la colonne plan_continu."
+      : "Une ligne = un clip de 5 s au plus. Les lignes qui se suivent avec le même « plan_continu » forment UN SEUL PLAN à l'écran : la première part de la photo du plan, chaque suivante part de la dernière image de la vidéo précédente, sans coupe visible. Dans un plan continu, le cadrage, l'angle, le lieu et le prompt_image sont identiques sur toutes les lignes, chaque pose_debut reprend la pose_fin précédente, et la caméra est fixe : c'est voulu, ne le « varie » pas. Ne change jamais la colonne plan_continu."
+  }
 ${cat.consigne}
 
 === PHOTOS DE DÉPART ===

@@ -92,6 +92,8 @@ Appliquez la migration `supabase/migrations/0016_categorie.sql` (SQL Editor → 
 
 Ensuite, à l'étape 1 de chaque projet, choisissez la catégorie. La consigne ChatGPT suit ses règles : en interview, plusieurs lignes de 5 s forment un seul plan (même numéro dans la colonne `plan_continu`), avec une seule photo de départ pour tout le plan. Chaque clip suivant du plan part de la **dernière image du clip précédent** : il attend que ce clip soit fini, puis part tout seul. Cela marche avec notre serveur (moteurs « Économique ») à partir de l'image `v4` du serveur vidéo, construite par GitHub après la fusion (environ 20 minutes) ; le studio y bascule le serveur au prochain envoi. Avec « Qualité max », chaque clip repart de la photo du plan.
 
+**Interview = prise unique.** En catégorie « Interview / témoignage », tout le film est une seule prise : une seule photo (celle du plan 1), et chaque clip part de la dernière image du clip précédent, même quand le plan continu change. Le cadrage change alors par un lent mouvement de caméra au début du premier clip du nouveau plan (rapprochement, plus rarement recul), jamais par une coupe. Si la consigne vidéo de ce clip ne parle pas de mouvement, le studio l'ajoute lui-même d'après la colonne « cadrage ». Les clips partent donc un par un, dans l'ordre du film. Les autres catégories gardent leurs coupes entre plans continus.
+
 ## Vérifications
 
 - [ ] Je me connecte et je vois « Responsable » en haut à droite.

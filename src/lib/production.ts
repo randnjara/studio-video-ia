@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { CATEGORIES, type Categorie, avecMouvement, lireCategorie } from "@/lib/categories";
 import { journaliser } from "@/lib/journal";
 import { type EtatFile, attente, lireEtatFile } from "@/lib/file-attente";
 import { MOTEURS, type Moteur, annulerJob, lancerGeneration, lireStatut } from "@/lib/runpod";
@@ -49,21 +50,36 @@ const STABILITE =
 
 // Photo de départ d'un clip. Dans un plan continu, le clip suivant part de la dernière image du clip précédent
 // (celui validé, sinon le dernier réussi) : le geste continue au lieu de repartir de la même pose.
+// En prise unique (interview), c'est vrai sur tout le film, même quand le plan continu change.
 // « attendre » : le clip précédent est encore en cours, celui-ci partira après lui.
 // Sans clip précédent réussi (ou avec le service « Qualité max », qui ne rend pas cette image) : la photo du plan.
-// « continu » : le plan fait partie d'un plan continu, sa propre dernière image doit être gardée pour le suivant.
+// « continu » : sa propre dernière image doit être gardée pour le clip suivant.
+// « consigne » : la consigne de mouvement à envoyer (avec le mouvement de caméra d'un changement de cadrage).
 // Toutes les colonnes sont lues : sans la migration 0016, on garde simplement la photo du plan.
 // « ligne » : le plan déjà lu en entier (évite une lecture par clip dans la file d'attente).
-type LignePlan = { id: string; project_id: string; position: number; plan_continu?: number | null };
+type LignePlan = {
+  id: string;
+  project_id: string;
+  position: number;
+  motion_prompt: string;
+  cadrage?: string | null;
+  plan_continu?: number | null;
+};
 export async function photoDeDepart(
   supabase: SupabaseClient,
   sceneId: string,
   photoDuPlan: string,
   ligne?: LignePlan,
-): Promise<{ chemin: string; continu: boolean } | "attendre"> {
+  categorie?: Categorie,
+): Promise<{ chemin: string; continu: boolean; consigne: string } | "attendre"> {
   const plan = ligne ?? ((await supabase.from("scenes").select("*").eq("id", sceneId).single()).data as LignePlan | null);
-  if (!plan?.plan_continu) return { chemin: photoDuPlan, continu: false };
-  const seule = { chemin: photoDuPlan, continu: true };
+  const consigne = plan?.motion_prompt ?? "";
+  if (!plan) return { chemin: photoDuPlan, continu: false, consigne };
+  const cat =
+    categorie ?? lireCategorie((await supabase.from("projects").select("*").eq("id", plan.project_id).single()).data?.categorie);
+  const unique = CATEGORIES[cat].priseUnique;
+  if (!unique && !plan.plan_continu) return { chemin: photoDuPlan, continu: false, consigne };
+  const seule = { chemin: photoDuPlan, continu: true, consigne };
   const { data: prec } = await supabase
     .from("scenes")
     .select("*, takes!takes_scene_id_fkey(*)")
@@ -72,12 +88,17 @@ export async function photoDeDepart(
     .order("position", { ascending: false })
     .limit(1)
     .maybeSingle();
-  if (!prec || prec.plan_continu !== plan.plan_continu) return seule;
+  if (!prec || (!unique && prec.plan_continu !== plan.plan_continu)) return seule;
   type Essai = { id: string; status: string; created_at: string; last_frame_path?: string | null };
   const essais = ((prec.takes ?? []) as Essai[]).sort((a, b) => b.created_at.localeCompare(a.created_at));
   const avecImage = essais.filter((t) => t.status === "terminee" && t.last_frame_path);
   const choisi = avecImage.find((t) => t.id === prec.validated_take_id) ?? avecImage[0];
-  if (choisi) return { chemin: choisi.last_frame_path!, continu: true };
+  if (choisi)
+    return {
+      chemin: choisi.last_frame_path!,
+      continu: true,
+      consigne: unique ? avecMouvement(consigne, prec.cadrage, plan.cadrage) : consigne,
+    };
   if (essais.some((t) => t.status === "en_cours")) return "attendre";
   return seule;
 }
@@ -102,7 +123,7 @@ type Plan = {
 export async function lancerPlan(
   supabase: SupabaseClient,
   auteurId: string,
-  plan: Plan,
+  plan: Plan & LignePlan,
   format: string,
   moteur: Moteur,
 ) {
@@ -131,7 +152,7 @@ export async function lancerPlan(
 
   try {
     // Plan continu : la dernière image du clip précédent ; s'il est encore en cours, la photo du plan
-    const depart = await photoDeDepart(supabase, plan.id, plan.image_path);
+    const depart = await photoDeDepart(supabase, plan.id, plan.image_path, plan);
     const { data: signee, error: errSigne } = await supabase.storage
       .from(BUCKET)
       .createSignedUrl(depart === "attendre" ? plan.image_path : depart.chemin, 60 * 60);
@@ -151,7 +172,7 @@ export async function lancerPlan(
 
     const jobId = await lancerGeneration({
       moteur,
-      prompt: `${plan.motion_prompt.trim().replace(/[.\s]+$/, "")}. ${STABILITE}`,
+      prompt: `${(depart === "attendre" ? plan.motion_prompt : depart.consigne).trim().replace(/[.\s]+$/, "")}. ${STABILITE}`,
       imageUrl: signee.signedUrl,
       format,
       duree,
@@ -191,7 +212,9 @@ const ENVOIS_PAR_APPEL = 3;
 const SUIVIS_PAR_APPEL = 4;
 const ENVOI = "envoi";
 const ENVOI_MAX_MS = 3 * 60 * 1000;
-const ATTENTE_MAX_MS = 60 * 60 * 1000;
+// En prise unique, les clips partent un par un (chacun attend la dernière image du précédent) : 40 clips peuvent
+// attendre leur tour plus de 2 h, l'attente permise est donc longue
+const ATTENTE_MAX_MS = 6 * 60 * 60 * 1000;
 // Annulations chez RunPod par clic sur « Arrêter le lot » (limite d'appels de Cloudflare) : au-delà, recliquer
 export const ANNULATIONS_PAR_APPEL = 30;
 
@@ -269,7 +292,8 @@ async function echecEssai(supabase: SupabaseClient, essai: EssaiEnCours, erreur:
 async function envoyerEssais(supabase: SupabaseClient, projectId: string, enAttente: EssaiEnCours[], serveurEco: string | null) {
   if (enAttente.length === 0) return;
   const [{ data: projet }, { data: scenes }] = await Promise.all([
-    supabase.from("projects").select("aspect_ratio").eq("id", projectId).single(),
+    // Toutes les colonnes : la catégorie est lue si la migration 0016 est passée
+    supabase.from("projects").select("*").eq("id", projectId).single(),
     supabase
       .from("scenes")
       // Toutes les colonnes : le plan continu est lu si la migration 0016 est passée
@@ -287,7 +311,9 @@ async function envoyerEssais(supabase: SupabaseClient, projectId: string, enAtte
   for (const essai of regardes) {
     if (envoyes >= ENVOIS_PAR_APPEL) break;
     const plan = scenes?.find((s) => s.id === essai.scene_id);
-    const depart = plan?.image_path ? await photoDeDepart(supabase, plan.id, plan.image_path, plan) : null;
+    const depart = plan?.image_path
+      ? await photoDeDepart(supabase, plan.id, plan.image_path, plan, lireCategorie(projet?.categorie))
+      : null;
     if (depart === "attendre") continue; // reste dans la file, sans numéro RunPod
     const { data: pris } = await supabase
       .from("takes")
@@ -314,7 +340,7 @@ async function envoyerEssais(supabase: SupabaseClient, projectId: string, enAtte
       if (envoi && (envoi.error || !envoi.data)) throw new Error("Impossible de préparer l'envoi de la vidéo.");
       const jobId = await lancerGeneration({
         moteur: essai.moteur,
-        prompt: `${plan.motion_prompt.trim().replace(/[.\s]+$/, "")}. ${STABILITE}`,
+        prompt: `${depart.consigne.trim().replace(/[.\s]+$/, "")}. ${STABILITE}`,
         imageUrl: signee.signedUrl,
         format: projet?.aspect_ratio ?? "16:9",
         duree,

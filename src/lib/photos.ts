@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { CATEGORIES, lireCategorie } from "@/lib/categories";
 import { GENRES } from "@/lib/libelles";
 import { type EtatFile, attente, lireEtatFile } from "@/lib/file-attente";
 import { ANNULATIONS_PAR_APPEL, BUCKET, aSuivre } from "@/lib/production";
@@ -408,23 +409,41 @@ export async function suivrePhotos(
 }
 
 // Plan continu : les lignes qui suivent celle-ci avec le même numéro de plan continu prennent la même photo de départ,
-// pour qu'aucune coupe ne se voie entre leurs clips de 5 s (toutes les colonnes : la migration 0016 peut manquer)
+// pour qu'aucune coupe ne se voie entre leurs clips de 5 s (toutes les colonnes : la migration 0016 peut manquer).
+// Prise unique (interview) : toutes les lignes suivantes du film. Elles partent de la dernière image de la ligne
+// précédente ; la photo ne sert que si cette image manque.
 export async function propagerPhoto(supabase: SupabaseClient, sceneId: string, imagePath: string) {
   const { data: plan } = await supabase.from("scenes").select("*").eq("id", sceneId).single();
-  if (!plan?.plan_continu) return;
+  if (!plan) return;
+  const { data: projet } = await supabase.from("projects").select("*").eq("id", plan.project_id).single();
+  const unique = CATEGORIES[lireCategorie(projet?.categorie)].priseUnique;
+  if (!unique && !plan.plan_continu) return;
   const { data: suivants } = await supabase
     .from("scenes")
     .select("*")
     .eq("project_id", plan.project_id)
     .gt("position", plan.position)
     .order("position")
-    .limit(100);
+    .limit(500);
   const ids: string[] = [];
   for (const s of suivants ?? []) {
-    if (s.plan_continu !== plan.plan_continu) break;
+    if (!unique && s.plan_continu !== plan.plan_continu) break;
     ids.push(s.id);
   }
   if (ids.length) await supabase.from("scenes").update({ image_path: imagePath }).in("id", ids);
+}
+
+// Passage en prise unique : la photo de la première ligne qui en a une est reportée sur tout le film
+export async function propagerPremierePhoto(supabase: SupabaseClient, projectId: string) {
+  const { data: premiere } = await supabase
+    .from("scenes")
+    .select("id, image_path")
+    .eq("project_id", projectId)
+    .not("image_path", "is", null)
+    .order("position")
+    .limit(1)
+    .maybeSingle();
+  if (premiere?.image_path) await propagerPhoto(supabase, premiere.id, premiere.image_path);
 }
 
 // Première photo réussie d'un lieu sans photo de référence : elle devient la référence du lieu (comme « Garder ce décor »)
