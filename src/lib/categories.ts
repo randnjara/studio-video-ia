@@ -123,7 +123,9 @@ const CADRAGES_EN: Record<string, string> = {
   "plan d'ensemble": "a very wide establishing shot",
 };
 
-export const MOTS_MOUVEMENT = /push|pull|dolly|zoom|track|pan\b|pans\b|panning|tilt|crane|orbit/i;
+// Mouvements de la caméra seulement : « she tilts her head » ou « pulls her shawl » ne sont pas des mouvements de caméra
+export const MOTS_MOUVEMENT =
+  /\b(push(es|ed|ing)?[- ]in|pull(s|ed|ing)?[- ](back|out)|dolly|zoom(s|ed|ing)?|pan(s|ned|ning)?\b|camera (moves|glides|drifts|travels|orbits|tracks|cranes))/i;
 
 // Fenêtre d'un changement (zoom, cadrage, lieu) dans un clip : jamais pendant la première ni la dernière seconde,
 // pour que le raccord avec le clip d'avant et celui d'après se fasse sur une image calme
