@@ -20,5 +20,5 @@ export async function confirmerLien(formData: FormData) {
     error ? `lien copié : ${error.message}` : "lien copié",
   );
   if (error) redirect("/connexion?erreur=lien-invalide");
-  redirect("/");
+  redirect(type === "recovery" ? "/compte?nouveau=1" : "/");
 }

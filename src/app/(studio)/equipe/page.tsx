@@ -20,6 +20,7 @@ import {
   passerAuCache,
   changerRole,
   creerServeurEco,
+  enregistrerAcces,
   creerServeurVoixAction,
   fixerBudget,
   inviterMembre,
@@ -27,6 +28,7 @@ import {
   renvoyerLien,
   supprimerMembre,
 } from "./actions";
+import { LONGUEUR_MOT_DE_PASSE } from "@/lib/identifiant";
 import { LienConnexion } from "./lien-connexion";
 
 const ERREURS: Record<string, string> = {
@@ -46,6 +48,12 @@ const ERREURS: Record<string, string> = {
   suppression: "Le compte n'a pas pu être supprimé.",
   "confirmer-cache": "Cochez la case de confirmation.",
   "cache-absent": "Créez d'abord les deux serveurs (étape 1).",
+  secours: "Le compte de secours (super-admin) ne peut être modifié que par lui-même, depuis « Mon compte ».",
+  "format-identifiant":
+    "Nom d'utilisateur : 3 à 30 caractères, lettres minuscules sans accent, chiffres, point, tiret ou _.",
+  "identifiant-pris": "Ce nom d'utilisateur est déjà pris.",
+  "mot-de-passe-court": `Le mot de passe doit faire au moins ${LONGUEUR_MOT_DE_PASSE} caractères.`,
+  acces: "Les accès n'ont pas pu être enregistrés.",
   "suppression-disque":
     "Le studio utilise bien les nouveaux serveurs, mais l'ancien serveur ou le disque n'a pas pu être supprimé chez RunPod. Supprimez-les dans la console RunPod (Serverless et Storage).",
 };
@@ -58,6 +66,9 @@ const EVENEMENTS: Record<string, string> = {
   "lien-cree-par-responsable": "lien à copier créé par",
   "lien-envoye-par-responsable": "lien renvoyé par e-mail par",
   "compte-cree-sans-email": "compte créé sans e-mail (limite atteinte) par",
+  "compte-cree-avec-mot-de-passe": "compte créé avec mot de passe par",
+  "mot-de-passe-refuse": "mot de passe refusé",
+  "reinitialisation-demandee": "a demandé un nouveau mot de passe",
 };
 
 const date = (d?: string | null) =>
@@ -83,6 +94,7 @@ const ACTIONS: Record<string, string> = {
   "renvoi-lien": "a renvoyé un lien à",
   reinitialisation: "a réinitialisé la connexion d'un membre",
   suppression: "a supprimé le compte",
+  "mot-de-passe": "a donné un nouveau mot de passe à un membre",
   restauration: "a restauré un projet",
   ajout: "a ajouté un plan",
   import: "a importé des plans",
@@ -113,6 +125,8 @@ export default async function Equipe({
     membre?: string;
     file?: string;
     voix?: string;
+    cree?: string;
+    acces?: string;
   }>;
 }) {
   const sp = await searchParams;
@@ -125,7 +139,7 @@ export default async function Equipe({
 
   const [{ data: membres }, { data: budgetMois }, { data: depense }, { data: journal }, endpoint, { data: volume }, runpod] =
     await Promise.all([
-    supabase.from("profiles").select("id, display_name, role, active").order("created_at"),
+    supabase.from("profiles").select("id, display_name, role, active, username, telephone, super_admin").order("created_at"),
     supabase.from("monthly_budgets").select("limit_usd").eq("month", mois).maybeSingle(),
     supabase.rpc("month_spend_usd"),
     supabase
@@ -164,6 +178,12 @@ export default async function Equipe({
     ((sessions ?? []) as { user_id: string; sessions: number; derniere_activite: string }[]).map((x) => [x.user_id, x]),
   );
 
+  // Demandes « mot de passe oublié » de la semaine, à traiter dans la fiche du membre
+  const ilYaUneSemaine = Date.now() - 7 * 24 * 3600 * 1000;
+  const demandes = (tentatives ?? []).filter(
+    (t) => t.evenement === "reinitialisation-demandee" && new Date(t.created_at).getTime() > ilYaUneSemaine,
+  );
+
   const noms = new Map((membres ?? []).map((m) => [m.id, m.display_name]));
   const limite = budgetMois ? Number(budgetMois.limit_usd) : null;
   const depenseMois = Number(depense ?? 0);
@@ -174,6 +194,33 @@ export default async function Equipe({
       <h1 className="text-2xl font-bold tracking-tight">Équipe et budget</h1>
 
       {invite && <p className="message-ok">Invitation envoyée à {invite}.</p>}
+      {sp.cree && (
+        <p className="message-ok">
+          Compte de {sp.cree} créé, sans e-mail. Transmettez-lui son nom d'utilisateur et son mot de passe (WhatsApp, SMS…).
+        </p>
+      )}
+      {sp.acces && (
+        <p className="message-ok">
+          {sp.acces === "mot-de-passe"
+            ? "Nouveau mot de passe enregistré. Transmettez-le au membre ; il pourra le changer dans « Mon compte »."
+            : "Accès enregistrés."}
+        </p>
+      )}
+      {demandes.length > 0 && (
+        <div className="message-erreur">
+          <p className="font-semibold">Demandes de nouveau mot de passe (7 derniers jours)</p>
+          <ul className="mt-1 list-disc pl-5">
+            {demandes.map((t) => (
+              <li key={t.id}>
+                {date(t.created_at)} · {t.email ?? "compte introuvable"} · {t.detail}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1">
+            Ouvrez « Détails et dépannage » du membre, donnez-lui un nouveau mot de passe et envoyez-le à son numéro.
+          </p>
+        </div>
+      )}
       {budget && <p className="message-ok">Budget du mois enregistré.</p>}
       {renvoye && <p className="message-ok">Lien envoyé par e-mail à {renvoye}.</p>}
       {reinitialise && (
@@ -447,9 +494,11 @@ export default async function Equipe({
           {((membres ?? []) as Profile[]).map((m) => (
             <li key={m.id} id={`membre-${m.id}`} className="flex flex-wrap items-center gap-3 py-3">
               <span className="font-semibold">{m.display_name}</span>
-              <span className="text-sm text-sourdine">{m.role === "responsable" ? "Responsable" : "Membre"}</span>
+              <span className="text-sm text-sourdine">
+                {m.super_admin ? "Super-admin" : m.role === "responsable" ? "Responsable" : "Membre"} · {m.username}
+              </span>
               {!m.active && <span className="rounded bg-fond px-2 py-0.5 text-xs font-semibold">Désactivé</span>}
-              {m.id !== profile.id && (
+              {m.id !== profile.id && !m.super_admin && (
                 <div className="ml-auto flex items-center gap-2">
                   <form action={changerRole.bind(null, m.id, m.role === "responsable" ? "membre" : "responsable")}>
                     <BoutonEnvoi className="bouton-discret px-3 py-1 text-sm" enCours="…">
@@ -466,7 +515,7 @@ export default async function Equipe({
               <FicheMembre
                 ouverte={sp.membre === m.id}
                 m={m}
-                moi={m.id === profile.id}
+                moi={m.id === profile.id || m.super_admin}
                 u={compte.get(m.id)}
                 s={session.get(m.id)}
                 tentatives={(tentatives ?? []).filter((t) => t.email && t.email === compte.get(m.id)?.email?.toLowerCase())}
@@ -474,20 +523,47 @@ export default async function Equipe({
             </li>
           ))}
         </ul>
-        <form action={inviterMembre} className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
-          <div>
-            <label htmlFor="display_name" className="etiquette">
-              Prénom
-            </label>
-            <input id="display_name" name="display_name" className="champ" />
+        <form action={inviterMembre} className="flex flex-col gap-3 border-t border-ligne pt-4">
+          <h3 className="font-semibold">Ajouter un membre</h3>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label htmlFor="display_name" className="etiquette">
+                Prénom
+              </label>
+              <input id="display_name" name="display_name" className="champ" />
+            </div>
+            <div>
+              <label htmlFor="email" className="etiquette">
+                E-mail
+              </label>
+              <input id="email" name="email" type="email" required className="champ" />
+            </div>
+            <div>
+              <label htmlFor="username" className="etiquette">
+                Nom d'utilisateur
+              </label>
+              <input id="username" name="username" autoCapitalize="none" placeholder="ex. julia" className="champ" />
+            </div>
+            <div>
+              <label htmlFor="telephone" className="etiquette">
+                Téléphone
+              </label>
+              <input id="telephone" name="telephone" type="tel" className="champ" />
+            </div>
+            <div className="sm:col-span-2">
+              <label htmlFor="mot_de_passe" className="etiquette">
+                Mot de passe de départ
+              </label>
+              <input id="mot_de_passe" name="mot_de_passe" autoComplete="off" className="champ" />
+              <p className="mt-1 text-xs text-sourdine">
+                Rempli : le compte est prêt tout de suite, sans e-mail ; transmettez le nom d'utilisateur et le mot de passe
+                à la personne. Vide : une invitation part par e-mail (limitée à quelques envois par heure).
+              </p>
+            </div>
           </div>
           <div>
-            <label htmlFor="email" className="etiquette">
-              E-mail
-            </label>
-            <input id="email" name="email" type="email" required className="champ" />
+            <BoutonEnvoi enCours="Création…">Ajouter</BoutonEnvoi>
           </div>
-          <BoutonEnvoi enCours="Envoi…">Inviter</BoutonEnvoi>
         </form>
       </section>
 
@@ -536,7 +612,7 @@ export default async function Equipe({
 type TentativeConnexion = { id: number; email: string | null; evenement: string; detail: string; appareil: string; created_at: string };
 
 function Tentative({ t }: { t: TentativeConnexion }) {
-  const erreur = t.evenement.startsWith("erreur") || t.evenement === "lien-refuse";
+  const erreur = t.evenement.startsWith("erreur") || t.evenement.endsWith("refuse");
   return (
     <li className={erreur ? "text-alerte" : ""}>
       <span className="text-sourdine">{date(t.created_at)}</span> {t.email ?? "adresse inconnue"} :{" "}
@@ -544,6 +620,12 @@ function Tentative({ t }: { t: TentativeConnexion }) {
       {t.appareil && <span className="text-xs text-sourdine"> ({appareil(t.appareil)})</span>}
     </li>
   );
+}
+
+// Numéro au format international pour wa.me (Madagascar par défaut : 034… → 26134…)
+function whatsapp(tel: string) {
+  const chiffres = tel.replace(/\D/g, "");
+  return chiffres.startsWith("0") ? `261${chiffres.slice(1)}` : chiffres;
 }
 
 // Détails et dépannage d'un membre, pour le responsable
@@ -568,6 +650,10 @@ function FicheMembre({
       <div className="mt-3 flex flex-col gap-3 rounded-lg bg-surface-2 p-3">
         {u ? (
           <dl className="grid gap-x-4 gap-y-1 sm:grid-cols-[auto_1fr]">
+            <dt className="text-sourdine">Nom d'utilisateur</dt>
+            <dd>{m.username}</dd>
+            <dt className="text-sourdine">Téléphone</dt>
+            <dd>{m.telephone || "non renseigné"}</dd>
             <dt className="text-sourdine">E-mail</dt>
             <dd className="break-all">{u.email}</dd>
             <dt className="text-sourdine">Invité le</dt>
@@ -607,7 +693,39 @@ function FicheMembre({
             <p className="font-semibold">Si la personne n'arrive pas à se connecter</p>
             <ol className="flex list-decimal flex-col gap-3 pl-5">
               <li>
-                <span>Le plus sûr : un lien à lui envoyer vous-même, sans e-mail.</span>
+                <span>Le plus simple : lui donner un nouveau mot de passe, puis le lui envoyer vous-même.</span>
+                <form action={enregistrerAcces.bind(null, m.id)} className="mt-1 grid gap-2 sm:grid-cols-3 sm:items-end">
+                  <div>
+                    <label className="etiquette text-xs">Nom d'utilisateur</label>
+                    <input name="username" required defaultValue={m.username} autoCapitalize="none" className="champ" />
+                  </div>
+                  <div>
+                    <label className="etiquette text-xs">Téléphone</label>
+                    <input name="telephone" type="tel" defaultValue={m.telephone} className="champ" />
+                  </div>
+                  <div>
+                    <label className="etiquette text-xs">Nouveau mot de passe</label>
+                    <input name="mot_de_passe" autoComplete="off" placeholder="laisser vide = inchangé" className="champ" />
+                  </div>
+                  <div className="sm:col-span-3 flex flex-wrap items-center gap-3">
+                    <BoutonEnvoi className="bouton-discret px-3 py-1 text-sm" enCours="…">
+                      Enregistrer
+                    </BoutonEnvoi>
+                    {m.telephone && (
+                      <a
+                        className="lien text-sm"
+                        href={`https://wa.me/${whatsapp(m.telephone)}`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Ouvrir WhatsApp avec {m.telephone}
+                      </a>
+                    )}
+                  </div>
+                </form>
+              </li>
+              <li>
+                <span>Ou un lien de connexion à lui envoyer vous-même, sans e-mail.</span>
                 <div className="mt-1">
                   <LienConnexion userId={m.id} nom={m.display_name} />
                 </div>

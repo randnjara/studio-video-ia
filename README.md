@@ -6,7 +6,7 @@ Le cahier des charges complet et le guide pas à pas sont dans le document du pr
 
 ## Ce qui fonctionne déjà
 
-- Connexion par lien envoyé par e-mail, sans mot de passe, **sur invitation uniquement**. Rôles responsable / membre modifiables.
+- Connexion par **nom d'utilisateur et mot de passe** (ou e-mail, ou téléphone), **sur invitation uniquement** ; lien par e-mail toujours possible. Mot de passe oublié : lien par e-mail et demande transmise au responsable, qui donne un nouveau mot de passe par téléphone. Compte de secours « superadmin » protégé (voir `supabase/super-admin.sql`). Page « Mon compte » pour changer son mot de passe, son nom d'utilisateur et son téléphone. Rôles responsable / membre modifiables.
 - Chaque membre a son espace personnel. Tout le monde partage l'espace « Équipe ».
 - Chaque projet suit 5 étapes, en onglets (l'étape actuelle est en couleur) :
   1. **Infos** : titre, format, résumé, voix off, style, photos de référence (au minimum le personnage principal), puis « Valider les informations ». Aussi : prochaine étape, historique, corbeille.

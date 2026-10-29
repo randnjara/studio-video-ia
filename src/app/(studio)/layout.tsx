@@ -11,6 +11,7 @@ export default async function StudioLayout({ children }: { children: React.React
     { href: "/", libelle: "Projets", icone: "🎬" },
     { href: "/voix", libelle: "Voix", icone: "🎙" },
     ...(profile.role === "responsable" ? [{ href: "/equipe", libelle: "Équipe et budget", icone: "👥" }] : []),
+    { href: "/compte", libelle: "Mon compte", icone: "🔑" },
   ];
 
   return (
@@ -27,7 +28,10 @@ export default async function StudioLayout({ children }: { children: React.React
           <ChoixTheme />
           <div className="mt-2 rounded-lg bg-surface-2 px-3 py-2">
             <p className="truncate text-sm font-semibold">{profile.display_name}</p>
-            <p className="text-xs text-sourdine">{profile.role === "responsable" ? "Responsable" : "Membre"}</p>
+            <p className="text-xs text-sourdine">
+              {profile.super_admin ? "Super-admin" : profile.role === "responsable" ? "Responsable" : "Membre"} ·{" "}
+              {profile.username}
+            </p>
           </div>
           <form action="/auth/deconnexion" method="post">
             <BoutonEnvoi className="bouton-danger w-full justify-start" enCours="Déconnexion…">
