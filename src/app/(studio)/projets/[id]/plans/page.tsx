@@ -223,6 +223,7 @@ export default async function PagePlans({
         enCours={nbPhotosEnCours + plans.filter(enCours).length}
         enPause={etat.enPause}
         serveurArrete={etat.serveurArrete}
+        arretAuto={etat.arretAuto}
         serveurExiste={Boolean(etat.serveurVideo)}
         responsable={profile.role === "responsable"}
         sp={sp}

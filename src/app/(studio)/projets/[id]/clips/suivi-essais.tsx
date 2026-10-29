@@ -2,6 +2,8 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import type { EtatServeur } from "@/lib/surveillance";
+import { EtatServeurVue, useJournalServeur } from "../etat-serveur";
 import { actualiserEssais } from "./actions";
 
 // Tant qu'un essai tourne, demande des nouvelles à RunPod toutes les 10 secondes et rafraîchit la page.
@@ -12,6 +14,8 @@ export function SuiviEssais({ projectId, enCours, enPause }: { projectId: string
   const [secondes, setSecondes] = useState(0);
   const [permission, setPermission] = useState<NotificationPermission | "absent">("absent");
   const precedent = useRef(enCours);
+  const [serveur, setServeur] = useState<EtatServeur | null>(null);
+  const { journal, noter } = useJournalServeur(`journal-videos:${projectId}`);
 
   useEffect(() => {
     setPermission("Notification" in window ? Notification.permission : "absent");
@@ -23,28 +27,39 @@ export function SuiviEssais({ projectId, enCours, enPause }: { projectId: string
     precedent.current = enCours;
     if (finies <= 0) return;
     const texte = finies === 1 ? "Une vidéo est prête à valider." : `${finies} vidéos sont prêtes à valider.`;
+    noter(texte);
     try {
       if ("Notification" in window && Notification.permission === "granted") {
         new Notification("Studio Vidéo IA", { body: texte });
       }
     } catch {}
-  }, [enCours]);
+  }, [enCours, noter]);
 
   useEffect(() => {
     if (enCours === 0) return;
     let actif = true;
     const debut = Date.now();
     const compteur = setInterval(() => setSecondes(Math.round((Date.now() - debut) / 1000)), 1000);
-    const boucle = setInterval(async () => {
-      const restants = await actualiserEssais(projectId).catch(() => enCours);
-      if (actif && restants !== enCours) router.refresh();
-    }, 10_000);
+    noter(enCours === 1 ? "1 vidéo en cours" : `${enCours} vidéos en cours`);
+    const tour = async () => {
+      const r = await actualiserEssais(projectId).catch(() => null);
+      if (!actif) return;
+      if (!r) {
+        noter("Le studio ne répond pas (connexion internet ?)", "alerte");
+        return;
+      }
+      setServeur(r.serveur);
+      if (r.serveur) noter(r.serveur.arret ?? r.serveur.texte, r.serveur.arret ? "alerte" : r.serveur.ton);
+      if (r.restants !== enCours || r.serveur?.arret) router.refresh();
+    };
+    tour();
+    const boucle = setInterval(tour, 10_000);
     return () => {
       actif = false;
       clearInterval(compteur);
       clearInterval(boucle);
     };
-  }, [projectId, enCours, router]);
+  }, [projectId, enCours, router, noter]);
 
   if (enCours === 0) return null;
   return (
@@ -74,6 +89,7 @@ export function SuiviEssais({ projectId, enCours, enPause }: { projectId: string
           🔔 Me prévenir quand c'est prêt
         </button>
       )}
+      <EtatServeurVue etat={serveur} journal={journal} />
     </div>
   );
 }

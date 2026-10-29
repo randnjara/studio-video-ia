@@ -10,6 +10,7 @@ import { demanderPhotos, propagerPhoto, suivrePhotos } from "@/lib/photos";
 import { agrandirStockage, mettreAJourServeur } from "@/lib/runpod-admin";
 import { endpointEco, endpointPhoto, estMoteur, moteursDisponibles } from "@/lib/runpod";
 import { requireProfile } from "@/lib/session";
+import { type EtatServeur, surveiller } from "@/lib/surveillance";
 
 // Les références du film se gèrent à l'étape 1 (Infos)
 function versInfos(projectId: string, params = ""): never {
@@ -384,22 +385,29 @@ export async function regenererPhoto(projectId: string, sceneId: string, formDat
 }
 
 // Appelée toutes les 10 s par la page tant que des photos sont en cours ; renvoie le nombre restant
-export async function actualiserPhotos(projectId: string): Promise<number> {
+export async function actualiserPhotos(projectId: string): Promise<{ restants: number; serveur: EtatServeur | null }> {
   const { supabase } = await requireProfile();
-  const { data } = await supabase
-    .from("photos")
-    .select("id, scene_id, runpod_job_id, created_at, scenes!inner(project_id)")
-    .eq("status", "en_cours")
-    .eq("scenes.project_id", projectId);
+  const [{ data }, etat] = await Promise.all([
+    supabase
+      .from("photos")
+      .select("id, scene_id, runpod_job_id, created_at, scenes!inner(project_id)")
+      .eq("status", "en_cours")
+      .eq("scenes.project_id", projectId),
+    lireEtatFile(supabase, projectId),
+  ]);
   const enCours = data ?? [];
-  if (enCours.length === 0) return 0;
-  await suivrePhotos(supabase, projectId, enCours);
-  const { count } = await supabase
-    .from("photos")
-    .select("id, scenes!inner(project_id)", { count: "exact", head: true })
-    .eq("status", "en_cours")
-    .eq("scenes.project_id", projectId);
-  return count ?? 0;
+  if (enCours.length === 0) return { restants: 0, serveur: null };
+  await suivrePhotos(supabase, projectId, enCours, true, etat);
+  const parties = enCours.filter((p): p is typeof p & { runpod_job_id: string } => Boolean(p.runpod_job_id) && p.runpod_job_id !== "envoi");
+  const [serveur, { count }] = await Promise.all([
+    surveiller(supabase, projectId, "photo", etat.serveurPhoto, etat, parties),
+    supabase
+      .from("photos")
+      .select("id, scenes!inner(project_id)", { count: "exact", head: true })
+      .eq("status", "en_cours")
+      .eq("scenes.project_id", projectId),
+  ]);
+  return { restants: count ?? 0, serveur };
 }
 
 export type LigneTableau = {
