@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { journaliser } from "@/lib/journal";
+import { lireCategorie } from "@/lib/categories";
 import { FORMATS } from "@/lib/libelles";
 import { requireProfile } from "@/lib/session";
 
@@ -13,19 +14,21 @@ export async function enregistrerProjet(projectId: string, formData: FormData) {
   const script = String(formData.get("scenario_text") ?? "").replace(/\r\n?/g, "\n").trim().slice(0, 50_000);
   const { data: avant } = await supabase.from("projects").select("scenario_text").eq("id", projectId).single();
 
-  const { error } = await supabase
-    .from("projects")
-    .update({
-      title: String(formData.get("title") ?? "").trim() || "Sans titre",
-      client_name: String(formData.get("client_name") ?? "").trim() || null,
-      aspect_ratio: (FORMATS as readonly string[]).includes(format) ? format : "9:16",
-      due_date: String(formData.get("due_date") ?? "") || null,
-      workspace_id: String(formData.get("workspace_id") ?? ""),
-      resume: String(formData.get("resume") ?? "").replace(/\r\n?/g, "\n").trim().slice(0, 5_000),
-      style_text: String(formData.get("style_text") ?? "").trim().slice(0, 600),
-      scenario_text: script,
-    })
-    .eq("id", projectId);
+  const infos = {
+    title: String(formData.get("title") ?? "").trim() || "Sans titre",
+    client_name: String(formData.get("client_name") ?? "").trim() || null,
+    aspect_ratio: (FORMATS as readonly string[]).includes(format) ? format : "9:16",
+    due_date: String(formData.get("due_date") ?? "") || null,
+    workspace_id: String(formData.get("workspace_id") ?? ""),
+    resume: String(formData.get("resume") ?? "").replace(/\r\n?/g, "\n").trim().slice(0, 5_000),
+    style_text: String(formData.get("style_text") ?? "").trim().slice(0, 600),
+    scenario_text: script,
+  };
+  const categorie = lireCategorie(formData.get("categorie"));
+  let { error } = await supabase.from("projects").update({ ...infos, categorie }).eq("id", projectId);
+  // Base sans la migration 0016 : les autres informations sont quand même enregistrées
+  if (error && /categorie/.test(error.message))
+    ({ error } = await supabase.from("projects").update(infos).eq("id", projectId));
 
   if (error) redirect(`/projets/${projectId}?erreur=enregistrement`);
   // Une copie de la voix off dans l'historique, quand elle a changé

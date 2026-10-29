@@ -117,6 +117,8 @@ export async function lancerGeneration(p: {
   // Notre serveur dépose lui-même la vidéo dans le stockage, à ce chemin, grâce à ce lien d'envoi
   videoPath: string;
   uploadUrl: string;
+  // Plan continu : notre serveur dépose aussi la dernière image du clip, photo de départ du clip suivant
+  dernierePhoto?: { chemin: string; uploadUrl: string };
   serveur?: string;
 }): Promise<string> {
   const input =
@@ -144,6 +146,7 @@ export async function lancerGeneration(p: {
           seed: p.seed,
           video_path: p.videoPath,
           upload_url: p.uploadUrl,
+          ...(p.dernierePhoto ? { last_frame_path: p.dernierePhoto.chemin, last_frame_upload_url: p.dernierePhoto.uploadUrl } : {}),
         };
   const data = await appel(p.moteur, "/run", { method: "POST", body: JSON.stringify({ input }) }, p.serveur);
   return String(data.id);
@@ -218,6 +221,8 @@ export type StatutRunPod =
       // Service tout prêt : vidéo à télécharger. Notre serveur : vidéo déjà rangée dans le stockage.
       videoUrl?: string;
       videoPath?: string;
+      // Dernière image du clip, déposée par notre serveur quand elle a été demandée
+      dernierePhoto?: string;
       imagePath?: string;
       audioPath?: string;
       duree?: number;
@@ -240,7 +245,13 @@ export async function lireStatut(moteur: Cible, jobId: string, serveur?: string)
           return { etat: "terminee", audioPath: String(data.output.audio_path), duree: Number(data.output.duree) || undefined, secondes, coutUsd };
         if (data.output?.image_path) return { etat: "terminee", imagePath: String(data.output.image_path), secondes, coutUsd };
         if (!data.output?.video_path) return { etat: "echouee", erreur: "Le serveur n'a pas renvoyé de vidéo." };
-        return { etat: "terminee", videoPath: String(data.output.video_path), secondes, coutUsd };
+        return {
+          etat: "terminee",
+          videoPath: String(data.output.video_path),
+          ...(data.output.last_frame_path ? { dernierePhoto: String(data.output.last_frame_path) } : {}),
+          secondes,
+          coutUsd,
+        };
       }
       const url = data.output?.video_url ?? data.output?.result ?? data.output?.url;
       if (!url) return { etat: "echouee", erreur: "RunPod n'a pas renvoyé de vidéo." };

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { BoutonEnvoi } from "@/components/bouton-envoi";
 import { MOUVEMENT_PAR_DEFAUT, STATUTS_PLAN, couleurStatut, dureeLisible } from "@/lib/libelles";
+import { estSuite, lireCategorie, plansContinus } from "@/lib/categories";
 import { alertesPlans } from "@/lib/controles";
 import { lotsPromptsPhotos, suivrePhotos } from "@/lib/photos";
 import { signerLiens } from "@/lib/production";
@@ -42,6 +43,8 @@ type Plan = {
   intention: string;
   pose_debut: string;
   pose_fin: string;
+  // Lignes de 5 s qui forment un seul plan à l'écran (absent tant que la migration 0016 n'est pas passée)
+  plan_continu?: number | null;
   consent_confirmed: boolean;
   duration_s: number;
   status: string;
@@ -99,12 +102,11 @@ export default async function PagePlans({
 
   // Le cadre du projet vérifie déjà la connexion et l'existence du projet : tout part en même temps
   const [{ data: projet }, { data }, { data: versions }, moteurs, { data: refsLues }, serveur, etat] = await Promise.all([
-    supabase.from("projects").select("title, aspect_ratio, scenario_text, style_text").eq("id", id).maybeSingle(),
+    // Toutes les colonnes : la catégorie et le plan continu sont lus si la migration 0016 est passée
+    supabase.from("projects").select("*").eq("id", id).maybeSingle(),
     supabase
       .from("scenes")
-      .select(
-        "id, position, motion_prompt, voiceover_text, image_description, image_path, cadrage, angle, lieu, intention, pose_debut, pose_fin, consent_confirmed, duration_s, status, validated_take_id, takes!takes_scene_id_fkey(status), photos(*)",
-      )
+      .select("*, takes!takes_scene_id_fkey(status), photos(*)")
       .eq("project_id", id)
       .order("position"),
     supabase
@@ -158,7 +160,8 @@ export default async function PagePlans({
   const apercu = parStatut.map(([st, n]) => `${n} ${(STATUTS_PLAN[st] ?? st).toLowerCase()}`).join(" · ");
   const ouvert = Boolean(sp.ajoute || sp.enregistre || sp.importe || sp.refuse || sp.ouvert);
   const decrits = plans.filter((p) => p.image_description.trim()).length;
-  const alertes = alertesPlans(plans, MOUVEMENT_PAR_DEFAUT);
+  const alertes = alertesPlans(plans, MOUVEMENT_PAR_DEFAUT, lireCategorie(projet?.categorie));
+  const continus = plansContinus(plans);
   const nbAlertes = [...alertes.values()].reduce((n, a) => n + a.length, 0);
   const lieux = refs.filter((r) => r.genre === "lieu").map((r) => r.nom);
   // Lieux des plans sans photo de référence : le décor sera réinventé à chaque photo
@@ -325,7 +328,9 @@ export default async function PagePlans({
                     lieu: p.lieu,
                     intention: p.intention,
                     pose_debut: p.pose_debut,
-                  })),
+                  }))
+                  // La suite d'un plan continu reprend la photo de la première ligne : pas de prompt à copier pour elle
+                  .filter((_, i) => !estSuite(plans, i)),
                   projet,
                   refs,
                 )}
@@ -357,7 +362,12 @@ export default async function PagePlans({
         )}
         {plans.length > 0 && projet && (
           <CopierVerification
-            texte={promptVerification(projet, plans, [...new Set(refs.filter((r) => r.genre === "produit").map((r) => r.nom))])}
+            texte={promptVerification(
+              projet,
+              plans,
+              [...new Set(refs.filter((r) => r.genre === "produit").map((r) => r.nom))],
+              lireCategorie(projet.categorie),
+            )}
             explication="Le bouton copie une consigne complète avec votre script et le tableau de tous les plans. Collez-la dans ChatGPT ou Claude (joignez les photos de départ dans l'ordre si possible). L'assistant rend un fichier tableau_corrige.csv : importez-le juste en dessous pour mettre à jour les plans."
           />
         )}
@@ -391,6 +401,8 @@ export default async function PagePlans({
                 const photo = plan.image_path ? liens.get(plan.image_path) : undefined;
                 const nbClips = plan.takes.filter((t) => t.status === "terminee").length;
                 const derniere = dernierePhoto(plan);
+                const suite = estSuite(plans, i);
+                const continu = continus[i];
                 const manque = !plan.image_path ? "photo" : !plan.motion_prompt ? "mouvement" : !plan.consent_confirmed ? "accord" : null;
                 return (
                   <li
@@ -413,6 +425,11 @@ export default async function PagePlans({
                         className="size-4 accent-[var(--accent)]"
                       />
                       <h3 className="font-bold whitespace-nowrap">Plan {i + 1}</h3>
+                      {continu.morceaux > 1 && (
+                        <span className="pastille bg-accent-doux text-accent" title="Ces lignes forment un seul plan à l'écran, sans coupe">
+                          🔗 Plan continu {continu.numero} · {continu.morceau}/{continu.morceaux}
+                        </span>
+                      )}
                       <span className={`pastille ${couleurStatut(plan.status)}`}>{STATUTS_PLAN[plan.status] ?? plan.status}</span>
                       <div className="ml-auto flex items-center gap-1 text-sm">
                         {i > 0 && (
@@ -499,8 +516,14 @@ export default async function PagePlans({
                       )}
                     </div>
 
-                    {derniere?.status !== "en_cours" && <RemplacerPhoto projectId={id} sceneId={plan.id} />}
-                    {serveur && (photo || derniere) && plan.image_description.trim() && derniere?.status !== "en_cours" && (
+                    {suite && (
+                      <p className="text-xs text-sourdine">
+                        Même photo de départ que le plan {continu.tete + 1}, au début de ce plan continu : pour la changer, changez
+                        celle du plan {continu.tete + 1}.
+                      </p>
+                    )}
+                    {!suite && derniere?.status !== "en_cours" && <RemplacerPhoto projectId={id} sceneId={plan.id} />}
+                    {!suite && serveur && (photo || derniere) && plan.image_description.trim() && derniere?.status !== "en_cours" && (
                       <details open={sp.erreur === "sans-remarque" && sp.plan === plan.id}>
                         <summary className="cursor-pointer text-sm font-semibold text-accent">🔁 Re-générer cette photo</summary>
                         <form action={regenererPhoto.bind(null, id, plan.id)} className="mt-3 flex flex-col gap-3">
