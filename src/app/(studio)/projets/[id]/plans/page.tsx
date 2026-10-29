@@ -300,6 +300,13 @@ export default async function PagePlans({
             </Link>
           </p>
         </div>
+        {plans.length > 1 && (
+          <p className="rounded-lg bg-accent-doux px-4 py-3 text-sm text-accent">
+            Prise unique : une seule photo suffit pour tout le film, celle du plan 1. Chacun des {plans.length - 1} autres plans
+            part de la dernière image du clip précédent. C'est pourquoi un seul plan (« plans 1 à 1 ») est proposé, même si
+            tous sont cochés.
+          </p>
+        )}
         <details className="rounded-lg border border-ligne p-4">
           <summary className="cursor-pointer font-semibold">🖼 A. Créées par notre serveur RunPod (≈ {PRIX_PHOTO_ESTIME_USD} $ la photo)</summary>
           <div className="mt-3 flex flex-col gap-2 text-sm text-sourdine">
