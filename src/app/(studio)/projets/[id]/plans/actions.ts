@@ -6,7 +6,6 @@ import { lireEtatFile } from "@/lib/file-attente";
 import { journaliser } from "@/lib/journal";
 import { MOUVEMENT_PAR_DEFAUT } from "@/lib/libelles";
 import { demanderEssais, marquerEnProduction } from "@/lib/production";
-import { enchainee, lireCategorie } from "@/lib/categories";
 import { demanderPhotos, propagerPhoto, suivrePhotos } from "@/lib/photos";
 import { agrandirStockage, mettreAJourServeur } from "@/lib/runpod-admin";
 import { endpointEco, endpointPhoto, estMoteur, moteursDisponibles } from "@/lib/runpod";
@@ -330,12 +329,11 @@ export async function creerPhotos(projectId: string, formData: FormData) {
   const tous = scenes ?? [];
   const aLancer = tous
     .map((s, i) => ({ ...s, numero: i + 1 }))
-    // La suite d'un plan continu (en prise unique : toute ligne après la première) part de la photo ou de la dernière
-    // image d'avant : pas de photo à créer pour elle
+    // Prise unique : seule la première ligne a une photo, les suivantes partent de la dernière image d'avant
     .filter(
       (s, i) =>
         choisis.has(s.id) &&
-        !enchainee(tous, i, lireCategorie(projet?.categorie)) &&
+        i === 0 &&
         s.image_description.trim() &&
         !(s.photos as { status: string }[]).some((p) => p.status === "en_cours"),
     );

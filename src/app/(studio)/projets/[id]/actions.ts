@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { journaliser } from "@/lib/journal";
-import { CATEGORIES, lireCategorie } from "@/lib/categories";
+import { lireCategorie } from "@/lib/categories";
 import { FORMATS } from "@/lib/libelles";
 import { propagerPremierePhoto } from "@/lib/photos";
 import { requireProfile } from "@/lib/session";
@@ -33,7 +33,7 @@ export async function enregistrerProjet(projectId: string, formData: FormData) {
 
   if (error) redirect(`/projets/${projectId}?erreur=enregistrement`);
   // Prise unique : chaque ligne doit avoir une photo de secours, celle de la première ligne
-  if (CATEGORIES[categorie].priseUnique) await propagerPremierePhoto(supabase, projectId);
+  await propagerPremierePhoto(supabase, projectId);
   // Une copie de la voix off dans l'historique, quand elle a changé
   if (script && script !== avant?.scenario_text?.trim())
     await supabase

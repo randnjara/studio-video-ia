@@ -2,7 +2,7 @@
 // (gestes copiés en boucle, cadrages identiques, voix off trop longue, consignes vidéo pas en anglais).
 // Aucun appel extérieur : tout se calcule à l'affichage.
 
-import { CATEGORIES, type Categorie, plansContinus } from "@/lib/categories";
+import { CATEGORIES, type Categorie, MOTS_MOUVEMENT, fenetreMouvement, momentMouvement, plansContinus } from "@/lib/categories";
 
 export type PlanControle = {
   id: string;
@@ -78,13 +78,13 @@ export function pasEnAnglais(texte: string) {
 }
 
 // Le mouvement mis par défaut à l'import n'est pas une répétition choisie : il est signalé à part
-// Les lignes d'un même plan continu partagent volontairement la photo, le cadrage, l'angle et les poses qui s'enchaînent :
-// ces ressemblances ne sont signalées qu'entre deux plans continus différents.
+// Les lignes d'un même plan continu partagent volontairement le cadrage, l'angle et les poses qui s'enchaînent :
+// ces ressemblances ne sont signalées qu'entre deux plans continus différents. Prise unique : une seule photo pour tout
+// le film, les descriptions de photo ne sont donc pas comparées.
 export function alertesPlans(plans: PlanControle[], mouvementParDefaut = "", categorie: Categorie = "film") {
   const alertes = new Map<string, string[]>();
   const ajouter = (id: string, texte: string) => alertes.set(id, [...(alertes.get(id) ?? []), texte]);
   const communsMvt = motsCommuns(plans.map((p) => p.motion_prompt));
-  const communsPhoto = motsCommuns(plans.map((p) => p.image_description));
   const continus = plansContinus(plans);
   const cat = CATEGORIES[categorie];
 
@@ -102,9 +102,6 @@ export function alertesPlans(plans: PlanControle[], mouvementParDefaut = "", cat
       ? proche((q) => Boolean(q.pose_fin) && (p.pose_fin === q.pose_fin || ressemblance(p.pose_fin!, q.pose_fin!) >= 0.9), true)
       : 0;
     if (fin) ajouter(p.id, `Même pose de fin que le plan ${fin} : chaque fin doit préparer le plan suivant.`);
-    // Prise unique : une seule photo pour tout le film, les descriptions sont donc les mêmes partout
-    const photo = cat.priseUnique ? 0 : proche((q) => ressemblance(p.image_description, q.image_description, communsPhoto) >= 0.8, true);
-    if (photo) ajouter(p.id, `Photo presque identique à celle du plan ${photo} : changez le cadrage, l'angle ou l'action.`);
     const prec = plans[i - 1];
     const continu = continus[i];
     const nouveauPlan = continu.morceau === 1;
@@ -126,9 +123,11 @@ export function alertesPlans(plans: PlanControle[], mouvementParDefaut = "", cat
             : `Plan continu de ${total} s : en « ${cat.libelle} », gardez-le au moins ${cat.planMin} s.`,
         );
       if (total > cat.planMax)
-        ajouter(p.id, `Plan continu de ${total} s : en « ${cat.libelle} », coupez-le vers ${cat.planMax} s au plus, à la fin d'une phrase.`);
+        ajouter(p.id, `Plan continu de ${total} s : en « ${cat.libelle} », changez de cadrage vers ${cat.planMax} s au plus, à la fin d'une phrase.`);
       if (categorie === "interview" && prec?.voiceover_text.trim() && !/[.!?…»"”]\s*$/.test(prec.voiceover_text.trim()))
         ajouter(p.id, `Changement de plan au milieu d'une phrase (plan ${i} → ${i + 1}) : continuez le plan jusqu'à la fin de la phrase.`);
+      if (prec && p.cadrage !== prec.cadrage && !MOTS_MOUVEMENT.test(p.motion_prompt))
+        ajouter(p.id, `Nouveau cadrage sans mouvement de caméra écrit : le studio ajoutera un lent zoom au milieu du clip, mieux vaut l'écrire vous-même selon la réplique.`);
     }
 
     // Lieux : un changement de décor au milieu d'une phrase, ou un lieu tenu un seul plan, casse le réalisme
@@ -140,8 +139,17 @@ export function alertesPlans(plans: PlanControle[], mouvementParDefaut = "", cat
         ajouter(p.id, `Un seul plan dans « ${p.lieu} » : restez plus longtemps dans un même lieu, ne changez que le cadrage, l'angle ou le geste.`);
     }
 
-    const voix = dureeVoix(p.voiceover_text);
     const duree = Number(p.duration_s || 5);
+    // Prise unique : un changement de lieu se fait par la caméra, pendant le clip
+    if (prec && p.lieu && prec.lieu && p.lieu !== prec.lieu && !MOTS_MOUVEMENT.test(p.motion_prompt))
+      ajouter(p.id, `Changement de lieu sans mouvement de caméra : le clip part de la dernière image dans « ${prec.lieu} », écrivez comment la caméra va vers « ${p.lieu} » au milieu du clip.`);
+    // Un zoom ou un changement à la première ou à la dernière seconde se voit au raccord avec le clip voisin
+    const moment = momentMouvement(p.motion_prompt, duree);
+    const fenetre = fenetreMouvement(duree);
+    if (moment && (moment.debut < fenetre.debut || moment.fin > fenetre.fin))
+      ajouter(p.id, `Mouvement de caméra de ${moment.debut} à ${moment.fin} s : placez-le au milieu du clip, entre ${fenetre.debut} et ${fenetre.fin} s, jamais à la première ni à la dernière seconde.`);
+
+    const voix = dureeVoix(p.voiceover_text);
     if (duree > DUREE_MAX)
       ajouter(p.id, `Plan de ${duree} s : au-delà de ${DUREE_MAX} s la vidéo se dégrade, coupez la réplique en deux plans.`);
     else if (voix > duree + 0.5)
