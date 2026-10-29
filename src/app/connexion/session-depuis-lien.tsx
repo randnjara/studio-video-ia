@@ -32,7 +32,9 @@ export function SessionDepuisLien() {
           noterErreurLien(`session : ${error.message}`);
           history.replaceState(null, "", window.location.pathname);
         } else {
-          noterConnexionReussie().finally(() => window.location.replace("/"));
+          // Lien « mot de passe oublié » : on va directement choisir le nouveau mot de passe
+          const suite = params.get("type") === "recovery" ? "/compte?nouveau=1" : "/";
+          noterConnexionReussie().finally(() => window.location.replace(suite));
         }
       });
   }, []);
@@ -43,7 +45,7 @@ export function SessionDepuisLien() {
   if (etat === "erreur") {
     return (
       <p className="text-sm text-alerte">
-        Ce lien a expiré ou a déjà servi. Saisissez votre adresse ci-dessous pour recevoir un nouveau lien.
+        Ce lien a expiré ou a déjà servi. Connectez-vous avec votre mot de passe, ou demandez-en un nouveau.
       </p>
     );
   }

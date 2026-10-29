@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { FORMAT_NOM_UTILISATEUR, LONGUEUR_MOT_DE_PASSE } from "@/lib/identifiant";
 import { journaliser } from "@/lib/journal";
 import { noterConnexion } from "@/lib/journal-connexion";
 import { CLE_ENDPOINT, CLE_ENDPOINT_PHOTO, CLE_ENDPOINT_VOIX, CLE_VOLUME, endpointEco } from "@/lib/runpod";
@@ -24,14 +25,43 @@ async function requireResponsable() {
   return ctx;
 }
 
+// Le compte de secours (super-admin) ne peut être touché que par lui-même
+async function refuserSiSecours(userId: string, moi: string) {
+  if (userId === moi) return;
+  const { data } = await createAdminClient().from("profiles").select("super_admin").eq("id", userId).maybeSingle();
+  if (data?.super_admin) redirect("/equipe?erreur=secours");
+}
+
 export async function inviterMembre(formData: FormData) {
   const { supabase, profile } = await requireResponsable();
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const nom = String(formData.get("display_name") ?? "").trim();
+  const username = String(formData.get("username") ?? "").trim().toLowerCase();
+  const telephone = String(formData.get("telephone") ?? "").trim().slice(0, 30);
+  const motDePasse = String(formData.get("mot_de_passe") ?? "");
   if (!email) redirect("/equipe?erreur=email-vide");
+  if (username && !FORMAT_NOM_UTILISATEUR.test(username)) redirect("/equipe?erreur=format-identifiant");
 
   const admin = createAdminClient();
-  const data = { display_name: nom || email.split("@")[0] };
+  if (username) {
+    const { data: pris } = await admin.from("profiles").select("id").eq("username", username).maybeSingle();
+    if (pris) redirect("/equipe?erreur=identifiant-pris");
+  }
+  const data = { display_name: nom || email.split("@")[0], ...(username && { username }), telephone };
+
+  // Avec un mot de passe : compte prêt tout de suite, aucun e-mail (donc aucune limite d'envoi).
+  // Le responsable transmet le nom d'utilisateur et le mot de passe à la personne (WhatsApp, SMS…).
+  if (motDePasse) {
+    if (motDePasse.length < LONGUEUR_MOT_DE_PASSE) redirect("/equipe?erreur=mot-de-passe-court");
+    const cree = await admin.auth.admin.createUser({ email, password: motDePasse, email_confirm: true, user_metadata: data });
+    if (cree.error || !cree.data.user)
+      redirect(`/equipe?erreur=invitation&detail=${encodeURIComponent(cree.error?.message ?? "")}`);
+    await noterConnexion(email, "compte-cree-avec-mot-de-passe", profile.display_name);
+    await journaliser(supabase, profile.id, "invitation", "membre", cree.data.user.id, { email });
+    revalidatePath("/equipe");
+    redirect(`/equipe?cree=${encodeURIComponent(email)}&membre=${cree.data.user.id}#membre-${cree.data.user.id}`);
+  }
+
   const { error } = await admin.auth.admin.inviteUserByEmail(email, { data, redirectTo: `${await siteUrl()}/connexion` });
   if (error && (error.status === 429 || error.code === "over_email_send_rate_limit")) {
     // Limite d'e-mails atteinte : le compte est créé sans e-mail, le responsable envoie lui-même le lien de connexion
@@ -52,6 +82,7 @@ export async function inviterMembre(formData: FormData) {
 
 export async function changerAcces(userId: string, actif: boolean) {
   const { supabase, profile } = await requireResponsable();
+  await refuserSiSecours(userId, profile.id);
   if (userId === profile.id) redirect("/equipe?erreur=soi-meme");
 
   await supabase.from("profiles").update({ active: actif }).eq("id", userId);
@@ -75,6 +106,7 @@ export async function fixerBudget(formData: FormData) {
 // Le nombre de responsables n'est pas limité : l'équipe peut grandir et se réorganiser
 export async function changerRole(userId: string, role: "responsable" | "membre") {
   const { supabase, profile } = await requireResponsable();
+  await refuserSiSecours(userId, profile.id);
   if (userId === profile.id) redirect("/equipe?erreur=soi-meme");
 
   await supabase.from("profiles").update({ role }).eq("id", userId);
@@ -147,6 +179,8 @@ async function emailDe(userId: string) {
 // Valable une heure et une seule fois ; il fonctionne sur n'importe quel appareil.
 export async function creerLienConnexion(userId: string): Promise<{ lien?: string; erreur?: string }> {
   const { supabase, profile } = await requireResponsable();
+  const { data: cible } = await createAdminClient().from("profiles").select("super_admin").eq("id", userId).maybeSingle();
+  if (cible?.super_admin && userId !== profile.id) return { erreur: "Le compte de secours ne peut pas être modifié." };
   const admin = createAdminClient();
   const { data: u } = await admin.auth.admin.getUserById(userId);
   if (!u.user?.email) return { erreur: "Membre introuvable." };
@@ -162,6 +196,7 @@ export async function creerLienConnexion(userId: string): Promise<{ lien?: strin
 // Renvoie par e-mail l'invitation (compte jamais ouvert) ou un lien de connexion
 export async function renvoyerLien(userId: string) {
   const { supabase, profile } = await requireResponsable();
+  await refuserSiSecours(userId, profile.id);
   const user = await emailDe(userId);
   const email = user.email!;
   const admin = createAdminClient();
@@ -184,9 +219,33 @@ export async function renvoyerLien(userId: string) {
   redirect(`/equipe?renvoye=${encodeURIComponent(email)}`);
 }
 
+// Nom d'utilisateur, téléphone et, si rempli, nouveau mot de passe d'un membre (à lui transmettre soi-même)
+export async function enregistrerAcces(userId: string, formData: FormData) {
+  const { supabase, profile } = await requireResponsable();
+  await refuserSiSecours(userId, profile.id);
+  const username = String(formData.get("username") ?? "").trim().toLowerCase();
+  const telephone = String(formData.get("telephone") ?? "").trim().slice(0, 30);
+  const motDePasse = String(formData.get("mot_de_passe") ?? "");
+  const ancre = `&membre=${userId}#membre-${userId}`;
+  if (!FORMAT_NOM_UTILISATEUR.test(username)) redirect(`/equipe?erreur=format-identifiant${ancre}`);
+  if (motDePasse && motDePasse.length < LONGUEUR_MOT_DE_PASSE) redirect(`/equipe?erreur=mot-de-passe-court${ancre}`);
+
+  const admin = createAdminClient();
+  const { error } = await admin.from("profiles").update({ username, telephone }).eq("id", userId);
+  if (error) redirect(`/equipe?erreur=${error.code === "23505" ? "identifiant-pris" : "acces"}${ancre}`);
+  if (motDePasse) {
+    const { error: e } = await admin.auth.admin.updateUserById(userId, { password: motDePasse });
+    if (e) redirect(`/equipe?erreur=acces&detail=${encodeURIComponent(e.message)}${ancre}`);
+    await journaliser(supabase, profile.id, "mot-de-passe", "membre", userId);
+  }
+  revalidatePath("/equipe");
+  redirect(`/equipe?acces=${motDePasse ? "mot-de-passe" : "1"}&membre=${userId}#membre-${userId}`);
+}
+
 // Déconnecte le membre de tous ses appareils : il repart de zéro avec un nouveau lien
 export async function reinitialiserConnexion(userId: string) {
   const { supabase, profile } = await requireResponsable();
+  await refuserSiSecours(userId, profile.id);
   const { error } = await supabase.rpc("reinitialiser_sessions", { uid: userId });
   if (error) redirect(`/equipe?erreur=reinitialisation&detail=${encodeURIComponent(error.message)}`);
   await journaliser(supabase, profile.id, "reinitialisation", "membre", userId);
@@ -196,6 +255,7 @@ export async function reinitialiserConnexion(userId: string) {
 // Supprime le compte. Ses projets, plans et vidéos restent dans le studio.
 export async function supprimerMembre(userId: string, formData: FormData) {
   const { supabase, profile } = await requireResponsable();
+  await refuserSiSecours(userId, profile.id);
   if (userId === profile.id) redirect("/equipe?erreur=soi-meme");
   if (formData.get("confirmer") !== "oui") redirect("/equipe?erreur=confirmer");
   const user = await emailDe(userId);
