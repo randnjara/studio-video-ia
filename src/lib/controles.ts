@@ -2,6 +2,8 @@
 // (gestes copiés en boucle, cadrages identiques, voix off trop longue, consignes vidéo pas en anglais).
 // Aucun appel extérieur : tout se calcule à l'affichage.
 
+import { CATEGORIES, type Categorie, plansContinus } from "@/lib/categories";
+
 export type PlanControle = {
   id: string;
   motion_prompt: string;
@@ -12,6 +14,7 @@ export type PlanControle = {
   angle: string;
   pose_fin?: string;
   lieu?: string | null;
+  plan_continu?: number | null;
 };
 
 // Débit moyen d'une voix posée, en mots par seconde
@@ -75,30 +78,57 @@ export function pasEnAnglais(texte: string) {
 }
 
 // Le mouvement mis par défaut à l'import n'est pas une répétition choisie : il est signalé à part
-export function alertesPlans(plans: PlanControle[], mouvementParDefaut = "") {
+// Les lignes d'un même plan continu partagent volontairement la photo, le cadrage, l'angle et la pose de base :
+// ces ressemblances ne sont signalées qu'entre deux plans continus différents.
+export function alertesPlans(plans: PlanControle[], mouvementParDefaut = "", categorie: Categorie = "film") {
   const alertes = new Map<string, string[]>();
   const ajouter = (id: string, texte: string) => alertes.set(id, [...(alertes.get(id) ?? []), texte]);
   const communsMvt = motsCommuns(plans.map((p) => p.motion_prompt));
   const communsPhoto = motsCommuns(plans.map((p) => p.image_description));
+  const continus = plansContinus(plans);
+  const cat = CATEGORIES[categorie];
 
   plans.forEach((p, i) => {
     // Répétitions avec les plans précédents proches : on signale le plus proche, une fois par sorte de répétition
     // (chaque paire n'est signalée que sur le second plan)
-    const proche = (pareil: (q: PlanControle) => boolean) => {
-      for (let j = i - 1; j >= Math.max(0, i - VOISINS); j--) if (pareil(plans[j])) return j + 1;
+    const proche = (pareil: (q: PlanControle) => boolean, autrePlan = false) => {
+      for (let j = i - 1; j >= Math.max(0, i - VOISINS); j--)
+        if ((!autrePlan || continus[j].numero !== continus[i].numero) && pareil(plans[j])) return j + 1;
       return 0;
     };
     const mvt = p.motion_prompt !== mouvementParDefaut ? proche((q) => ressemblance(p.motion_prompt, q.motion_prompt, communsMvt) >= 0.8) : 0;
     if (mvt) ajouter(p.id, `Même mouvement que le plan ${mvt} : variez le geste ou la caméra.`);
     const fin = p.pose_fin
-      ? proche((q) => Boolean(q.pose_fin) && (p.pose_fin === q.pose_fin || ressemblance(p.pose_fin!, q.pose_fin!) >= 0.9))
+      ? proche((q) => Boolean(q.pose_fin) && (p.pose_fin === q.pose_fin || ressemblance(p.pose_fin!, q.pose_fin!) >= 0.9), true)
       : 0;
     if (fin) ajouter(p.id, `Même pose de fin que le plan ${fin} : chaque fin doit préparer le plan suivant.`);
-    const photo = proche((q) => ressemblance(p.image_description, q.image_description, communsPhoto) >= 0.8);
+    const photo = proche((q) => ressemblance(p.image_description, q.image_description, communsPhoto) >= 0.8, true);
     if (photo) ajouter(p.id, `Photo presque identique à celle du plan ${photo} : changez le cadrage, l'angle ou l'action.`);
     const prec = plans[i - 1];
-    if (prec && p.cadrage && p.angle && p.cadrage === prec.cadrage && p.angle === prec.angle)
+    const continu = continus[i];
+    const nouveauPlan = continu.morceau === 1;
+    if (nouveauPlan && prec && p.cadrage && p.angle && p.cadrage === prec.cadrage && p.angle === prec.angle)
       ajouter(p.id, `Même cadrage et même angle que le plan ${i} : les deux plans vont sembler collés.`);
+    if (!nouveauPlan && prec && (p.cadrage !== prec.cadrage || p.angle !== prec.angle))
+      ajouter(p.id, `Cadrage ou angle différent du plan ${i} dans le même plan continu : gardez les mêmes, sinon l'image saute.`);
+
+    // Durée du plan continu (sur sa première ligne) : une interview ne doit pas changer de plan toutes les 5 s
+    if (nouveauPlan) {
+      const lignes = plans.slice(i, i + continu.morceaux);
+      const total = lignes.reduce((n, l) => n + Number(l.duration_s || 5), 0);
+      const dernier = continus.at(-1)!.numero === continu.numero;
+      if (total < cat.planMin && !dernier)
+        ajouter(
+          p.id,
+          continu.morceaux === 1
+            ? `Plan seul de ${total} s : en « ${cat.libelle} », gardez le même plan au moins ${cat.planMin} s (même numéro de plan continu sur les lignes suivantes).`
+            : `Plan continu de ${total} s : en « ${cat.libelle} », gardez-le au moins ${cat.planMin} s.`,
+        );
+      if (total > cat.planMax)
+        ajouter(p.id, `Plan continu de ${total} s : en « ${cat.libelle} », coupez-le vers ${cat.planMax} s au plus, à la fin d'une phrase.`);
+      if (categorie === "interview" && prec?.voiceover_text.trim() && !/[.!?…»"”]\s*$/.test(prec.voiceover_text.trim()))
+        ajouter(p.id, `Changement de plan au milieu d'une phrase (plan ${i} → ${i + 1}) : continuez le plan jusqu'à la fin de la phrase.`);
+    }
 
     // Lieux : un changement de décor au milieu d'une phrase, ou un lieu tenu un seul plan, casse le réalisme
     const suiv = plans[i + 1];

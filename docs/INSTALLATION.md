@@ -86,6 +86,12 @@ Le studio voix a son propre petit serveur (dossier `worker-voix/`), sur une cart
 
 Ensuite : menu **Voix** pour le catalogue et pour ajouter la voix d'une personne (avec son accord), et lien **🎙 Studio voix** en haut de chaque projet pour créer les voix, les régler dans la table de mixage (calculée par le navigateur, gratuite) et les envoyer au montage.
 
+## Catégorie du film et plans continus (migration 0016)
+
+Appliquez la migration `supabase/migrations/0016_categorie.sql` (SQL Editor → coller → **Run**). Elle ajoute la **catégorie** du film (interview, documentaire, film, promotion, tutoriel, clip) et le **plan continu** des lignes du tableau. Sans elle, le studio marche comme avant : la catégorie choisie n'est pas gardée et les lignes ne sont pas regroupées.
+
+Ensuite, à l'étape 1 de chaque projet, choisissez la catégorie. La consigne ChatGPT suit ses règles : en interview, plusieurs lignes de 5 s forment un seul plan (même numéro dans la colonne `plan_continu`), avec une seule photo de départ pour tout le plan.
+
 ## Vérifications
 
 - [ ] Je me connecte et je vois « Responsable » en haut à droite.

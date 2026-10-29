@@ -1,5 +1,7 @@
 // Prompt de vérification du script et des plans, à coller dans un assistant gratuit (ChatGPT, Claude, Gemini…).
 // Rien n'est envoyé par le studio : la personne copie le texte et le colle elle-même.
+import { CATEGORIES, type Categorie, plansContinus } from "@/lib/categories";
+
 type PlanVerif = {
   position: number;
   motion_prompt: string;
@@ -13,11 +15,14 @@ type PlanVerif = {
   pose_debut?: string;
   pose_fin?: string;
   image_path?: string | null;
+  plan_continu?: number | null;
 };
 
 // Colonnes du fichier corrigé rendu par l'assistant, réimporté dans l'onglet Plans (mise à jour des plans existants)
+// « plan_continu » est donné pour information : le regroupement des lignes ne se corrige pas par ce fichier.
 export const COLONNES_CORRECTION = [
   "numero",
+  "plan_continu",
   "verdict",
   "probleme",
   "photo_a_refaire",
@@ -40,12 +45,16 @@ export function promptVerification(
   projet: { title: string; aspect_ratio: string; scenario_text: string },
   plans: PlanVerif[],
   produits: string[] = [],
+  categorie: Categorie = "film",
 ) {
+  const cat = CATEGORIES[categorie];
+  const continus = plansContinus(plans);
   const tableau = [
     COLONNES_CORRECTION.join(";"),
     ...plans.map((p, i) =>
       [
         String(i + 1),
+        String(continus[i].numero),
         "",
         "",
         "",
@@ -75,7 +84,11 @@ export function promptVerification(
   return `Tu es scripte (responsable de la continuité) et réalisateur sur un film tourné entièrement en vidéo générée par IA.
 Chaque plan est un clip de 5 s au plus, créé par le modèle Wan 2.2 « image vers vidéo » : il part d'une PHOTO DE DÉPART (créée à partir de « prompt_image » et des photos de référence) et l'anime selon « prompt_video ». Le modèle ne connaît ni les autres plans ni le script : toute la continuité dépend des photos de départ et des consignes.
 
-FILM : « ${projet.title} » — format ${projet.aspect_ratio} — ${plans.length} plans
+FILM : « ${projet.title} » — format ${projet.aspect_ratio} — ${plans.length} lignes — catégorie : ${cat.libelle}
+
+=== PLANS CONTINUS ===
+Une ligne = un clip de 5 s au plus. Les lignes qui se suivent avec le même « plan_continu » forment UN SEUL PLAN à l'écran : elles partent toutes de la même photo de départ (celle de la première ligne du plan), sans coupe visible. Dans un plan continu, le cadrage, l'angle, le lieu, le prompt_image et la pose_debut sont identiques sur toutes les lignes, chaque ligne revient à cette pose de base à la fin, et la caméra est fixe : c'est voulu, ne le « varie » pas. Ne change jamais la colonne plan_continu.
+${cat.consigne}
 
 === PHOTOS DE DÉPART ===
 ${photos}
@@ -90,10 +103,10 @@ ${tableau}
 === CE QUE TU DOIS VÉRIFIER ===
 1. Respect du script : chaque moment important a son plan, dans le bon ordre, sans plan en double.
 2. Lieux : le moins de lieux possible (un seul pour un film de 2 minutes ou moins : c'est le geste qui fait varier), de longues séquences par lieu ; jamais de changement de lieu au milieu d'une phrase ou d'une idée, ni de lieu tenu un seul plan. Un témoignage reste dans un seul lieu (un souvenir se raconte depuis ce lieu). Corrige « lieu », les poses et les prompts en conséquence.
-2 bis. Découpage : chaque séquence s'ouvre par un plan large puis se resserre avec l'émotion ; cadrage ou angle changent à chaque nouvelle idée (jamais deux plans de suite identiques) ; caméra toujours du même côté de la personne dans une séquence (règle des 180°).
-2 ter. Continuité entre plans voisins : visage, âge, coiffure, tenue, accessoires, objets, lieu, moment de la journée, lumière, direction du regard (règle des 180°) ; la pose_fin d'un plan doit enchaîner avec la pose_debut du suivant dans le même lieu, sinon coupe franche motivée (changement net de cadrage). Dans un même lieu, aucun prompt_image n'invente ou ne change un élément du décor (banc, fleurs, colonnes, couleur du ciel, heure) : corrige-le pour qu'il ne garde que le nom du lieu et ce qui est derrière la personne dans ce cadrage.
+2 bis. Découpage : les règles de la catégorie ci-dessus passent avant tout. Deux plans continus qui se suivent changent au moins le cadrage ou l'angle ; dans un même plan continu, rien ne change. Caméra toujours du même côté de la personne dans une séquence (règle des 180°).
+2 ter. Continuité entre plans voisins : visage, âge, coiffure, tenue, accessoires, objets, lieu, moment de la journée, lumière, direction du regard (règle des 180°) ; entre deux plans continus, coupe franche motivée (changement net de cadrage) ; dans un plan continu, toutes les lignes partent de la même pose de base et y reviennent. Dans un même lieu, aucun prompt_image n'invente ou ne change un élément du décor (banc, fleurs, colonnes, couleur du ciel, heure) : corrige-le pour qu'il ne garde que le nom du lieu et ce qui est derrière la personne dans ce cadrage.
 3. Chaque prompt_video : une seule action principale réalisable dans la durée, découpée en temps (0-1s, 1-3s…), caméra précise, rien qui contredise la photo de départ, pas de texte à l'écran, mains visibles si un geste les montre (sinon adapter le cadrage ou remplacer le geste par une expression), lèvres libres pendant la parole.
-4. Variété : aucun geste, cadrage ou angle répété en boucle (comparer aux 10 plans voisins) ; chaque geste vient du sens de la réplique ; pas la même phrase recopiée au début ou à la fin de chaque prompt.
+4. Variété : aucun geste répété en boucle (comparer aux 10 lignes voisines), aucun cadrage ou angle répété d'un plan continu à l'autre ; chaque geste vient du sens de la réplique ; pas la même phrase recopiée au début ou à la fin de chaque prompt.
 5. Langue : prompt_image et prompt_video en anglais ; les répliques (« voix ») restent EXACTEMENT telles quelles.
 ${
     produits.length
@@ -112,6 +125,7 @@ ${COLONNES_CORRECTION.join(";")}
    - « voix » : jamais modifiée. « duree » : 5 au plus.
    - « prompt_image » en anglais, 30 à 70 mots : l'instant figé au début du plan (qui, où, pose_debut, expression, cadrage, angle, lumière), sans mouvement.
    - « prompt_video » en anglais, 40 à 80 mots, découpé en temps jusqu'à la durée, qui finit exactement sur la pose_fin.
+   - « plan_continu » : recopie la valeur actuelle, sans la changer.
    - Si tu ne peux pas créer de fichier, donne exactement le même contenu dans un seul bloc \`\`\`csv.
 2. Ensuite, en français simple et en quelques lignes seulement :
    A. Les problèmes de continuité les plus graves (plans concernés et correction faite dans le fichier).

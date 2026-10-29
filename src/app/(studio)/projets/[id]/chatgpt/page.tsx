@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { CATEGORIES, lireCategorie } from "@/lib/categories";
 import { getClient } from "@/lib/session";
 import { ImportTableau } from "../plans/import-tableau";
 import { PreparationTableau } from "../plans/preparation";
@@ -15,7 +16,8 @@ export default async function PageChatGPT({
   const sp = await searchParams;
   const supabase = await getClient();
   const [{ data: projet }, { data: refsLues }, { count: plans }] = await Promise.all([
-    supabase.from("projects").select("title, aspect_ratio, scenario_text, style_text, resume").eq("id", id).maybeSingle(),
+    // Toutes les colonnes : la catégorie est lue si la migration 0016 est passée
+    supabase.from("projects").select("*").eq("id", id).maybeSingle(),
     supabase.from("film_refs").select("nom, genre, description").eq("project_id", id).order("created_at"),
     supabase.from("scenes").select("id", { count: "exact", head: true }).eq("project_id", id),
   ]);
@@ -24,10 +26,12 @@ export default async function PageChatGPT({
   const personnages = refs.filter((r) => r.genre === "personnage").map((r) => r.nom);
   const lieux = refs.filter((r) => r.genre === "lieu").map((r) => r.nom);
   const produits = [...new Set(refs.filter((r) => r.genre === "produit").map((r) => r.nom))];
+  const categorie = lireCategorie(projet.categorie);
   const mots = projet.scenario_text.trim().split(/\s+/).filter(Boolean).length;
 
   // Rappel de l'étape 1 : ce que ChatGPT recevra
   const rappel = [
+    { ok: true, texte: `Catégorie : ${CATEGORIES[categorie].libelle} (plans de ${CATEGORIES[categorie].planMin} à ${CATEGORIES[categorie].planMax} s)` },
     { ok: personnages.length > 0, texte: personnages.length ? `Personnage : ${personnages.join(", ")}` : "Photo du personnage principal manquante", requis: true },
     { ok: mots > 0, texte: mots ? `Voix off : ${mots} mots` : "Voix off pas encore collée (vous pourrez la joindre dans l'assistant)" },
     { ok: Boolean(projet.resume.trim()), texte: projet.resume.trim() ? "Résumé donné" : "Pas de résumé (l'assistant le déduira de la voix off)" },
@@ -70,6 +74,7 @@ export default async function PageChatGPT({
           style={projet.style_text}
           script={projet.scenario_text}
           resume={projet.resume}
+          categorie={categorie}
           refs={refs}
         />
       </section>

@@ -6,7 +6,8 @@ import { lireEtatFile } from "@/lib/file-attente";
 import { journaliser } from "@/lib/journal";
 import { MOUVEMENT_PAR_DEFAUT } from "@/lib/libelles";
 import { demanderEssais, marquerEnProduction } from "@/lib/production";
-import { demanderPhotos, suivrePhotos } from "@/lib/photos";
+import { estSuite } from "@/lib/categories";
+import { demanderPhotos, propagerPhoto, suivrePhotos } from "@/lib/photos";
 import { agrandirStockage, mettreAJourServeur } from "@/lib/runpod-admin";
 import { endpointEco, endpointPhoto, estMoteur, moteursDisponibles } from "@/lib/runpod";
 import { requireProfile } from "@/lib/session";
@@ -133,6 +134,7 @@ export async function modifierPlan(projectId: string, sceneId: string, formData:
       })
       .eq("id", sceneId)
       .eq("project_id", projectId),
+    photo ? propagerPhoto(supabase, sceneId, photo) : null,
     // Un plan refusé que l'on corrige redevient prêt à générer
     supabase.from("scenes").update({ status: "brouillon" }).eq("id", sceneId).eq("status", "refusee"),
   ]);
@@ -153,6 +155,7 @@ export async function attacherPhotos(projectId: string, photos: { sceneId: strin
     ),
   );
   if (resultats.some((r) => r.error)) retour(projectId, "?erreur=photos-importees");
+  await Promise.all(valides.map((p) => propagerPhoto(supabase, p.sceneId, p.chemin)));
   // Ancre seulement de la forme « #plan-… » (une photo remplacée à la main : on revient sur son plan)
   retour(projectId, `?photos-importees=${valides.length}&ouvert=1${/^#plan-[0-9a-f-]+$/.test(ancre) ? ancre : ""}`);
 }
@@ -312,7 +315,8 @@ export async function creerPhotos(projectId: string, formData: FormData) {
     supabase.from("projects").select("id, aspect_ratio, style_text").eq("id", projectId).single(),
     supabase
       .from("scenes")
-      .select("id, image_description, cadrage, angle, lieu, intention, pose_debut, photos(status)")
+      // Toutes les colonnes : le plan continu est lu si la migration 0016 est passée
+      .select("*, photos(status)")
       .eq("project_id", projectId)
       .order("position"),
     // La première référence ajoutée pour un nom (la photo maîtresse) passe toujours en premier
@@ -326,7 +330,14 @@ export async function creerPhotos(projectId: string, formData: FormData) {
   const tous = scenes ?? [];
   const aLancer = tous
     .map((s, i) => ({ ...s, numero: i + 1 }))
-    .filter((s) => choisis.has(s.id) && s.image_description.trim() && !(s.photos as { status: string }[]).some((p) => p.status === "en_cours"));
+    // La suite d'un plan continu reprend la photo de la première ligne du plan : pas de photo à créer pour elle
+    .filter(
+      (s, i) =>
+        choisis.has(s.id) &&
+        !estSuite(tous, i) &&
+        s.image_description.trim() &&
+        !(s.photos as { status: string }[]).some((p) => p.status === "en_cours"),
+    );
   if (aLancer.length === 0) retour(projectId, "?erreur=selection-vide");
 
   // Les photos sont inscrites dans la file ; la page les envoie quelques-unes à la fois à chaque actualisation
@@ -403,32 +414,51 @@ export type LigneTableau = {
   pose_debut: string;
   pose_fin: string;
   duree: number | null;
+  plan_continu?: number | null;
 };
 
 // Import d'un tableau de scènes (CSV, par exemple le tableau maître d'un projet préparé ailleurs) : un plan par ligne
 export async function importerTableau(projectId: string, lignes: LigneTableau[], accord: boolean) {
   const { supabase, profile } = await requireProfile();
   if (lignes.length === 0) retour(projectId, "?erreur=import-vide");
-  const debut = await prochainePosition(supabase, projectId);
+  // Dernier plan du projet. Les numéros de plan continu du fichier repartent de 1 : ils sont décalés après le sien,
+  // pour que le premier nouveau plan ne prolonge pas le dernier ancien (toutes les colonnes : 0016 peut manquer)
+  const { data: dernier } = await supabase
+    .from("scenes")
+    .select("*")
+    .eq("project_id", projectId)
+    .order("position", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const debut = (dernier?.position ?? 0) + 1;
+  const decalage = Number(dernier?.plan_continu) || 0;
   const court = (t: string, n = 300) => String(t ?? "").trim().slice(0, n);
-  const { error } = await supabase.from("scenes").insert(
-    lignes.slice(0, 300).map((l, i) => ({
-      project_id: projectId,
-      position: debut + i,
-      voiceover_text: court(l.voix, 2000),
-      // Pas de mouvement passe-partout : chaque plan devra recevoir le sien (leçon du Projet Mama)
-      motion_prompt: court(l.mouvement, 2000),
-      image_description: court(l.description, 2000),
-      cadrage: court(l.cadrage),
-      angle: court(l.angle),
-      lieu: court(l.lieu),
-      intention: court(l.intention),
-      pose_debut: court(l.pose_debut),
-      pose_fin: court(l.pose_fin),
-      duration_s: l.duree && l.duree >= 2 && l.duree <= 10 ? l.duree : 5,
-      consent_confirmed: accord,
-    })),
-  );
+  const avecPlan = lignes.some((l) => l.plan_continu);
+  const lignesBase = lignes.slice(0, 300).map((l, i) => ({
+    project_id: projectId,
+    position: debut + i,
+    voiceover_text: court(l.voix, 2000),
+    // Pas de mouvement passe-partout : chaque plan devra recevoir le sien (leçon du Projet Mama)
+    motion_prompt: court(l.mouvement, 2000),
+    image_description: court(l.description, 2000),
+    cadrage: court(l.cadrage),
+    angle: court(l.angle),
+    lieu: court(l.lieu),
+    intention: court(l.intention),
+    pose_debut: court(l.pose_debut),
+    pose_fin: court(l.pose_fin),
+    duration_s: l.duree && l.duree >= 2 && l.duree <= 10 ? l.duree : 5,
+    consent_confirmed: accord,
+  }));
+  let { error } = await supabase
+    .from("scenes")
+    .insert(
+      avecPlan
+        ? lignesBase.map((b, i) => ({ ...b, plan_continu: lignes[i].plan_continu ? lignes[i].plan_continu! + decalage : null }))
+        : lignesBase,
+    );
+  // Base sans la migration 0016 : les plans sont créés sans regroupement
+  if (error && avecPlan && /plan_continu/.test(error.message)) ({ error } = await supabase.from("scenes").insert(lignesBase));
   if (error) retour(projectId, "?erreur=import");
   await Promise.all([
     journaliser(supabase, profile.id, "import", "plan", null, { project_id: projectId, nombre: lignes.length, source: "tableau" }),

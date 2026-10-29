@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { BoutonEnvoi } from "@/components/bouton-envoi";
+import { CATEGORIES, type Categorie, lireCategorie } from "@/lib/categories";
 import { FORMATS, GENRES, LIBELLES_FORMAT, STATUTS_MONTAGE, dureeLisible } from "@/lib/libelles";
 import { signerLiens } from "@/lib/production";
 import { getClient, requireProfile } from "@/lib/session";
@@ -43,7 +44,8 @@ export default async function PageProjet({
       requireProfile(),
       supabase
         .from("projects")
-        .select("id, title, client_name, aspect_ratio, due_date, workspace_id, created_at, resume, scenario_text, style_text")
+        // Toutes les colonnes : la catégorie est lue si la migration 0016 est passée
+        .select("*")
         .eq("id", id)
         .maybeSingle(),
       supabase.from("workspaces").select("id, kind, owner_id"),
@@ -176,6 +178,18 @@ export default async function PageProjet({
               {FORMATS.map((f) => (
                 <option key={f} value={f}>
                   {LIBELLES_FORMAT[f]}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="sm:col-span-2">
+            <label htmlFor="categorie" className="etiquette">
+              Catégorie du film (elle règle le découpage en plans)
+            </label>
+            <select id="categorie" name="categorie" defaultValue={lireCategorie(projet.categorie)} className="champ">
+              {(Object.entries(CATEGORIES) as [Categorie, (typeof CATEGORIES)[Categorie]][]).map(([cle, c]) => (
+                <option key={cle} value={cle}>
+                  {c.libelle} : {c.aide}
                 </option>
               ))}
             </select>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import type { Categorie } from "@/lib/categories";
 import { FICHIER_A_REMPLIR, promptPreparation, tableauARemplir } from "@/lib/preparation";
 
 type Ref = { nom: string; genre: string; description: string };
@@ -13,6 +14,7 @@ export function PreparationTableau(p: {
   style: string;
   script: string;
   resume: string;
+  categorie: Categorie;
   refs: Ref[];
 }) {
   const [etat, setEtat] = useState<"" | "copie" | "manuel">("");
@@ -23,6 +25,7 @@ export function PreparationTableau(p: {
     style: p.style,
     script: p.script,
     resume: p.resume,
+    categorie: p.categorie,
     refs: p.refs,
   });
 

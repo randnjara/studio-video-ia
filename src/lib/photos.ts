@@ -400,10 +400,31 @@ export async function suivrePhotos(
           })
           .eq("id", p.id),
         supabase.from("scenes").update({ image_path: statut.imagePath }).eq("id", p.scene_id),
+        propagerPhoto(supabase, p.scene_id, statut.imagePath),
         garderLieu(supabase, projectId, p.scene_id, statut.imagePath),
       ]);
     }),
   );
+}
+
+// Plan continu : les lignes qui suivent celle-ci avec le même numéro de plan continu prennent la même photo de départ,
+// pour qu'aucune coupe ne se voie entre leurs clips de 5 s (toutes les colonnes : la migration 0016 peut manquer)
+export async function propagerPhoto(supabase: SupabaseClient, sceneId: string, imagePath: string) {
+  const { data: plan } = await supabase.from("scenes").select("*").eq("id", sceneId).single();
+  if (!plan?.plan_continu) return;
+  const { data: suivants } = await supabase
+    .from("scenes")
+    .select("*")
+    .eq("project_id", plan.project_id)
+    .gt("position", plan.position)
+    .order("position")
+    .limit(100);
+  const ids: string[] = [];
+  for (const s of suivants ?? []) {
+    if (s.plan_continu !== plan.plan_continu) break;
+    ids.push(s.id);
+  }
+  if (ids.length) await supabase.from("scenes").update({ image_path: imagePath }).in("id", ids);
 }
 
 // Première photo réussie d'un lieu sans photo de référence : elle devient la référence du lieu (comme « Garder ce décor »)

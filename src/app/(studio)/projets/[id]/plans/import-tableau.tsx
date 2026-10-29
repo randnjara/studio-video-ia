@@ -99,7 +99,7 @@ const norm = (t: string) =>
     .trim();
 
 // Mots-clés reconnus dans les titres de colonnes (le premier titre qui correspond l'emporte)
-const COLONNES: Record<keyof Omit<LigneTableau, "duree">, string[]> = {
+const COLONNES: Record<keyof Omit<LigneTableau, "duree" | "plan_continu">, string[]> = {
   voix: ["dialogue", "voix", "replique", "texte"],
   mouvement: ["mouvement", "motion", "prompt video"],
   description: ["description", "prompt image", "image"],
@@ -110,7 +110,7 @@ const COLONNES: Record<keyof Omit<LigneTableau, "duree">, string[]> = {
   pose_debut: ["debut posture", "pose debut", "posture 0", "pose de debut"],
   pose_fin: ["fin posture", "pose fin", "pose de fin"],
 };
-const IGNORER = ["inventoriee", "officielle", "existante", "geste original"];
+const IGNORER = ["inventoriee", "officielle", "existante", "geste original", "continu"];
 
 // Les valeurs « à définir », « à mesurer »… ne sont pas des informations
 const vide = (v: string) => /^(a definir|a mesurer|a verifier|non verifie)/.test(norm(v));
@@ -137,6 +137,8 @@ function convertir(lignes: string[][], personnage: string): { plans: LigneTablea
   // « Action principale proposée » complète la description de la photo
   const action = titres.findIndex((t) => t.includes("action"));
   const duree = titres.findIndex((t) => t.includes("duree reelle") || t === "duree");
+  // Lignes de 5 s qui forment un seul plan à l'écran (même numéro = même photo de départ)
+  const continu = titres.findIndex((t) => t === "plan continu");
   const lire = (l: string[], i?: number) => {
     const v = i === undefined || i < 0 ? "" : (l[i] ?? "").trim();
     return vide(v) ? "" : v;
@@ -161,6 +163,7 @@ function convertir(lignes: string[][], personnage: string): { plans: LigneTablea
       pose_debut: lire(l, index.pose_debut),
       pose_fin: lire(l, index.pose_fin),
       duree: Number(lire(l, duree).replace(",", ".")) || null,
+      plan_continu: Number.parseInt(lire(l, continu), 10) || null,
     };
   });
   return {
