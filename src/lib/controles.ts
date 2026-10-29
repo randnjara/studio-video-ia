@@ -78,7 +78,7 @@ export function pasEnAnglais(texte: string) {
 }
 
 // Le mouvement mis par défaut à l'import n'est pas une répétition choisie : il est signalé à part
-// Les lignes d'un même plan continu partagent volontairement la photo, le cadrage, l'angle et la pose de base :
+// Les lignes d'un même plan continu partagent volontairement la photo, le cadrage, l'angle et les poses qui s'enchaînent :
 // ces ressemblances ne sont signalées qu'entre deux plans continus différents.
 export function alertesPlans(plans: PlanControle[], mouvementParDefaut = "", categorie: Categorie = "film") {
   const alertes = new Map<string, string[]>();

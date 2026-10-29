@@ -1,6 +1,7 @@
 """Serveur RunPod du studio, deux métiers (un serveur RunPod par métier, chacun avec son modèle en cache) :
 
-- « video » (par défaut) : transforme une photo en clip avec Wan 2.2 (image → vidéo), en 4 étapes ;
+- « video » (par défaut) : transforme une photo en clip avec Wan 2.2 (image → vidéo), en 4 étapes ; sur demande, la
+  dernière image du clip est aussi déposée, pour servir de photo de départ au clip suivant d'un même plan continu ;
 - « image » : crée une photo de départ avec Qwen-Image-Edit-2511 à partir de 1 à 3 images de référence
   (personnages, lieux), en 4 étapes, pour garder les mêmes visages et tenues d'un plan à l'autre.
 
@@ -26,6 +27,7 @@ VOLUME = _DOSSIER_VOLUME if os.path.isdir(_DOSSIER_VOLUME) and not os.path.isdir
 if VOLUME:
     os.environ.setdefault("HF_HOME", f"{VOLUME}/huggingface")
 
+import numpy as np
 import requests
 import runpod
 import torch
@@ -163,6 +165,17 @@ def nombre_images(duree):
     return 4 * round(duree * IMAGES_PAR_SECONDE / 4) + 1
 
 
+def derniere_image(images):
+    """Dernière image du clip, en PIL (diffusers rend des images PIL ou des tableaux de 0 à 1)."""
+    image = images[-1]
+    if isinstance(image, Image.Image):
+        return image.convert("RGB")
+    tableau = np.asarray(image)
+    if tableau.dtype != np.uint8:
+        tableau = (np.clip(tableau, 0, 1) * 255).round().astype(np.uint8)
+    return Image.fromarray(tableau).convert("RGB")
+
+
 def generer_video(pipe, entree):
     for champ in ("image_url", "prompt", "upload_url", "video_path"):
         if not entree.get(champ):
@@ -203,7 +216,22 @@ def generer_video(pipe, entree):
     if not envoi.ok:
         return {"error": f"Envoi de la vidéo refusé ({envoi.status_code}) : {envoi.text[:200]}"}
 
-    return {"video_path": entree["video_path"], "secondes": round(secondes, 1), "taille": f"{largeur}x{hauteur}"}
+    resultat = {"video_path": entree["video_path"], "secondes": round(secondes, 1), "taille": f"{largeur}x{hauteur}"}
+    # Plan continu : la dernière image devient la photo de départ du clip suivant (un échec ici ne perd pas la vidéo)
+    if entree.get("last_frame_upload_url") and entree.get("last_frame_path"):
+        tampon = BytesIO()
+        derniere_image(images).save(tampon, format="JPEG", quality=95)
+        envoi = requests.put(
+            entree["last_frame_upload_url"],
+            data=tampon.getvalue(),
+            headers={"Content-Type": "image/jpeg", "x-upsert": "true"},
+            timeout=120,
+        )
+        if envoi.ok:
+            resultat["last_frame_path"] = entree["last_frame_path"]
+        else:
+            print(f"Dernière image refusée ({envoi.status_code}) : {envoi.text[:200]}")
+    return resultat
 
 
 def generer_image(pipe, entree):

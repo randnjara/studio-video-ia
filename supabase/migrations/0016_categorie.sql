@@ -7,3 +7,6 @@ alter table public.projects
 -- Plan continu : plusieurs lignes de 5 s (la limite du modèle vidéo) qui forment un seul plan à l'écran.
 -- Les lignes qui se suivent avec le même numéro gardent le même cadrage et la même photo de départ.
 alter table public.scenes add column plan_continu integer;
+
+-- Dernière image d'un clip (notre serveur la dépose sur demande) : photo de départ du clip suivant du même plan continu
+alter table public.takes add column last_frame_path text;

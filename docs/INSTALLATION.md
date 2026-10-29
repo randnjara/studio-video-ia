@@ -90,7 +90,7 @@ Ensuite : menu **Voix** pour le catalogue et pour ajouter la voix d'une personne
 
 Appliquez la migration `supabase/migrations/0016_categorie.sql` (SQL Editor → coller → **Run**). Elle ajoute la **catégorie** du film (interview, documentaire, film, promotion, tutoriel, clip) et le **plan continu** des lignes du tableau. Sans elle, le studio marche comme avant : la catégorie choisie n'est pas gardée et les lignes ne sont pas regroupées.
 
-Ensuite, à l'étape 1 de chaque projet, choisissez la catégorie. La consigne ChatGPT suit ses règles : en interview, plusieurs lignes de 5 s forment un seul plan (même numéro dans la colonne `plan_continu`), avec une seule photo de départ pour tout le plan.
+Ensuite, à l'étape 1 de chaque projet, choisissez la catégorie. La consigne ChatGPT suit ses règles : en interview, plusieurs lignes de 5 s forment un seul plan (même numéro dans la colonne `plan_continu`), avec une seule photo de départ pour tout le plan. Chaque clip suivant du plan part de la **dernière image du clip précédent** : il attend que ce clip soit fini, puis part tout seul. Cela marche avec notre serveur (moteurs « Économique ») à partir de l'image `v4` du serveur vidéo, construite par GitHub après la fusion (environ 20 minutes) ; le studio y bascule le serveur au prochain envoi. Avec « Qualité max », chaque clip repart de la photo du plan.
 
 ## Vérifications
 
