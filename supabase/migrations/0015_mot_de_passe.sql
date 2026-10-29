@@ -43,7 +43,8 @@ begin
     nullif(regexp_replace(lower(split_part(coalesce(new.email, ''), '@', 1)), '[^a-z0-9._-]', '', 'g'), ''),
     'membre'
   );
-  base_nom := rpad(left(base_nom, 26), 3, '0');
+  base_nom := left(base_nom, 26);
+  base_nom := base_nom || repeat('0', greatest(0, 3 - length(base_nom))); -- 3 caractères au moins
   nom := base_nom;
   while exists (select 1 from profiles where username = nom) loop
     n := n + 1;
