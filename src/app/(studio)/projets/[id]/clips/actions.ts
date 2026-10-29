@@ -9,6 +9,7 @@ import { lancerPlan, suivreEssais } from "@/lib/production";
 import { endpointEco, estMoteur, moteurParDefaut } from "@/lib/runpod";
 import { mettreAJourServeur } from "@/lib/runpod-admin";
 import { requireProfile } from "@/lib/session";
+import { type EtatServeur, surveiller } from "@/lib/surveillance";
 
 function retour(projectId: string, params = ""): never {
   revalidatePath(`/projets/${projectId}`, "layout");
@@ -16,13 +17,16 @@ function retour(projectId: string, params = ""): never {
 }
 
 // Appelée toutes les 10 s par la page tant qu'un clip est en génération. Renvoie le nombre encore en cours.
-export async function actualiserEssais(projectId: string): Promise<number> {
+export async function actualiserEssais(projectId: string): Promise<{ restants: number; serveur: EtatServeur | null }> {
   const { supabase } = await requireProfile();
-  const { data } = await supabase
-    .from("takes")
-    .select("id, scene_id, runpod_job_id, moteur, created_at, scenes!takes_scene_id_fkey!inner(project_id, status)")
-    .eq("status", "en_cours")
-    .eq("scenes.project_id", projectId);
+  const [{ data }, etat] = await Promise.all([
+    supabase
+      .from("takes")
+      .select("id, scene_id, runpod_job_id, moteur, created_at, scenes!takes_scene_id_fkey!inner(project_id, status)")
+      .eq("status", "en_cours")
+      .eq("scenes.project_id", projectId),
+    lireEtatFile(supabase, projectId),
+  ]);
   const essais = (data ?? []).map((t) => ({
     id: t.id,
     scene_id: t.scene_id,
@@ -31,10 +35,17 @@ export async function actualiserEssais(projectId: string): Promise<number> {
     sceneValidee: (t.scenes as unknown as { status: string }).status === "validee",
     created_at: t.created_at,
   }));
-  if (essais.length === 0) return 0;
-  const restants = await suivreEssais(supabase, projectId, essais);
+  if (essais.length === 0) return { restants: 0, serveur: null };
+  const restants = await suivreEssais(supabase, projectId, essais, true, etat);
   if (restants < essais.length) revalidatePath(`/projets/${projectId}`, "layout");
-  return restants;
+  // Le service tout prêt « Qualité max » n'est pas notre serveur : il n'est ni surveillé ni coupé
+  const parties = essais.filter(
+    (e): e is typeof e & { runpod_job_id: string } => e.moteur !== "qualite" && Boolean(e.runpod_job_id) && e.runpod_job_id !== "envoi",
+  );
+  const serveur = essais.some((e) => e.moteur !== "qualite")
+    ? await surveiller(supabase, projectId, "video", etat.serveurVideo, etat, parties)
+    : null;
+  return { restants, serveur };
 }
 
 // Le clip choisi devient celui du plan : il pourra entrer dans un montage
@@ -106,7 +117,8 @@ export async function regenerer(projectId: string, sceneId: string) {
     supabase.from("projects").select("aspect_ratio").eq("id", projectId).single(),
     supabase
       .from("scenes")
-      .select("id, motion_prompt, image_path, consent_confirmed, duration_s, status")
+      // Toutes les colonnes : le plan continu sert à partir de la dernière image du clip précédent
+      .select("*")
       .eq("id", sceneId)
       .eq("project_id", projectId)
       .single(),

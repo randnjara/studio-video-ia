@@ -140,6 +140,7 @@ export default async function PageClips({
         enCours={enCours}
         enPause={etat.enPause}
         serveurArrete={etat.serveurArrete}
+        arretAuto={etat.arretAuto}
         serveurExiste={Boolean(etat.serveurVideo)}
         responsable={profile.role === "responsable"}
         sp={sp}

@@ -19,6 +19,7 @@ export function ControleFile({
   enCours,
   enPause,
   serveurArrete,
+  arretAuto,
   serveurExiste,
   responsable,
   sp,
@@ -28,6 +29,8 @@ export function ControleFile({
   enCours: number;
   enPause: boolean;
   serveurArrete: boolean;
+  // Raison quand le studio a coupé le serveur tout seul (rien n'avançait chez RunPod)
+  arretAuto?: string | null;
   serveurExiste: boolean;
   responsable: boolean;
   sp: Record<string, string | undefined>;
@@ -52,7 +55,9 @@ export function ControleFile({
       {visible && (
         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-ligne px-4 py-3 text-sm">
           <span className="flex-1 text-sourdine">
-            {serveurArrete
+            {serveurArrete && arretAuto
+              ? `${arretAuto} Rien n'est plus facturé. Ce qui attendait reste dans la file : redémarrez le serveur pour réessayer.`
+              : serveurArrete
               ? "Serveur RunPod arrêté : rien ne part (sauf « Qualité max »), rien n'est facturé."
               : enPause
                 ? "En pause : la suite du lot attend, sans rien coûter."

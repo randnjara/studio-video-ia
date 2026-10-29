@@ -13,13 +13,19 @@ export const CLE_ARRET_SERVEUR = "runpod_arret";
 export const VALEUR_PAUSE = "pause";
 export const valeurReprise = () => `reprise:${new Date().toISOString()}`;
 
-export type ArretServeur = { arrete: boolean; depuis: string; max: Record<string, number> };
+// « auto » : arrêt décidé par le studio lui-même (rien n'avançait chez RunPod), avec la raison affichée
+export type ArretServeur = { arrete: boolean; depuis: string; max: Record<string, number>; auto?: string };
 
 export function lireArretServeur(valeur: string | null | undefined): ArretServeur | null {
   if (!valeur) return null;
   try {
     const v = JSON.parse(valeur) as Partial<ArretServeur>;
-    return { arrete: Boolean(v.arrete), depuis: String(v.depuis ?? ""), max: v.max ?? {} };
+    return {
+      arrete: Boolean(v.arrete),
+      depuis: String(v.depuis ?? ""),
+      max: v.max ?? {},
+      ...(v.auto ? { auto: String(v.auto) } : {}),
+    };
   } catch {
     return null;
   }
@@ -28,6 +34,8 @@ export function lireArretServeur(valeur: string | null | undefined): ArretServeu
 export type EtatFile = {
   enPause: boolean;
   serveurArrete: boolean;
+  // Raison de l'arrêt automatique, quand le studio a coupé le serveur lui-même
+  arretAuto: string | null;
   // Dernière reprise (pause ou serveur) : une photo ou vidéo restée en attente ne compte son attente qu'à partir de là
   reprise: number;
   serveurVideo: string | null;
@@ -49,6 +57,7 @@ export async function lireEtatFile(supabase: SupabaseClient, projectId: string):
   return {
     enPause: pause === VALEUR_PAUSE,
     serveurArrete: Boolean(arret?.arrete),
+    arretAuto: arret?.arrete ? (arret.auto ?? null) : null,
     reprise: Math.max(
       pause?.startsWith("reprise:") ? date(pause.slice("reprise:".length)) : 0,
       arret && !arret.arrete ? date(arret.depuis) : 0,

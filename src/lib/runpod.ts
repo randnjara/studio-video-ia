@@ -74,6 +74,12 @@ const TAILLES: Record<string, string> = {
 export const PROMPT_NEGATIF =
   "blurry, distorted, text, watermark, deformed face, deformed hands, extra fingers, static frame, oversaturated, low quality";
 
+// Limites données à RunPod avec chaque travail, qui s'appliquent même si personne n'a la page ouverte :
+// « executionTimeout » coupe un calcul commencé qui ne finit pas, « ttl » abandonne un travail resté trop longtemps
+// chez RunPod (file comprise). Une vidéo d'un lot peut attendre son tour longtemps, d'où un ttl large.
+const POLICE_PHOTO = { executionTimeout: 10 * 60 * 1000, ttl: 30 * 60 * 1000 };
+const POLICE_VIDEO = { executionTimeout: 20 * 60 * 1000, ttl: 3 * 60 * 60 * 1000 };
+
 export function cle() {
   const k = process.env.RUNPOD_API_KEY;
   if (!k) throw new Error("La clé RunPod n'est pas encore configurée (RUNPOD_API_KEY dans Cloudflare).");
@@ -148,7 +154,9 @@ export async function lancerGeneration(p: {
           upload_url: p.uploadUrl,
           ...(p.dernierePhoto ? { last_frame_path: p.dernierePhoto.chemin, last_frame_upload_url: p.dernierePhoto.uploadUrl } : {}),
         };
-  const data = await appel(p.moteur, "/run", { method: "POST", body: JSON.stringify({ input }) }, p.serveur);
+  // Notre serveur : RunPod coupe lui-même un calcul bloqué, même page fermée (le service tout prêt a ses propres limites)
+  const policy = p.moteur === "qualite" ? undefined : POLICE_VIDEO;
+  const data = await appel(p.moteur, "/run", { method: "POST", body: JSON.stringify({ input, policy }) }, p.serveur);
   return String(data.id);
 }
 
@@ -174,7 +182,7 @@ export async function lancerPhotoRunPod(p: {
     image_path: p.imagePath,
     upload_url: p.uploadUrl,
   };
-  const data = await appel("photo", "/run", { method: "POST", body: JSON.stringify({ input }) }, p.serveur);
+  const data = await appel("photo", "/run", { method: "POST", body: JSON.stringify({ input, policy: POLICE_PHOTO }) }, p.serveur);
   return String(data.id);
 }
 
