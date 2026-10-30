@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { avecMouvement } from "@/lib/categories";
 import { journaliser } from "@/lib/journal";
 import { type EtatFile, attente, lireEtatFile } from "@/lib/file-attente";
+import { type Reference, referencesCitees } from "@/lib/photos";
 import { MOTEURS, type Moteur, annulerJob, lancerGeneration, lireStatut } from "@/lib/runpod";
 
 // Outils côté serveur partagés par les pages Plans, Clips et Montage.
@@ -45,8 +46,24 @@ export async function marquerEnProduction(supabase: SupabaseClient, projectId: s
 }
 
 // Ajouté à chaque consigne de mouvement : le visage et la tenue ne doivent pas changer pendant l'animation
+// MAMAN 2 : en enchaînant les clips, le visage rajeunissait et changeait (yeux, couleur des cheveux). Wan ne voit que
+// la première image et le texte : la fiche de chaque personnage cité est donc redite dans chaque consigne.
 const STABILITE =
-  "Same person, same face and clothing throughout, subtle natural movements, natural blinking and breathing, no morphing, no sudden change of position.";
+  "Same person, same face and clothing throughout, subtle natural movements, natural blinking and breathing, no morphing, no sudden change of position. Keep the face identical to the first frame: same apparent age, wrinkles, skin tone, eye colour, hair colour and hairstyle; never rejuvenate, beautify or change ethnicity.";
+
+// « Personnage MAMA : … » pour chaque personnage cité dans la photo du plan, avec la description de sa référence
+async function fichesPersonnages(supabase: SupabaseClient, projectId: string) {
+  const { data } = await supabase.from("film_refs").select("id, nom, genre, description, image_path").eq("project_id", projectId);
+  const refs = ((data ?? []) as Reference[]).filter((r) => r.genre === "personnage");
+  return (description: string) =>
+    referencesCitees(description, refs)
+      .filter((r) => r.genre === "personnage" && r.description?.trim())
+      .map((r) => `Character ${r.nom} (must stay exactly the same in every frame): ${r.description.trim().replace(/[.\s]+$/, "")}.`)
+      .join(" ");
+}
+
+const consigneVideo = (consigne: string, fiches: string) =>
+  [`${consigne.trim().replace(/[.\s]+$/, "")}.`, fiches, STABILITE].filter(Boolean).join(" ");
 
 // Photo de départ d'un clip. Prise unique, dans toutes les catégories : chaque clip part de la dernière image du clip
 // précédent (celui validé, sinon le dernier réussi), sur tout le film, même quand le plan continu change.
@@ -165,7 +182,10 @@ export async function lancerPlan(
 
     const jobId = await lancerGeneration({
       moteur,
-      prompt: `${(depart === "attendre" ? plan.motion_prompt : depart.consigne).trim().replace(/[.\s]+$/, "")}. ${STABILITE}`,
+      prompt: consigneVideo(
+        depart === "attendre" ? plan.motion_prompt : depart.consigne,
+        (await fichesPersonnages(supabase, plan.project_id))(String((plan as { image_description?: string }).image_description ?? "")),
+      ),
       imageUrl: signee.signedUrl,
       format,
       duree,
@@ -281,13 +301,14 @@ async function echecEssai(supabase: SupabaseClient, essai: EssaiEnCours, erreur:
 // Envoie à RunPod quelques essais en attente
 async function envoyerEssais(supabase: SupabaseClient, projectId: string, enAttente: EssaiEnCours[], serveurEco: string | null) {
   if (enAttente.length === 0) return;
-  const [{ data: projet }, { data: scenes }] = await Promise.all([
+  const [{ data: projet }, { data: scenes }, fiches] = await Promise.all([
     supabase.from("projects").select("aspect_ratio").eq("id", projectId).single(),
     supabase
       .from("scenes")
       // Toutes les colonnes : le cadrage et le plan continu sont lus si la migration 0016 est passée
       .select("*")
       .in("id", [...new Set(enAttente.map((e) => e.scene_id))]),
+    fichesPersonnages(supabase, projectId),
   ]);
   // Prise unique : un clip attend la fin du précédent. Les clips d'un même lot ont la même date : on les range dans
   // l'ordre du film pour que le premier clip du plan passe avant ses suites, et on regarde un peu plus loin dans la
@@ -329,7 +350,7 @@ async function envoyerEssais(supabase: SupabaseClient, projectId: string, enAtte
       if (envoi && (envoi.error || !envoi.data)) throw new Error("Impossible de préparer l'envoi de la vidéo.");
       const jobId = await lancerGeneration({
         moteur: essai.moteur,
-        prompt: `${depart.consigne.trim().replace(/[.\s]+$/, "")}. ${STABILITE}`,
+        prompt: consigneVideo(depart.consigne, fiches(String(plan.image_description ?? ""))),
         imageUrl: signee.signedUrl,
         format: projet?.aspect_ratio ?? "16:9",
         duree,
