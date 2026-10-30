@@ -3,7 +3,8 @@
 FROM pytorch/pytorch:2.13.0-cuda12.6-cudnn9-runtime
 
 ENV PYTHONUNBUFFERED=1 \
-    HF_HUB_ENABLE_HF_TRANSFER=1
+    HF_HUB_ENABLE_HF_TRANSFER=1 \
+    PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 WORKDIR /app
 COPY requirements.txt .

@@ -168,7 +168,10 @@ def charger_vace():
         print(f"LoRA VACE : {haut} / {bas}")
     except Exception as e:
         print(f"VACE sans LoRA rapide ({e}) : {VACE_ETAPES_NORMALES} étapes")
-    pipe.to("cuda")
+    # Les deux experts VACE (bien plus gros que ceux de l'image → vidéo) et l'encodeur de texte ne tiennent pas
+    # ensemble dans 80 Go (essai MAMAN 2 : mémoire pleine). Chaque morceau monte sur la carte quand il sert, puis en
+    # redescend : quelques secondes de plus par clip, et la carte reste libre pour les finitions.
+    pipe.enable_model_cpu_offload()
     print(f"Wan 2.2 VACE prêt en {time.time() - debut:.0f} s")
     return pipe
 

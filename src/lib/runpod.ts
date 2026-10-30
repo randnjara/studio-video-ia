@@ -67,7 +67,8 @@ export const endpointPhoto = cache(async (): Promise<string | null> => {
 export async function moteursDisponibles(): Promise<Moteur[]> {
   const [eco, vace] = await Promise.all([endpointEco(), endpointVace()]);
   const tous: Moteur[] = eco ? ["eco-480", "eco-720", "qualite"] : ["qualite"];
-  return vace ? [...tous, "fidele-480"] : tous;
+  // Visage fidèle en premier : c'est le choix par défaut du menu, le visage ne dérive plus d'un clip à l'autre
+  return vace ? ["fidele-480", ...tous] : tous;
 }
 
 export async function moteurParDefaut(): Promise<Moteur> {
