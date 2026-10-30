@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { lireEtatFile } from "@/lib/file-attente";
 import { journaliser } from "@/lib/journal";
 import { CONTROLES_CLIP } from "@/lib/libelles";
-import { lancerPlan, suivreEssais } from "@/lib/production";
+import { VISAGE, lancerPlan, suivreEssais } from "@/lib/production";
 import { endpointEco, estMoteur, moteurParDefaut } from "@/lib/runpod";
 import { mettreAJourServeur } from "@/lib/runpod-admin";
 import { requireProfile } from "@/lib/session";
@@ -40,7 +40,7 @@ export async function actualiserEssais(projectId: string): Promise<{ restants: n
   if (restants < essais.length) revalidatePath(`/projets/${projectId}`, "layout");
   // Le service tout prêt « Qualité max » n'est pas notre serveur : il n'est ni surveillé ni coupé
   const parties = essais.filter(
-    (e): e is typeof e & { runpod_job_id: string } => e.moteur !== "qualite" && Boolean(e.runpod_job_id) && e.runpod_job_id !== "envoi",
+    (e): e is typeof e & { runpod_job_id: string } => e.moteur !== "qualite" && Boolean(e.runpod_job_id) && e.runpod_job_id !== "envoi" && !e.runpod_job_id!.startsWith(VISAGE),
   );
   const serveur = essais.some((e) => e.moteur !== "qualite")
     ? await surveiller(supabase, projectId, "video", etat.serveurVideo, etat, parties)
