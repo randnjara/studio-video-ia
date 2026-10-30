@@ -127,14 +127,34 @@ async function base(moteur: Cible, serveur?: string) {
   return `https://api.runpod.ai/v2/${encodeURIComponent(id)}`;
 }
 
-async function appel(moteur: Cible, chemin: string, init?: RequestInit, serveur?: string) {
-  const res = await fetch(`${await base(moteur, serveur)}${chemin}`, {
+async function appel(moteur: Cible, chemin: string, init?: RequestInit, serveur?: string, dejaRelance = false) {
+  const url = await base(moteur, serveur);
+  const res = await fetch(`${url}${chemin}`, {
     ...init,
     headers: { Authorization: `Bearer ${cle()}`, "Content-Type": "application/json" },
   });
   const texte = await res.text();
+  // Serveur mis à 0 machine en dehors du studio (console RunPod, ancien arrêt) alors que le studio le croit allumé :
+  // on lui rend 2 machines et on renvoie une fois, au lieu d'un échec « Endpoint is paused »
+  if (res.status === 409 && /paused/i.test(texte) && chemin === "/run" && moteur !== "qualite" && !dejaRelance) {
+    await rallumer(url.split("/").pop()!);
+    return appel(moteur, chemin, init, serveur, true);
+  }
   if (!res.ok) throw new Error(`RunPod a répondu ${res.status} : ${texte.slice(0, 200)}`);
   return JSON.parse(texte);
+}
+
+async function rallumer(id: string) {
+  const supabase = await getClient();
+  const { data } = await supabase.from("reglages").select("valeur").eq("cle", "runpod_arret").maybeSingle();
+  if (data?.valeur && JSON.parse(data.valeur)?.arrete)
+    throw new Error("Le serveur est arrêté : cliquez sur « Redémarrer le serveur » avant d'envoyer.");
+  const res = await fetch(`https://rest.runpod.io/v1/endpoints/${id}`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${cle()}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ workersMax: 2 }),
+  });
+  if (!res.ok) throw new Error(`RunPod (rallumage du serveur) : ${res.status} ${(await res.text()).slice(0, 200)}`);
 }
 
 // Finitions faites par notre serveur sur la même carte, juste après le clip (worker/amelioration.py) : couleurs gardées
