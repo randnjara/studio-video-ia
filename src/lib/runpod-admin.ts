@@ -6,7 +6,7 @@ import { cle } from "@/lib/runpod";
 // L'image est construite par GitHub à chaque changement du dossier worker/ (.github/workflows/serveur-video.yml).
 export const IMAGE_SERVEUR = "ghcr.io/randnjara/studio-video-ia-worker:latest";
 // À augmenter avec worker/VERSION : le studio fait passer notre serveur sur cette image au prochain envoi
-export const VERSION_SERVEUR = "4";
+export const VERSION_SERVEUR = "5";
 const CLE_IMAGE = "runpod_image";
 const NOM = "studio-video-eco";
 
@@ -247,6 +247,13 @@ export async function creerServeursCache(): Promise<{ video: string; photo: stri
   const video = await creerServeur(SERVEURS_CACHE.video.nom, MODELE_CACHE, IMAGE_VERSION);
   const photo = await creerServeur(SERVEURS_CACHE.photo.nom, MODELE_CACHE, IMAGE_VERSION);
   return { video, photo };
+}
+
+// Serveur « Visage fidèle » (Wan 2.2 VACE), même image que le serveur vidéo, son modèle dans le cache de RunPod
+export const SERVEUR_VACE = { nom: "studio-vace-cache", modele: "linoyts/Wan2.2-VACE-Fun-14B-diffusers" } as const;
+
+export async function creerServeurVace(): Promise<string> {
+  return creerServeur(SERVEUR_VACE.nom, MODELE_CACHE, IMAGE_VERSION);
 }
 
 // Supprime l'ancien serveur (attaché au disque) puis le disque payant

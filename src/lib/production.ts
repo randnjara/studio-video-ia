@@ -51,16 +51,27 @@ export async function marquerEnProduction(supabase: SupabaseClient, projectId: s
 const STABILITE =
   "Same person, same face and clothing throughout, subtle natural movements, natural blinking and breathing, no morphing, no sudden change of position. Keep the face identical to the first frame: same apparent age, wrinkles, skin tone, eye colour, hair colour and hairstyle; never rejuvenate, beautify or change ethnicity.";
 
-// « Personnage MAMA : … » pour chaque personnage cité dans la photo du plan, avec la description de sa référence
+// Personnages cités dans la photo du plan : « Personnage MAMA : … » (description de sa référence) pour la consigne,
+// et leurs photos pour le moteur « Visage fidèle »
 async function fichesPersonnages(supabase: SupabaseClient, projectId: string) {
   const { data } = await supabase.from("film_refs").select("id, nom, genre, description, image_path").eq("project_id", projectId);
   const refs = ((data ?? []) as Reference[]).filter((r) => r.genre === "personnage");
-  return (description: string) =>
-    referencesCitees(description, refs)
-      .filter((r) => r.genre === "personnage" && r.description?.trim())
+  const cites = (description: string) => referencesCitees(description, refs).filter((r) => r.genre === "personnage");
+  const texte = (description: string) =>
+    cites(description)
+      .filter((r) => r.description?.trim())
       .map((r) => `Character ${r.nom} (must stay exactly the same in every frame): ${r.description.trim().replace(/[.\s]+$/, "")}.`)
       .join(" ");
+  return Object.assign(texte, { photos: (description: string) => cites(description).map((r) => r.image_path) });
 }
+
+// Serveur d'un moteur : aucun pour le service tout prêt, le serveur VACE pour « Visage fidèle », sinon le serveur vidéo
+export function serveurDuMoteur(moteur: string, etat: Pick<EtatFile, "serveurVideo" | "serveurVace">) {
+  if (moteur === "qualite") return undefined;
+  return (moteur === "fidele-480" ? etat.serveurVace : etat.serveurVideo) ?? undefined;
+}
+
+const resolutionDe = (moteur: Moteur) => (moteur === "eco-720" || moteur === "qualite" ? "720p" : "480p");
 
 const consigneVideo = (consigne: string, fiches: string) =>
   [`${consigne.trim().replace(/[.\s]+$/, "")}.`, fiches, STABILITE].filter(Boolean).join(" ");
@@ -153,12 +164,19 @@ export async function lancerPlan(
       seed,
       cost_usd: (MOTEURS[moteur].prix5s * duree) / 5,
       moteur,
-      resolution: moteur === "eco-480" ? "480p" : "720p",
+      resolution: resolutionDe(moteur),
       created_by: auteurId,
     })
     .select("id")
     .single();
   if (error || !essai) return error?.code === "P0001" ? "budget" : "essai";
+
+  // « Visage fidèle » passe par la file (photos des personnages, serveur VACE) : la page Clips l'envoie dans les 10 s
+  if (moteur === "fidele-480") {
+    if (plan.status !== "validee") await supabase.from("scenes").update({ status: "en_generation" }).eq("id", plan.id);
+    await journaliser(supabase, auteurId, "generation", "essai", essai.id, { scene_id: plan.id });
+    return null;
+  }
 
   try {
     // Prise unique : la dernière image du clip précédent ; s'il est encore en cours, la photo du plan
@@ -248,7 +266,7 @@ export async function demanderEssais(
         // Le coût estimé est compté tout de suite, pour que le plafond du mois bloque à temps
         cost_usd: (MOTEURS[moteur].prix5s * duree) / 5,
         moteur,
-        resolution: moteur === "eco-480" ? "480p" : "720p",
+        resolution: resolutionDe(moteur),
         created_by: auteurId,
       };
     }),
@@ -299,7 +317,7 @@ async function echecEssai(supabase: SupabaseClient, essai: EssaiEnCours, erreur:
 }
 
 // Envoie à RunPod quelques essais en attente
-async function envoyerEssais(supabase: SupabaseClient, projectId: string, enAttente: EssaiEnCours[], serveurEco: string | null) {
+async function envoyerEssais(supabase: SupabaseClient, projectId: string, enAttente: EssaiEnCours[], etat: EtatFile) {
   if (enAttente.length === 0) return;
   const [{ data: projet }, { data: scenes }, fiches] = await Promise.all([
     supabase.from("projects").select("aspect_ratio").eq("id", projectId).single(),
@@ -336,16 +354,32 @@ async function envoyerEssais(supabase: SupabaseClient, projectId: string, enAtte
     envoyes++;
     try {
       if (!plan?.image_path || !depart) throw new Error("Photo introuvable dans le stockage.");
-      if (essai.moteur !== "qualite" && !serveurEco) throw new Error("Notre serveur RunPod n'est pas encore créé.");
+      const serveur = serveurDuMoteur(essai.moteur, etat);
+      if (essai.moteur !== "qualite" && !serveur)
+        throw new Error(
+          essai.moteur === "fidele-480"
+            ? "Le serveur « Visage fidèle » n'est pas encore créé (voir « Équipe et budget »)."
+            : "Notre serveur RunPod n'est pas encore créé.",
+        );
       const duree = Number(plan.duration_s) || 5;
       // La vidéo sera rangée à côté des photos du projet ; notre serveur l'y dépose lui-même
       const videoPath = `${projectId}/essais/${essai.id}.mp4`;
       const notreServeur = essai.moteur !== "qualite";
-      const [{ data: signee, error: errSigne }, envoi, dernierePhoto] = await Promise.all([
+      // « Visage fidèle » : photos des personnages cités, sinon la photo du plan 1 (le bon visage)
+      const visages =
+        essai.moteur === "fidele-480"
+          ? (() => {
+              const photos = fiches.photos(String(plan.image_description ?? ""));
+              return photos.length ? photos : [plan.image_path];
+            })()
+          : [];
+      const [{ data: signee, error: errSigne }, envoi, dernierePhoto, { data: liensVisages }] = await Promise.all([
         supabase.storage.from(BUCKET).createSignedUrl(depart.chemin, 60 * 60),
         notreServeur ? supabase.storage.from(BUCKET).createSignedUploadUrl(videoPath, { upsert: true }) : Promise.resolve(null),
         notreServeur ? lienDernierePhoto(supabase, projectId, essai.id) : Promise.resolve(undefined),
+        visages.length ? supabase.storage.from(BUCKET).createSignedUrls(visages, 60 * 60) : Promise.resolve({ data: [] }),
       ]);
+      const referenceUrls = (liensVisages ?? []).map((l) => l.signedUrl).filter((u): u is string => Boolean(u));
       if (errSigne || !signee) throw new Error("Photo introuvable dans le stockage.");
       if (envoi && (envoi.error || !envoi.data)) throw new Error("Impossible de préparer l'envoi de la vidéo.");
       const jobId = await lancerGeneration({
@@ -358,7 +392,8 @@ async function envoyerEssais(supabase: SupabaseClient, projectId: string, enAtte
         videoPath,
         uploadUrl: envoi?.data?.signedUrl ?? "",
         dernierePhoto,
-        serveur: essai.moteur === "qualite" ? undefined : (serveurEco ?? undefined),
+        referenceUrls,
+        serveur,
       });
       const { data: gardee, error } = await supabase
         .from("takes")
@@ -368,7 +403,7 @@ async function envoyerEssais(supabase: SupabaseClient, projectId: string, enAtte
         .select("id");
       if (error) throw new Error(error.message);
       // Lot arrêté pendant l'envoi : la vidéo ne doit pas tourner (et être facturée) sans personne pour la suivre
-      if (gardee?.length === 0) await annulerJob(essai.moteur, jobId, essai.moteur === "qualite" ? undefined : (serveurEco ?? undefined));
+      if (gardee?.length === 0) await annulerJob(essai.moteur, jobId, serveur);
     } catch (e) {
       await echecEssai(supabase, essai, (e instanceof Error ? e.message : String(e)).slice(0, 500));
     }
@@ -399,8 +434,7 @@ export async function suivreEssais(
   const etat = etatLu ?? (await lireEtatFile(supabase, projectId));
   const age = (e: EssaiEnCours) => attente(etat, e.created_at);
   const bloque = (e: EssaiEnCours) => etat.enPause || (etat.serveurArrete && e.moteur !== "qualite");
-  const serveurEco = etat.serveurVideo;
-  const serveurDe = (e: EssaiEnCours) => (e.moteur === "qualite" ? undefined : (serveurEco ?? undefined));
+  const serveurDe = (e: EssaiEnCours) => serveurDuMoteur(e.moteur, etat);
   let finis = 0;
 
   // Coupé pendant l'envoi ou jamais envoyé (page fermée) : en échec, pour être relancé. En pause, l'attente est voulue.
@@ -417,7 +451,7 @@ export async function suivreEssais(
       supabase,
       projectId,
       essais.filter((e) => !e.runpod_job_id && !bloque(e) && age(e) <= ATTENTE_MAX_MS).sort((a, b) => a.created_at.localeCompare(b.created_at)),
-      serveurEco,
+      etat,
     );
 
   // Remet un essai dans notre file (sans numéro RunPod), s'il n'a pas changé entre-temps
@@ -505,7 +539,7 @@ export async function arreterEssais(supabase: SupabaseClient, projectId: string)
   const restants = parties.slice(ANNULATIONS_PAR_APPEL).map((e) => e.id);
   await Promise.all(
     annulees.map((e) =>
-      annulerJob(e.moteur as Moteur, e.runpod_job_id!, e.moteur === "qualite" ? undefined : (etat.serveurVideo ?? undefined)),
+      annulerJob(e.moteur as Moteur, e.runpod_job_id!, serveurDuMoteur(e.moteur, etat)),
     ),
   );
   const arretes = essais.filter((e) => !restants.includes(e.id));

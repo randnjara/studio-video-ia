@@ -6,16 +6,20 @@ import { getClient } from "@/lib/session";
 // - « qualite » : le service tout prêt de RunPod (Public Endpoint), 720p, environ 0,30 $ le clip de 5 s ;
 // - « eco-480 » / « eco-720 » : notre propre serveur RunPod (dossier worker/), même modèle en version
 //   rapide (4 étapes), facturé à la seconde de GPU. Disponible dès que le serveur est créé
-//   (bouton dans « Équipe et budget », identifiant gardé dans la table reglages).
+//   (bouton dans « Équipe et budget », identifiant gardé dans la table reglages) ;
+// - « fidele-480 » : Wan 2.2 VACE sur un serveur à part. Il part de la même photo de départ (la dernière image du clip
+//   précédent) et regarde en plus la photo du personnage pendant tout le clip : le visage ne dérive plus d'un clip
+//   enchaîné à l'autre (MAMAN 2). Disponible dès que ce serveur est créé.
 const PUBLIC = "https://api.runpod.ai/v2/wan-2-2-i2v-720";
 
-export type Moteur = "qualite" | "eco-480" | "eco-720";
+export type Moteur = "qualite" | "eco-480" | "eco-720" | "fidele-480";
 
 // Prix estimés d'un clip de 5 s, comptés tout de suite pour que le plafond du mois bloque à temps.
 // Pour notre serveur, le coût réel est recalculé ensuite à partir du temps de GPU.
 export const MOTEURS: Record<Moteur, { libelle: string; prix5s: number }> = {
   "eco-480": { libelle: "Économique 480p", prix5s: 0.05 },
   "eco-720": { libelle: "Économique 720p", prix5s: 0.12 },
+  "fidele-480": { libelle: "Visage fidèle 480p (VACE)", prix5s: 0.08 },
   qualite: { libelle: "Qualité max 720p", prix5s: 0.3 },
 };
 
@@ -46,6 +50,14 @@ export const endpointVoix = cache(async (): Promise<string | null> => {
   return data?.valeur || null;
 });
 
+// Serveur Wan 2.2 VACE (moteur « fidele-480 »), avec son modèle dans le cache de RunPod
+export const CLE_ENDPOINT_VACE = "runpod_endpoint_vace";
+export const endpointVace = cache(async (): Promise<string | null> => {
+  const supabase = await getClient();
+  const { data } = await supabase.from("reglages").select("valeur").eq("cle", CLE_ENDPOINT_VACE).maybeSingle();
+  return data?.valeur || null;
+});
+
 export const endpointPhoto = cache(async (): Promise<string | null> => {
   const supabase = await getClient();
   const { data } = await supabase.from("reglages").select("valeur").eq("cle", CLE_ENDPOINT_PHOTO).maybeSingle();
@@ -53,7 +65,9 @@ export const endpointPhoto = cache(async (): Promise<string | null> => {
 });
 
 export async function moteursDisponibles(): Promise<Moteur[]> {
-  return (await endpointEco()) ? ["eco-480", "eco-720", "qualite"] : ["qualite"];
+  const [eco, vace] = await Promise.all([endpointEco(), endpointVace()]);
+  const tous: Moteur[] = eco ? ["eco-480", "eco-720", "qualite"] : ["qualite"];
+  return vace ? [...tous, "fidele-480"] : tous;
 }
 
 export async function moteurParDefaut(): Promise<Moteur> {
@@ -93,11 +107,21 @@ type Cible = Moteur | "photo" | "voix";
 // d'appels extérieurs par requête)
 async function base(moteur: Cible, serveur?: string) {
   if (moteur === "qualite") return PUBLIC;
-  const id = serveur ?? (moteur === "photo" ? await endpointPhoto() : moteur === "voix" ? await endpointVoix() : await endpointEco());
+  const id =
+    serveur ??
+    (moteur === "photo"
+      ? await endpointPhoto()
+      : moteur === "voix"
+        ? await endpointVoix()
+        : moteur === "fidele-480"
+          ? await endpointVace()
+          : await endpointEco());
   if (!id)
     throw new Error(
       moteur === "voix"
         ? "Le serveur voix n'est pas encore créé (voir « Équipe et budget »)."
+        : moteur === "fidele-480"
+          ? "Le serveur « Visage fidèle » n'est pas encore créé (voir « Équipe et budget »)."
         : "Notre serveur RunPod n'est pas encore créé (voir « Équipe et budget »).",
     );
   return `https://api.runpod.ai/v2/${encodeURIComponent(id)}`;
@@ -125,6 +149,8 @@ export async function lancerGeneration(p: {
   uploadUrl: string;
   // Plan continu : notre serveur dépose aussi la dernière image du clip, photo de départ du clip suivant
   dernierePhoto?: { chemin: string; uploadUrl: string };
+  // « Visage fidèle » : photos des personnages cités, regardées pendant tout le clip
+  referenceUrls?: string[];
   serveur?: string;
 }): Promise<string> {
   const input =
@@ -153,6 +179,7 @@ export async function lancerGeneration(p: {
           video_path: p.videoPath,
           upload_url: p.uploadUrl,
           ...(p.dernierePhoto ? { last_frame_path: p.dernierePhoto.chemin, last_frame_upload_url: p.dernierePhoto.uploadUrl } : {}),
+          ...(p.moteur === "fidele-480" ? { mode: "vace", reference_urls: p.referenceUrls ?? [] } : {}),
         };
   // Notre serveur : RunPod coupe lui-même un calcul bloqué, même page fermée (le service tout prêt a ses propres limites)
   const policy = p.moteur === "qualite" ? undefined : POLICE_VIDEO;
