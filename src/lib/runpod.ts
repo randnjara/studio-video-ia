@@ -86,7 +86,7 @@ const TAILLES: Record<string, string> = {
 
 // Le modèle comprend surtout l'anglais
 export const PROMPT_NEGATIF =
-  "blurry, distorted, text, watermark, deformed face, deformed hands, extra fingers, static frame, oversaturated, low quality";
+  "blurry, distorted, text, watermark, deformed face, deformed hands, extra fingers, static frame, oversaturated, low quality, morphing face, shifting facial features, changing hair colour, younger face, flickering, jitter, sudden movements";
 
 // Limites données à RunPod avec chaque travail, qui s'appliquent même si personne n'a la page ouverte :
 // « executionTimeout » coupe un calcul commencé qui ne finit pas, « ttl » abandonne un travail resté trop longtemps
