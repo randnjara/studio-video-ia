@@ -10,6 +10,11 @@ COPY requirements.txt .
 # Le Python de l'image est « géré par le système » : on installe à côté de PyTorch, sans environnement séparé
 RUN python3 -m pip install --no-cache-dir --break-system-packages -r requirements.txt \
  && python3 -c "import torch, diffusers, runpod; print('torch', torch.__version__, 'diffusers', diffusers.__version__)"
-COPY handler.py .
+# Finitions (voir amelioration.py) : Real-ESRGAN pour la vidéo (licence BSD-3) et RIFE 4.7 (licence MIT), petits fichiers
+RUN mkdir -p /app/modeles \
+ && python3 -c "import urllib.request as u; \
+u.urlretrieve('https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-general-x4v3.pth', '/app/modeles/realesr-general-x4v3.pth'); \
+u.urlretrieve('https://github.com/Fannovel16/ComfyUI-Frame-Interpolation/releases/download/models/rife47.pth', '/app/modeles/rife47.pth')"
+COPY handler.py amelioration.py rife_arch.py ./
 
 CMD ["python3", "-u", "handler.py"]

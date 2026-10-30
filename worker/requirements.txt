@@ -11,3 +11,4 @@ imageio==2.38.0
 imageio-ffmpeg==0.6.0
 requests==2.34.2
 runpod==1.10.1
+spandrel==0.4.2
