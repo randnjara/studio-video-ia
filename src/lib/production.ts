@@ -3,7 +3,7 @@ import { avecMouvement } from "@/lib/categories";
 import { journaliser } from "@/lib/journal";
 import { type EtatFile, attente, lireEtatFile } from "@/lib/file-attente";
 import { type Reference, referencesCitees } from "@/lib/photos";
-import { MOTEURS, type Moteur, annulerJob, lancerGeneration, lancerPhotoRunPod, lireStatut } from "@/lib/runpod";
+import { MOTEURS, type Moteur, annulerJob, lancerGeneration, lireStatut } from "@/lib/runpod";
 
 // Outils côté serveur partagés par les pages Plans, Clips et Montage.
 
@@ -46,23 +46,24 @@ export async function marquerEnProduction(supabase: SupabaseClient, projectId: s
 }
 
 // Ajouté à chaque consigne de mouvement : le visage et la tenue ne doivent pas changer pendant l'animation
-// MAMAN 2 : en enchaînant les clips, le visage rajeunissait et changeait (volume, yeux, couleur des cheveux)
+// MAMAN 2 : en enchaînant les clips, le visage rajeunissait et changeait (yeux, couleur des cheveux). Wan ne voit que
+// la première image et le texte : la fiche de chaque personnage cité est donc redite dans chaque consigne.
 const STABILITE =
   "Same person, same face and clothing throughout, subtle natural movements, natural blinking and breathing, no morphing, no sudden change of position. Keep the face identical to the first frame: same apparent age, wrinkles, skin tone, eye colour, hair colour and hairstyle; never rejuvenate, beautify or change ethnicity.";
 
-// Visage remis d'aplomb avant chaque clip enchaîné. Chaque clip part de la dernière image du précédent : les petites
-// erreurs du visage s'additionnaient d'un clip à l'autre (MAMAN 2 : une femme âgée devenue jeune et blonde en 1 min 30).
-// Notre serveur photo reprend la dernière image telle quelle et ne corrige que le visage, d'après la photo du plan 1
-// et la photo du personnage. Le numéro RunPod de l'essai porte ce préfixe pendant cette étape.
-export const VISAGE = "visage:";
-// Au-delà, RunPod abandonne la correction et le clip part de l'image non corrigée
-const VISAGE_TTL_MS = 8 * 60 * 1000;
-const PROMPT_VISAGE = [
-  "Image 1 is a frame taken from a continuous film shot. Reproduce image 1 exactly: same framing, camera distance, pose, hands, gesture, facial expression, mouth shape, clothing, background, lighting direction and composition. Do not move, add or remove anything.",
-  "Only restore the person's identity: the face, hair and skin must be exactly those of the person in image 2 (and image 3 if given): same face shape, apparent age, wrinkles, skin tone, eye colour, eyebrows, hairstyle and hair colour. Do not beautify, rejuvenate or change ethnicity.",
-  "Match the colour grading, saturation and brightness of image 2, correcting any drift in tint or contrast.",
-  "Photorealistic, natural skin texture, sharp face, one single full-frame image with no border and no text.",
-].join("\n");
+// « Personnage MAMA : … » pour chaque personnage cité dans la photo du plan, avec la description de sa référence
+async function fichesPersonnages(supabase: SupabaseClient, projectId: string) {
+  const { data } = await supabase.from("film_refs").select("id, nom, genre, description, image_path").eq("project_id", projectId);
+  const refs = ((data ?? []) as Reference[]).filter((r) => r.genre === "personnage");
+  return (description: string) =>
+    referencesCitees(description, refs)
+      .filter((r) => r.genre === "personnage" && r.description?.trim())
+      .map((r) => `Character ${r.nom} (must stay exactly the same in every frame): ${r.description.trim().replace(/[.\s]+$/, "")}.`)
+      .join(" ");
+}
+
+const consigneVideo = (consigne: string, fiches: string) =>
+  [`${consigne.trim().replace(/[.\s]+$/, "")}.`, fiches, STABILITE].filter(Boolean).join(" ");
 
 // Photo de départ d'un clip. Prise unique, dans toutes les catégories : chaque clip part de la dernière image du clip
 // précédent (celui validé, sinon le dernier réussi), sur tout le film, même quand le plan continu change.
@@ -85,10 +86,10 @@ export async function photoDeDepart(
   sceneId: string,
   photoDuPlan: string,
   ligne?: LignePlan,
-): Promise<{ chemin: string; consigne: string; enchaine: boolean } | "attendre"> {
+): Promise<{ chemin: string; consigne: string } | "attendre"> {
   const plan = ligne ?? ((await supabase.from("scenes").select("*").eq("id", sceneId).single()).data as LignePlan | null);
   const consigne = plan?.motion_prompt ?? "";
-  const seule = { chemin: photoDuPlan, consigne, enchaine: false };
+  const seule = { chemin: photoDuPlan, consigne };
   if (!plan) return seule;
   const { data: prec } = await supabase
     .from("scenes")
@@ -107,7 +108,6 @@ export async function photoDeDepart(
     return {
       chemin: choisi.last_frame_path!,
       consigne: avecMouvement(consigne, prec.cadrage, plan.cadrage, Number(plan.duration_s) || 5),
-      enchaine: true,
     };
   if (essais.some((t) => t.status === "en_cours")) return "attendre";
   return seule;
@@ -160,14 +160,6 @@ export async function lancerPlan(
     .single();
   if (error || !essai) return error?.code === "P0001" ? "budget" : "essai";
 
-  // Notre serveur : l'essai passe par la file, comme un lot. Elle attend la fin du clip précédent et remet le
-  // visage d'aplomb avant d'envoyer la vidéo (la page Clips l'envoie dans les 10 secondes).
-  if (moteur !== "qualite") {
-    if (plan.status !== "validee") await supabase.from("scenes").update({ status: "en_generation" }).eq("id", plan.id);
-    await journaliser(supabase, auteurId, "generation", "essai", essai.id, { scene_id: plan.id });
-    return null;
-  }
-
   try {
     // Prise unique : la dernière image du clip précédent ; s'il est encore en cours, la photo du plan
     const depart = await photoDeDepart(supabase, plan.id, plan.image_path, plan);
@@ -190,7 +182,10 @@ export async function lancerPlan(
 
     const jobId = await lancerGeneration({
       moteur,
-      prompt: `${(depart === "attendre" ? plan.motion_prompt : depart.consigne).trim().replace(/[.\s]+$/, "")}. ${STABILITE}`,
+      prompt: consigneVideo(
+        depart === "attendre" ? plan.motion_prompt : depart.consigne,
+        (await fichesPersonnages(supabase, plan.project_id))(String((plan as { image_description?: string }).image_description ?? "")),
+      ),
       imageUrl: signee.signedUrl,
       format,
       duree,
@@ -303,27 +298,18 @@ async function echecEssai(supabase: SupabaseClient, essai: EssaiEnCours, erreur:
   }
 }
 
-type LigneEnvoi = LignePlan & { image_path: string | null };
-
-// Envoie à RunPod quelques essais en attente. Un clip enchaîné passe d'abord par la correction du visage (serveur
-// photo) ; sans serveur photo ou si elle ne peut pas partir, la vidéo part directement.
-async function envoyerEssais(
-  supabase: SupabaseClient,
-  projectId: string,
-  enAttente: EssaiEnCours[],
-  serveurEco: string | null,
-  serveurPhoto: string | null,
-) {
+// Envoie à RunPod quelques essais en attente
+async function envoyerEssais(supabase: SupabaseClient, projectId: string, enAttente: EssaiEnCours[], serveurEco: string | null) {
   if (enAttente.length === 0) return;
-  const [{ data: projet }, { data: scenes }] = await Promise.all([
+  const [{ data: projet }, { data: scenes }, fiches] = await Promise.all([
     supabase.from("projects").select("aspect_ratio").eq("id", projectId).single(),
     supabase
       .from("scenes")
       // Toutes les colonnes : le cadrage et le plan continu sont lus si la migration 0016 est passée
       .select("*")
       .in("id", [...new Set(enAttente.map((e) => e.scene_id))]),
+    fichesPersonnages(supabase, projectId),
   ]);
-  const format = projet?.aspect_ratio ?? "16:9";
   // Prise unique : un clip attend la fin du précédent. Les clips d'un même lot ont la même date : on les range dans
   // l'ordre du film pour que le premier clip du plan passe avant ses suites, et on regarde un peu plus loin dans la
   // file (pas plus loin que le double : Cloudflare limite le nombre d'appels par requête).
@@ -334,7 +320,7 @@ async function envoyerEssais(
   let envoyes = 0;
   for (const essai of regardes) {
     if (envoyes >= ENVOIS_PAR_APPEL) break;
-    const plan = scenes?.find((s) => s.id === essai.scene_id) as LigneEnvoi | undefined;
+    const plan = scenes?.find((s) => s.id === essai.scene_id);
     const depart = plan?.image_path
       ? await photoDeDepart(supabase, plan.id, plan.image_path, plan)
       : null;
@@ -348,157 +334,45 @@ async function envoyerEssais(
       .maybeSingle();
     if (!pris) continue; // déjà pris par une autre actualisation
     envoyes++;
-    const seed = Number(pris.seed);
     try {
       if (!plan?.image_path || !depart) throw new Error("Photo introuvable dans le stockage.");
       if (essai.moteur !== "qualite" && !serveurEco) throw new Error("Notre serveur RunPod n'est pas encore créé.");
-      if (depart.enchaine && essai.moteur !== "qualite" && serveurPhoto) {
-        const visage = await lancerVisage(supabase, projectId, essai, plan, depart.chemin, seed, format, serveurPhoto).catch(() => null);
-        if (visage) {
-          const { data: gardee } = await supabase
-            .from("takes")
-            .update({ runpod_job_id: `${VISAGE}${visage}` })
-            .eq("id", essai.id)
-            .eq("status", "en_cours")
-            .select("id");
-          if (gardee?.length === 0) await annulerJob("photo", visage, serveurPhoto);
-          continue;
-        }
-      }
-      await lancerVideo(supabase, projectId, essai, plan, depart, seed, format, serveurEco, ENVOI);
+      const duree = Number(plan.duration_s) || 5;
+      // La vidéo sera rangée à côté des photos du projet ; notre serveur l'y dépose lui-même
+      const videoPath = `${projectId}/essais/${essai.id}.mp4`;
+      const notreServeur = essai.moteur !== "qualite";
+      const [{ data: signee, error: errSigne }, envoi, dernierePhoto] = await Promise.all([
+        supabase.storage.from(BUCKET).createSignedUrl(depart.chemin, 60 * 60),
+        notreServeur ? supabase.storage.from(BUCKET).createSignedUploadUrl(videoPath, { upsert: true }) : Promise.resolve(null),
+        notreServeur ? lienDernierePhoto(supabase, projectId, essai.id) : Promise.resolve(undefined),
+      ]);
+      if (errSigne || !signee) throw new Error("Photo introuvable dans le stockage.");
+      if (envoi && (envoi.error || !envoi.data)) throw new Error("Impossible de préparer l'envoi de la vidéo.");
+      const jobId = await lancerGeneration({
+        moteur: essai.moteur,
+        prompt: consigneVideo(depart.consigne, fiches(String(plan.image_description ?? ""))),
+        imageUrl: signee.signedUrl,
+        format: projet?.aspect_ratio ?? "16:9",
+        duree,
+        seed: Number(pris.seed),
+        videoPath,
+        uploadUrl: envoi?.data?.signedUrl ?? "",
+        dernierePhoto,
+        serveur: essai.moteur === "qualite" ? undefined : (serveurEco ?? undefined),
+      });
+      const { data: gardee, error } = await supabase
+        .from("takes")
+        .update({ runpod_job_id: jobId })
+        .eq("id", essai.id)
+        .eq("status", "en_cours")
+        .select("id");
+      if (error) throw new Error(error.message);
+      // Lot arrêté pendant l'envoi : la vidéo ne doit pas tourner (et être facturée) sans personne pour la suivre
+      if (gardee?.length === 0) await annulerJob(essai.moteur, jobId, essai.moteur === "qualite" ? undefined : (serveurEco ?? undefined));
     } catch (e) {
       await echecEssai(supabase, essai, (e instanceof Error ? e.message : String(e)).slice(0, 500));
     }
   }
-}
-
-// Correction du visage de la dernière image du clip précédent. Images données au serveur photo : cette dernière image,
-// puis la photo du plan 1 (le bon visage, avec la lumière du film), puis la photo du personnage cité.
-// Renvoie le numéro RunPod, ou null s'il n'y a rien pour corriger.
-async function lancerVisage(
-  supabase: SupabaseClient,
-  projectId: string,
-  essai: EssaiEnCours,
-  plan: LigneEnvoi,
-  derniereImage: string,
-  seed: number,
-  format: string,
-  serveurPhoto: string,
-): Promise<string | null> {
-  const [{ data: premier }, { data: refs }] = await Promise.all([
-    supabase
-      .from("scenes")
-      .select("image_path, image_description")
-      .eq("project_id", projectId)
-      .not("image_path", "is", null)
-      .order("position")
-      .limit(1)
-      .maybeSingle(),
-    supabase.from("film_refs").select("id, nom, genre, description, image_path").eq("project_id", projectId),
-  ]);
-  const description = `${premier?.image_description ?? ""} ${(plan as { image_description?: string }).image_description ?? ""}`;
-  const personnages = referencesCitees(description, (refs ?? []) as Reference[]).filter((r) => r.genre === "personnage");
-  const visages = [premier?.image_path, ...personnages.map((r) => r.image_path)].filter(
-    (c): c is string => Boolean(c) && c !== derniereImage,
-  );
-  if (visages.length === 0) return null;
-  const imagePath = `${projectId}/essais/${essai.id}-visage.jpg`;
-  const chemins = [derniereImage, ...visages].slice(0, 3);
-  const [{ data: envoi }, { data: liens }] = await Promise.all([
-    supabase.storage.from(BUCKET).createSignedUploadUrl(imagePath, { upsert: true }),
-    supabase.storage.from(BUCKET).createSignedUrls(chemins, 60 * 60),
-  ]);
-  const urls = chemins.map((c) => liens?.find((l) => l.path === c)?.signedUrl).filter(Boolean) as string[];
-  if (!envoi || urls.length < 2) return null;
-  return lancerPhotoRunPod({
-    prompt: PROMPT_VISAGE,
-    referenceUrls: urls,
-    format,
-    seed,
-    imagePath,
-    uploadUrl: envoi.signedUrl,
-    serveur: serveurPhoto,
-    ttlMs: VISAGE_TTL_MS,
-  });
-}
-
-// Envoie la vidéo d'un essai, depuis « depart.chemin ». « avant » : son numéro RunPod actuel, pour ne pas écraser
-// un arrêt du lot survenu pendant l'envoi.
-async function lancerVideo(
-  supabase: SupabaseClient,
-  projectId: string,
-  essai: EssaiEnCours,
-  plan: LigneEnvoi,
-  depart: { chemin: string; consigne: string },
-  seed: number,
-  format: string,
-  serveurEco: string | null,
-  avant: string,
-) {
-  const duree = Number(plan.duration_s) || 5;
-  // La vidéo sera rangée à côté des photos du projet ; notre serveur l'y dépose lui-même
-  const videoPath = `${projectId}/essais/${essai.id}.mp4`;
-  const notreServeur = essai.moteur !== "qualite";
-  const [{ data: signee, error: errSigne }, envoi, dernierePhoto] = await Promise.all([
-    supabase.storage.from(BUCKET).createSignedUrl(depart.chemin, 60 * 60),
-    notreServeur ? supabase.storage.from(BUCKET).createSignedUploadUrl(videoPath, { upsert: true }) : Promise.resolve(null),
-    notreServeur ? lienDernierePhoto(supabase, projectId, essai.id) : Promise.resolve(undefined),
-  ]);
-  if (errSigne || !signee) throw new Error("Photo introuvable dans le stockage.");
-  if (envoi && (envoi.error || !envoi.data)) throw new Error("Impossible de préparer l'envoi de la vidéo.");
-  const serveur = notreServeur ? (serveurEco ?? undefined) : undefined;
-  const jobId = await lancerGeneration({
-    moteur: essai.moteur,
-    prompt: `${depart.consigne.trim().replace(/[.\s]+$/, "")}. ${STABILITE}`,
-    imageUrl: signee.signedUrl,
-    format,
-    duree,
-    seed,
-    videoPath,
-    uploadUrl: envoi?.data?.signedUrl ?? "",
-    dernierePhoto,
-    serveur,
-  });
-  const { data: gardee, error } = await supabase
-    .from("takes")
-    .update({ runpod_job_id: jobId })
-    .eq("id", essai.id)
-    .eq("status", "en_cours")
-    .eq("runpod_job_id", avant)
-    .select("id");
-  if (error) throw new Error(error.message);
-  // Lot arrêté pendant l'envoi : la vidéo ne doit pas tourner (et être facturée) sans personne pour la suivre
-  if (gardee?.length === 0) await annulerJob(essai.moteur, jobId, serveur);
-}
-
-// Visage corrigé (ou correction ratée) : la vidéo part, depuis l'image corrigée si elle est là, sinon la dernière image
-async function apresVisage(
-  supabase: SupabaseClient,
-  projectId: string,
-  essai: EssaiEnCours,
-  imageCorrigee: string | null,
-  serveurEco: string | null,
-) {
-  const [{ data: plan }, { data: projet }] = await Promise.all([
-    supabase.from("scenes").select("*").eq("id", essai.scene_id).single(),
-    supabase.from("projects").select("aspect_ratio").eq("id", projectId).single(),
-  ]);
-  const ligne = plan as LigneEnvoi | null;
-  if (!ligne?.image_path) throw new Error("Photo introuvable dans le stockage.");
-  const depart = await photoDeDepart(supabase, ligne.id, ligne.image_path, ligne);
-  if (depart === "attendre") throw new Error("Le clip précédent a été relancé : relancez ce plan.");
-  const { data: prise } = await supabase.from("takes").select("seed").eq("id", essai.id).single();
-  await lancerVideo(
-    supabase,
-    projectId,
-    essai,
-    ligne,
-    { chemin: imageCorrigee ?? depart.chemin, consigne: depart.consigne },
-    Number(prise?.seed ?? 0),
-    projet?.aspect_ratio ?? "16:9",
-    serveurEco,
-    essai.runpod_job_id!,
-  );
 }
 
 // Les essais à suivre à chaque actualisation, les plus anciens d'abord : RunPod traite sa file dans l'ordre, ce sont
@@ -526,7 +400,6 @@ export async function suivreEssais(
   const age = (e: EssaiEnCours) => attente(etat, e.created_at);
   const bloque = (e: EssaiEnCours) => etat.enPause || (etat.serveurArrete && e.moteur !== "qualite");
   const serveurEco = etat.serveurVideo;
-  const serveurPhoto = etat.serveurPhoto;
   const serveurDe = (e: EssaiEnCours) => (e.moteur === "qualite" ? undefined : (serveurEco ?? undefined));
   let finis = 0;
 
@@ -545,39 +418,11 @@ export async function suivreEssais(
       projectId,
       essais.filter((e) => !e.runpod_job_id && !bloque(e) && age(e) <= ATTENTE_MAX_MS).sort((a, b) => a.created_at.localeCompare(b.created_at)),
       serveurEco,
-      serveurPhoto,
     );
 
   // Remet un essai dans notre file (sans numéro RunPod), s'il n'a pas changé entre-temps
   const remettreEnFile = (essai: EssaiEnCours) =>
     supabase.from("takes").update({ runpod_job_id: null }).eq("id", essai.id).eq("runpod_job_id", essai.runpod_job_id!).eq("status", "en_cours");
-
-  // Correction du visage en cours chez le serveur photo ; terminée (ou ratée), la vidéo part. En pause, elle attend.
-  const suivreVisage = async (essai: EssaiEnCours) => {
-    const job = essai.runpod_job_id!.slice(VISAGE.length);
-    const statut = serveurPhoto ? await lireStatut("photo", job, serveurPhoto).catch(() => null) : null;
-    if (serveurPhoto && !statut) return 0;
-    if (statut?.etat === "en_cours") {
-      if (statut.enFile && bloque(essai)) {
-        await annulerJob("photo", job, serveurPhoto!);
-        await remettreEnFile(essai);
-      }
-      return 0;
-    }
-    if (bloque(essai)) {
-      if (statut?.etat === "echouee" && statut.annulee) await remettreEnFile(essai);
-      return 0;
-    }
-    const corrigee =
-      statut?.etat === "terminee" && statut.imagePath?.startsWith(`${projectId}/essais/`) ? statut.imagePath : null;
-    try {
-      await apresVisage(supabase, projectId, essai, corrigee, serveurEco);
-      return 0;
-    } catch (e) {
-      await echecEssai(supabase, essai, (e instanceof Error ? e.message : String(e)).slice(0, 500));
-      return 1;
-    }
-  };
 
   const parties = aSuivre(
     essais.filter((e) => e.runpod_job_id && e.runpod_job_id !== ENVOI),
@@ -586,7 +431,6 @@ export async function suivreEssais(
   );
   const resultats = await Promise.all(
     parties.map(async (essai) => {
-      if (essai.runpod_job_id!.startsWith(VISAGE)) return suivreVisage(essai);
       let statut;
       try {
         statut = await lireStatut(essai.moteur, essai.runpod_job_id!, serveurDe(essai));
@@ -661,9 +505,7 @@ export async function arreterEssais(supabase: SupabaseClient, projectId: string)
   const restants = parties.slice(ANNULATIONS_PAR_APPEL).map((e) => e.id);
   await Promise.all(
     annulees.map((e) =>
-      e.runpod_job_id!.startsWith(VISAGE)
-        ? etat.serveurPhoto && annulerJob("photo", e.runpod_job_id!.slice(VISAGE.length), etat.serveurPhoto)
-        : annulerJob(e.moteur as Moteur, e.runpod_job_id!, e.moteur === "qualite" ? undefined : (etat.serveurVideo ?? undefined)),
+      annulerJob(e.moteur as Moteur, e.runpod_job_id!, e.moteur === "qualite" ? undefined : (etat.serveurVideo ?? undefined)),
     ),
   );
   const arretes = essais.filter((e) => !restants.includes(e.id));

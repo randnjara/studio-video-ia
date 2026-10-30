@@ -172,8 +172,6 @@ export async function lancerPhotoRunPod(p: {
   imagePath: string;
   uploadUrl: string;
   serveur?: string;
-  // Durée de vie plus courte chez RunPod que celle d'une photo de départ (correction du visage d'un clip)
-  ttlMs?: number;
 }): Promise<string> {
   const input = {
     mode: "image",
@@ -184,7 +182,7 @@ export async function lancerPhotoRunPod(p: {
     image_path: p.imagePath,
     upload_url: p.uploadUrl,
   };
-  const data = await appel("photo", "/run", { method: "POST", body: JSON.stringify({ input, policy: p.ttlMs ? { ...POLICE_PHOTO, ttl: p.ttlMs } : POLICE_PHOTO }) }, p.serveur);
+  const data = await appel("photo", "/run", { method: "POST", body: JSON.stringify({ input, policy: POLICE_PHOTO }) }, p.serveur);
   return String(data.id);
 }
 

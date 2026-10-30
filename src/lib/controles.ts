@@ -81,6 +81,9 @@ export function pasEnAnglais(texte: string) {
 // Les lignes d'un même plan continu partagent volontairement le cadrage, l'angle et les poses qui s'enchaînent :
 // ces ressemblances ne sont signalées qu'entre deux plans continus différents. Prise unique : une seule photo pour tout
 // le film, les descriptions de photo ne sont donc pas comparées.
+// Plus serré que le plan poitrine : le visage remplit l'image et l'IA en invente les détails (MAMAN 2)
+const CADRAGES_SERRES = ["très gros plan", "gros plan", "plan rapproché"];
+
 export function alertesPlans(plans: PlanControle[], mouvementParDefaut = "", categorie: Categorie = "film") {
   const alertes = new Map<string, string[]>();
   const ajouter = (id: string, texte: string) => alertes.set(id, [...(alertes.get(id) ?? []), texte]);
@@ -126,6 +129,8 @@ export function alertesPlans(plans: PlanControle[], mouvementParDefaut = "", cat
         ajouter(p.id, `Plan continu de ${total} s : en « ${cat.libelle} », changez de cadrage vers ${cat.planMax} s au plus, à la fin d'une phrase.`);
       if (categorie === "interview" && prec?.voiceover_text.trim() && !/[.!?…»"”]\s*$/.test(prec.voiceover_text.trim()))
         ajouter(p.id, `Changement de plan au milieu d'une phrase (plan ${i} → ${i + 1}) : continuez le plan jusqu'à la fin de la phrase.`);
+      if (CADRAGES_SERRES.includes(p.cadrage))
+        ajouter(p.id, `« ${p.cadrage} » : en prise unique, l'IA réinvente le visage quand la caméra s'approche autant, et il change ensuite d'un clip à l'autre. Restez au plan poitrine au plus (sauf pour un produit seul).`);
       if (prec && p.cadrage !== prec.cadrage && !MOTS_MOUVEMENT.test(p.motion_prompt))
         ajouter(p.id, `Nouveau cadrage sans mouvement de caméra écrit : le studio ajoutera un lent zoom au milieu du clip, mieux vaut l'écrire vous-même selon la réplique.`);
     }
