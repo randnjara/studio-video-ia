@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { avecMouvement } from "@/lib/categories";
+import { MOTS_MOUVEMENT, avecMouvement } from "@/lib/categories";
 import { journaliser } from "@/lib/journal";
 import { type EtatFile, attente, lireEtatFile } from "@/lib/file-attente";
 import { type Reference, referencesCitees } from "@/lib/photos";
@@ -73,8 +73,22 @@ export function serveurDuMoteur(moteur: string, etat: Pick<EtatFile, "serveurVid
 
 const resolutionDe = (moteur: Moteur) => (moteur === "eco-720" || moteur === "qualite" ? "720p" : "480p");
 
+// L'identité vient en tête de la consigne (le modèle tient davantage compte du début) et revient à la fin ; un
+// mouvement de caméra ou un zoom, là où le visage dérive le plus (MAMAN 2), a sa propre phrase.
+const IDENTITE =
+  "Identity lock: the person is exactly the same individual as in the first frame and the reference photo, in every frame of the clip.";
+const IDENTITE_MOUVEMENT =
+  "During the camera move or zoom only the framing changes: the face keeps exactly the same features, proportions, age, wrinkles, skin tone and hair; do not redraw or reinterpret the face as it gets closer or farther.";
 const consigneVideo = (consigne: string, fiches: string) =>
-  [`${consigne.trim().replace(/[.\s]+$/, "")}.`, fiches, STABILITE].filter(Boolean).join(" ");
+  [
+    IDENTITE,
+    fiches,
+    `${consigne.trim().replace(/[.\s]+$/, "")}.`,
+    MOTS_MOUVEMENT.test(consigne) ? IDENTITE_MOUVEMENT : "",
+    STABILITE,
+  ]
+    .filter(Boolean)
+    .join(" ");
 
 // Photo de départ d'un clip. Prise unique, dans toutes les catégories : chaque clip part de la dernière image du clip
 // précédent (celui validé, sinon le dernier réussi), sur tout le film, même quand le plan continu change.
