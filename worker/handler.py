@@ -29,7 +29,6 @@ VOLUME = _DOSSIER_VOLUME if os.path.isdir(_DOSSIER_VOLUME) and not os.path.isdir
 if VOLUME:
     os.environ.setdefault("HF_HOME", f"{VOLUME}/huggingface")
 
-import numpy as np
 import requests
 import runpod
 import torch
@@ -37,6 +36,8 @@ from diffusers import FlowMatchEulerDiscreteScheduler, QwenImageEditPlusPipeline
 from diffusers.utils import export_to_video
 from huggingface_hub import hf_hub_download, list_repo_files
 from PIL import Image, ImageOps
+
+from amelioration import finitions
 
 MODELE = os.environ.get("WAN_MODEL", "Wan-AI/Wan2.2-I2V-A14B-Diffusers")
 LORA_REPO = os.environ.get("LORA_REPO", "lightx2v/Wan2.2-Distill-Loras")
@@ -196,17 +197,6 @@ def nombre_images(duree):
     return 4 * round(duree * IMAGES_PAR_SECONDE / 4) + 1
 
 
-def derniere_image(images):
-    """Dernière image du clip, en PIL (diffusers rend des images PIL ou des tableaux de 0 à 1)."""
-    image = images[-1]
-    if isinstance(image, Image.Image):
-        return image.convert("RGB")
-    tableau = np.asarray(image)
-    if tableau.dtype != np.uint8:
-        tableau = (np.clip(tableau, 0, 1) * 255).round().astype(np.uint8)
-    return Image.fromarray(tableau).convert("RGB")
-
-
 def generer_video(pipe, entree):
     for champ in ("image_url", "prompt", "upload_url", "video_path"):
         if not entree.get(champ):
@@ -233,14 +223,20 @@ def generer_video(pipe, entree):
         generator=torch.Generator("cuda").manual_seed(int(entree.get("seed", 0)) % 2**32),
     ).frames[0]
     # Plan continu : la dernière image devient la photo de départ du clip suivant (un échec ici ne perd pas la vidéo)
-    return deposer_video(entree, images, largeur, hauteur, time.time() - debut)
+    return deposer_video(entree, images, time.time() - debut)
 
 
-def deposer_video(entree, images, largeur, hauteur, secondes):
-    """Dépose le clip (et sa dernière image si elle est demandée) dans le stockage du studio."""
+def deposer_video(entree, images, secondes):
+    """Finitions demandées par le studio (couleurs, fluidité, netteté), puis dépôt du clip (et de sa dernière image si
+    elle est demandée) dans le stockage du studio."""
+    debut = time.time()
+    video, derniere = finitions(images, entree.get("finitions") or {})
+    print(f"Finitions en {time.time() - debut:.1f} s : {len(images)} → {len(video)} images, {video[0].width}x{video[0].height}")
+    # RIFE double les images : la durée du clip reste la même
+    fps = IMAGES_PAR_SECONDE * (len(video) - 1) / max(1, len(images) - 1)
     with tempfile.TemporaryDirectory() as dossier:
         chemin = os.path.join(dossier, "clip.mp4")
-        export_to_video(images, chemin, fps=IMAGES_PAR_SECONDE, quality=8)
+        export_to_video(video, chemin, fps=round(fps), quality=8)
         with open(chemin, "rb") as f:
             envoi = requests.put(
                 entree["upload_url"],
@@ -250,10 +246,11 @@ def deposer_video(entree, images, largeur, hauteur, secondes):
             )
     if not envoi.ok:
         return {"error": f"Envoi de la vidéo refusé ({envoi.status_code}) : {envoi.text[:200]}"}
-    resultat = {"video_path": entree["video_path"], "secondes": round(secondes, 1), "taille": f"{largeur}x{hauteur}"}
+    resultat = {"video_path": entree["video_path"], "secondes": round(secondes, 1), "taille": f"{video[0].width}x{video[0].height}"}
     if entree.get("last_frame_upload_url") and entree.get("last_frame_path"):
         tampon = BytesIO()
-        derniere_image(images).save(tampon, format="JPEG", quality=95)
+        # Dernière image en taille d'origine, couleurs déjà corrigées : la dérive ne passe pas au clip suivant
+        derniere.save(tampon, format="JPEG", quality=95)
         envoi = requests.put(
             entree["last_frame_upload_url"],
             data=tampon.getvalue(),
@@ -297,7 +294,7 @@ def generer_vace(pipe, entree):
         guidance_scale_2=1.0 if pipe.rapide else 5.0,
         generator=torch.Generator("cuda").manual_seed(int(entree.get("seed", 0)) % 2**32),
     ).frames[0]
-    return deposer_video(entree, images, largeur, hauteur, time.time() - debut)
+    return deposer_video(entree, images, time.time() - debut)
 
 
 def generer_image(pipe, entree):

@@ -137,6 +137,11 @@ async function appel(moteur: Cible, chemin: string, init?: RequestInit, serveur?
   return JSON.parse(texte);
 }
 
+// Finitions faites par notre serveur sur la même carte, juste après le clip (worker/amelioration.py) : couleurs gardées
+// sur celles de la première image (la dérive ne passe plus au clip suivant), RIFE 16 → 32 images/s, Real-ESRGAN.
+// En 720p, pas d'agrandissement (le clip passerait en 1440p, lourd et lent) ; en 480p, le clip sort en 960p.
+const finitionsDe = (moteur: Moteur) => ({ couleurs: 0.5, fluidite: true, nettete: moteur === "eco-720" ? 0 : 2 });
+
 export async function lancerGeneration(p: {
   moteur: Moteur;
   prompt: string;
@@ -180,6 +185,7 @@ export async function lancerGeneration(p: {
           upload_url: p.uploadUrl,
           ...(p.dernierePhoto ? { last_frame_path: p.dernierePhoto.chemin, last_frame_upload_url: p.dernierePhoto.uploadUrl } : {}),
           ...(p.moteur === "fidele-480" ? { mode: "vace", reference_urls: p.referenceUrls ?? [] } : {}),
+          finitions: finitionsDe(p.moteur),
         };
   // Notre serveur : RunPod coupe lui-même un calcul bloqué, même page fermée (le service tout prêt a ses propres limites)
   const policy = p.moteur === "qualite" ? undefined : POLICE_VIDEO;
