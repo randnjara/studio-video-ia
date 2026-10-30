@@ -3,7 +3,9 @@
 - « video » (par défaut) : transforme une photo en clip avec Wan 2.2 (image → vidéo), en 4 étapes ; sur demande, la
   dernière image du clip est aussi déposée, pour servir de photo de départ au clip suivant d'un même plan continu ;
 - « image » : crée une photo de départ avec Qwen-Image-Edit-2511 à partir de 1 à 3 images de référence
-  (personnages, lieux), en 4 étapes, pour garder les mêmes visages et tenues d'un plan à l'autre.
+  (personnages, lieux), en 4 étapes, pour garder les mêmes visages et tenues d'un plan à l'autre ;
+- « vace » : clip avec Wan 2.2 VACE Fun, qui part de la photo donnée (première image gardée telle quelle) et regarde
+  en plus la photo du personnage pendant tout le clip, pour que le visage ne change pas d'un clip enchaîné à l'autre.
 
 Un seul modèle tient en mémoire à la fois : il est chargé à la première demande de son métier, et remplacé
 si l'autre métier est demandé. Le résultat (MP4 ou JPEG) est déposé directement dans le stockage Supabase
@@ -31,7 +33,7 @@ import numpy as np
 import requests
 import runpod
 import torch
-from diffusers import FlowMatchEulerDiscreteScheduler, QwenImageEditPlusPipeline, WanImageToVideoPipeline
+from diffusers import FlowMatchEulerDiscreteScheduler, QwenImageEditPlusPipeline, WanImageToVideoPipeline, WanVACEPipeline
 from diffusers.utils import export_to_video
 from huggingface_hub import hf_hub_download, list_repo_files
 from PIL import Image, ImageOps
@@ -44,6 +46,13 @@ IMAGES_PAR_SECONDE = 16
 # Wan 2.2 est publié en 32 bits (126 Go). Sur le volume, on garde une copie en 16 bits (≈ 70 Go) :
 # deux fois moins de place, et un démarrage plus rapide.
 WAN_LOCAL = f"{VOLUME}/modeles/wan22-i2v-bf16" if VOLUME else None
+
+# Version VACE de Wan 2.2 (deux experts, comme l'image → vidéo), au format diffusers ; elle vient du texte → vidéo :
+# la version rapide utilise donc les LoRA 4 étapes « t2v » du même dépôt
+VACE_MODELE = os.environ.get("VACE_MODEL", "linoyts/Wan2.2-VACE-Fun-14B-diffusers")
+# Force de la photo de départ et de la photo du personnage (1 = valeur conseillée)
+VACE_FORCE = float(os.environ.get("VACE_SCALE", "1.0"))
+VACE_ETAPES_NORMALES = int(os.environ.get("VACE_STEPS", "20"))
 
 QWEN_MODELE = os.environ.get("QWEN_MODEL", "Qwen/Qwen-Image-Edit-2511")
 QWEN_LORA_REPO = os.environ.get("QWEN_LORA_REPO", "lightx2v/Qwen-Image-Edit-2511-Lightning")
@@ -76,21 +85,22 @@ TAILLES = {
 }
 
 
-def fichier_lora(fichiers, bruit):
-    """Choisit le LoRA 4 étapes image → vidéo pour l'expert « high » ou « low » (ou celui imposé par LORA_HIGH / LORA_LOW)."""
-    impose = os.environ.get(f"LORA_{bruit.upper()}")
+def fichier_lora(fichiers, bruit, genre="i2v"):
+    """Choisit le LoRA 4 étapes (image → vidéo, ou texte → vidéo pour VACE) pour l'expert « high » ou « low »
+    (ou celui imposé par LORA_HIGH / LORA_LOW, VACE_LORA_HIGH / VACE_LORA_LOW)."""
+    impose = os.environ.get(f"{'VACE_' if genre == 't2v' else ''}LORA_{bruit.upper()}")
     if impose:
         return impose
     candidats = sorted(
         f
         for f in fichiers
         if f.endswith(".safetensors")
-        and "i2v" in f.lower()
+        and genre in f.lower()
         and f"{bruit}_noise" in f.lower()
         and "4step" in f.lower()
     )
     if not candidats:
-        raise RuntimeError(f"Aucun LoRA 4 étapes « {bruit} noise » trouvé dans {LORA_REPO}")
+        raise RuntimeError(f"Aucun LoRA 4 étapes {genre} « {bruit} noise » trouvé dans {LORA_REPO}")
     return candidats[-1]
 
 
@@ -138,6 +148,27 @@ def charger_wan():
     pipe.load_lora_weights(LORA_REPO, weight_name=bas, adapter_name="rapide_2", load_into_transformer_2=True)
     pipe.to("cuda")
     print(f"Wan 2.2 prêt en {time.time() - debut:.0f} s")
+    return pipe
+
+
+def charger_vace():
+    debut = time.time()
+    source = dans_cache(VACE_MODELE) or VACE_MODELE
+    print(f"Wan 2.2 VACE : {source}")
+    pipe = WanVACEPipeline.from_pretrained(source, torch_dtype=torch.bfloat16)
+    # Sans LoRA rapide trouvé, VACE tourne en version normale : plus d'étapes et le guidage classique
+    pipe.rapide = False
+    try:
+        fichiers = list_repo_files(LORA_REPO)
+        haut, bas = fichier_lora(fichiers, "high", "t2v"), fichier_lora(fichiers, "low", "t2v")
+        pipe.load_lora_weights(LORA_REPO, weight_name=haut, adapter_name="rapide")
+        pipe.load_lora_weights(LORA_REPO, weight_name=bas, adapter_name="rapide_2", load_into_transformer_2=True)
+        pipe.rapide = True
+        print(f"LoRA VACE : {haut} / {bas}")
+    except Exception as e:
+        print(f"VACE sans LoRA rapide ({e}) : {VACE_ETAPES_NORMALES} étapes")
+    pipe.to("cuda")
+    print(f"Wan 2.2 VACE prêt en {time.time() - debut:.0f} s")
     return pipe
 
 
@@ -201,8 +232,12 @@ def generer_video(pipe, entree):
         guidance_scale_2=1.0,
         generator=torch.Generator("cuda").manual_seed(int(entree.get("seed", 0)) % 2**32),
     ).frames[0]
-    secondes = time.time() - debut
+    # Plan continu : la dernière image devient la photo de départ du clip suivant (un échec ici ne perd pas la vidéo)
+    return deposer_video(entree, images, largeur, hauteur, time.time() - debut)
 
+
+def deposer_video(entree, images, largeur, hauteur, secondes):
+    """Dépose le clip (et sa dernière image si elle est demandée) dans le stockage du studio."""
     with tempfile.TemporaryDirectory() as dossier:
         chemin = os.path.join(dossier, "clip.mp4")
         export_to_video(images, chemin, fps=IMAGES_PAR_SECONDE, quality=8)
@@ -215,9 +250,7 @@ def generer_video(pipe, entree):
             )
     if not envoi.ok:
         return {"error": f"Envoi de la vidéo refusé ({envoi.status_code}) : {envoi.text[:200]}"}
-
     resultat = {"video_path": entree["video_path"], "secondes": round(secondes, 1), "taille": f"{largeur}x{hauteur}"}
-    # Plan continu : la dernière image devient la photo de départ du clip suivant (un échec ici ne perd pas la vidéo)
     if entree.get("last_frame_upload_url") and entree.get("last_frame_path"):
         tampon = BytesIO()
         derniere_image(images).save(tampon, format="JPEG", quality=95)
@@ -232,6 +265,39 @@ def generer_video(pipe, entree):
         else:
             print(f"Dernière image refusée ({envoi.status_code}) : {envoi.text[:200]}")
     return resultat
+
+
+def generer_vace(pipe, entree):
+    """Première image = la photo de départ (gardée, masque noir), les suivantes sont créées (masque blanc) ;
+    la ou les photos du personnage guident le visage sur tout le clip."""
+    for champ in ("image_url", "prompt", "upload_url", "video_path"):
+        if not entree.get(champ):
+            return {"error": f"Champ manquant : {champ}"}
+    tailles = TAILLES.get(entree.get("resolution"), TAILLES["480p"])
+    largeur, hauteur = tailles.get(entree.get("format"), tailles["16:9"])
+    photo = ImageOps.fit(telecharger_image(entree["image_url"]), (largeur, hauteur), Image.LANCZOS)
+    references = [telecharger_image(u) for u in (entree.get("reference_urls") or [])[:3]]
+    n = nombre_images(entree.get("duration", 5))
+    gris = Image.new("RGB", (largeur, hauteur), (128, 128, 128))
+    garde, cree = Image.new("L", (largeur, hauteur), 0), Image.new("L", (largeur, hauteur), 255)
+
+    debut = time.time()
+    images = pipe(
+        video=[photo] + [gris] * (n - 1),
+        mask=[garde] + [cree] * (n - 1),
+        reference_images=references or None,
+        conditioning_scale=VACE_FORCE,
+        prompt=entree["prompt"],
+        negative_prompt=entree.get("negative_prompt", ""),
+        width=largeur,
+        height=hauteur,
+        num_frames=n,
+        num_inference_steps=ETAPES if pipe.rapide else VACE_ETAPES_NORMALES,
+        guidance_scale=1.0 if pipe.rapide else 5.0,
+        guidance_scale_2=1.0 if pipe.rapide else 5.0,
+        generator=torch.Generator("cuda").manual_seed(int(entree.get("seed", 0)) % 2**32),
+    ).frames[0]
+    return deposer_video(entree, images, largeur, hauteur, time.time() - debut)
 
 
 def generer_image(pipe, entree):
@@ -269,7 +335,11 @@ def generer_image(pipe, entree):
     return {"image_path": entree["image_path"], "secondes": round(secondes, 1), "taille": f"{largeur}x{hauteur}"}
 
 
-METIERS = {"video": (charger_wan, generer_video), "image": (charger_qwen, generer_image)}
+METIERS = {
+    "video": (charger_wan, generer_video),
+    "image": (charger_qwen, generer_image),
+    "vace": (charger_vace, generer_vace),
+}
 EN_MEMOIRE = {"metier": None, "pipe": None}
 
 

@@ -5,13 +5,14 @@ import { redirect } from "next/navigation";
 import { FORMAT_NOM_UTILISATEUR, LONGUEUR_MOT_DE_PASSE } from "@/lib/identifiant";
 import { journaliser } from "@/lib/journal";
 import { noterConnexion } from "@/lib/journal-connexion";
-import { CLE_ENDPOINT, CLE_ENDPOINT_PHOTO, CLE_ENDPOINT_VOIX, CLE_VOLUME, endpointEco } from "@/lib/runpod";
+import { CLE_ENDPOINT, CLE_ENDPOINT_PHOTO, CLE_ENDPOINT_VACE, CLE_ENDPOINT_VOIX, CLE_VOLUME, endpointEco } from "@/lib/runpod";
 import {
   CLE_CACHE_PHOTO,
   CLE_CACHE_VIDEO,
   ajouterStockage,
   creerServeur,
   creerServeursCache,
+  creerServeurVace,
   creerServeurVoix,
   supprimerAncienServeurEtDisque,
 } from "@/lib/runpod-admin";
@@ -282,6 +283,21 @@ export async function creerServeursCacheAction() {
   ]);
   await journaliser(supabase, profile.id, "creation-serveurs-cache", "reglage", null, ids);
   redirect("/equipe?cache=1#cache");
+}
+
+// Serveur « Visage fidèle » (Wan 2.2 VACE) : le moteur apparaît dans les choix dès qu'il est créé
+export async function creerServeurVaceAction() {
+  const { supabase, profile } = await requireResponsable();
+  let id: string;
+  try {
+    id = await creerServeurVace();
+  } catch (e) {
+    redirect(`/equipe?erreur=serveur&detail=${encodeURIComponent(e instanceof Error ? e.message : String(e))}#vace`);
+  }
+  await supabase.from("reglages").upsert({ cle: CLE_ENDPOINT_VACE, valeur: id, updated_at: new Date().toISOString() });
+  await journaliser(supabase, profile.id, "creation-serveur-vace", "reglage", null, { id });
+  revalidatePath("/", "layout");
+  redirect("/equipe?vace=1#vace");
 }
 
 // Étape 3 : le studio utilise les nouveaux serveurs ; l'ancien serveur et le disque payant sont supprimés

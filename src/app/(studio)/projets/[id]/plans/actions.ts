@@ -8,7 +8,7 @@ import { MOUVEMENT_PAR_DEFAUT } from "@/lib/libelles";
 import { demanderEssais, marquerEnProduction } from "@/lib/production";
 import { demanderPhotos, propagerPhoto, suivrePhotos } from "@/lib/photos";
 import { agrandirStockage, mettreAJourServeur } from "@/lib/runpod-admin";
-import { endpointEco, endpointPhoto, estMoteur, moteursDisponibles } from "@/lib/runpod";
+import { endpointEco, endpointVace, endpointPhoto, estMoteur, moteursDisponibles } from "@/lib/runpod";
 import { requireProfile } from "@/lib/session";
 import { type EtatServeur, surveiller } from "@/lib/surveillance";
 
@@ -209,7 +209,7 @@ export async function envoyerALaGeneration(projectId: string, formData: FormData
   const disponibles = await moteursDisponibles();
   const moteur = estMoteur(demande) && disponibles.includes(demande) ? demande : disponibles[0];
   if (moteur !== "qualite" && (await lireEtatFile(supabase, projectId)).serveurArrete) retour(projectId, "?erreur=serveur-arrete");
-  const serveur = moteur === "qualite" ? null : await endpointEco();
+  const serveur = moteur === "qualite" ? null : moteur === "fidele-480" ? await endpointVace() : await endpointEco();
   if (serveur) await mettreAJourServeur(supabase, serveur).catch(() => undefined);
 
   const { data: scenes } = await supabase

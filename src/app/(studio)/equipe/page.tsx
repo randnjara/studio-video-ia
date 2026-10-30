@@ -1,13 +1,14 @@
 import { redirect } from "next/navigation";
 import { requireProfile, type Profile } from "@/lib/session";
 import { BoutonEnvoi } from "@/components/bouton-envoi";
-import { CLE_ENDPOINT_PHOTO, CLE_ENDPOINT_VOIX, CLE_VOLUME, PRIX_SECONDE_VOIX, endpointEco } from "@/lib/runpod";
+import { CLE_ENDPOINT_PHOTO, CLE_ENDPOINT_VACE, CLE_ENDPOINT_VOIX, CLE_VOLUME, PRIX_SECONDE_VOIX, endpointEco } from "@/lib/runpod";
 import {
   CLE_CACHE_PHOTO,
   CLE_CACHE_VIDEO,
   depenseRunPodMois,
   PRIX_VOLUME_MOIS_USD,
   SERVEURS_CACHE,
+  SERVEUR_VACE,
   TAILLE_VOLUME_GO,
 } from "@/lib/runpod-admin";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -17,6 +18,7 @@ import {
   ajouterStockageEco,
   changerAcces,
   creerServeursCacheAction,
+  creerServeurVaceAction,
   passerAuCache,
   changerRole,
   creerServeurEco,
@@ -127,6 +129,7 @@ export default async function Equipe({
     voix?: string;
     cree?: string;
     acces?: string;
+    vace?: string;
   }>;
 }) {
   const sp = await searchParams;
@@ -165,12 +168,13 @@ export default async function Equipe({
   const { data: reglagesCache } = await supabase
     .from("reglages")
     .select("cle, valeur")
-    .in("cle", [CLE_CACHE_VIDEO, CLE_CACHE_PHOTO, CLE_ENDPOINT_PHOTO, CLE_ENDPOINT_VOIX, CLE_ARRET_SERVEUR]);
+    .in("cle", [CLE_CACHE_VIDEO, CLE_CACHE_PHOTO, CLE_ENDPOINT_PHOTO, CLE_ENDPOINT_VOIX, CLE_ENDPOINT_VACE, CLE_ARRET_SERVEUR]);
   const reglage = (c: string) => reglagesCache?.find((x) => x.cle === c)?.valeur ?? null;
   const cacheVideo = reglage(CLE_CACHE_VIDEO);
   const cachePhoto = reglage(CLE_CACHE_PHOTO);
   const serveurPhoto = reglage(CLE_ENDPOINT_PHOTO);
   const serveurVoix = reglage(CLE_ENDPOINT_VOIX);
+  const serveurVace = reglage(CLE_ENDPOINT_VACE);
   const serveurArrete = Boolean(lireArretServeur(reglage(CLE_ARRET_SERVEUR))?.arrete);
 
   const compte = new Map(comptes.map((u) => [u.id, u]));
@@ -422,6 +426,49 @@ export default async function Equipe({
           </>
         )}
       </section>
+
+      {endpoint && (
+        <section id="vace" className="carte flex flex-col gap-3">
+          <h2 className="text-lg font-bold">Serveur « Visage fidèle » (Wan 2.2 VACE)</h2>
+          <p className="text-sm text-sourdine">
+            Un moteur de plus pour les clips : il part, comme les autres, de la dernière image du clip précédent, et regarde
+            en plus la photo du personnage pendant tout le clip, pour que son visage ne change pas au fil du film. Il ne coûte
+            rien quand il ne tourne pas (environ 0,08 $ le clip de 5 s en 480p).
+          </p>
+          {sp.vace && <p className="message-ok">Serveur créé. Indiquez maintenant son modèle dans la console RunPod.</p>}
+          <ol className="flex list-decimal flex-col gap-3 pl-5 text-sm">
+            <li>
+              {serveurVace ? (
+                <span>
+                  Serveur créé : <code>{serveurVace}</code>. Le moteur « Visage fidèle 480p » est proposé dans les onglets
+                  Plans et Clips.
+                </span>
+              ) : (
+                <form action={creerServeurVaceAction}>
+                  <BoutonEnvoi enCours="Création chez RunPod…">Créer le serveur « Visage fidèle »</BoutonEnvoi>
+                </form>
+              )}
+            </li>
+            <li>
+              Dans la console RunPod, ouvrez{" "}
+              {serveurVace ? (
+                <a
+                  className="lien"
+                  href={`https://console.runpod.io/serverless/user/endpoint/${serveurVace}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {SERVEUR_VACE.nom}
+                </a>
+              ) : (
+                SERVEUR_VACE.nom
+              )}
+              , « Manage » puis « Edit Endpoint », champ <b>Model</b> : <code className="select-all">{SERVEUR_VACE.modele}</code>,
+              puis « Save ». Sans cela, le premier clip télécharge le modèle (long et facturé).
+            </li>
+          </ol>
+        </section>
+      )}
 
       {endpoint && !serveurPhoto && (
         <section id="cache" className="carte flex flex-col gap-3">

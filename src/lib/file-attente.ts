@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { CLE_ENDPOINT, CLE_ENDPOINT_PHOTO, CLE_ENDPOINT_VOIX } from "@/lib/runpod";
+import { CLE_ENDPOINT, CLE_ENDPOINT_PHOTO, CLE_ENDPOINT_VACE, CLE_ENDPOINT_VOIX } from "@/lib/runpod";
 
 // Pause et arrêt des générations, gardés dans la table reglages (pas de changement de la base).
 // - Pause d'un projet : les photos et vidéos pas encore parties restent dans la file, celles que RunPod n'a pas
@@ -41,6 +41,8 @@ export type EtatFile = {
   serveurVideo: string | null;
   serveurPhoto: string | null;
   serveurVoix: string | null;
+  // Serveur Wan 2.2 VACE (moteur « Visage fidèle »)
+  serveurVace: string | null;
 };
 
 // Lit en un seul appel l'état de la file d'un projet et nos serveurs RunPod
@@ -48,7 +50,7 @@ export async function lireEtatFile(supabase: SupabaseClient, projectId: string):
   const { data } = await supabase
     .from("reglages")
     .select("cle, valeur")
-    .in("cle", [CLE_ENDPOINT, CLE_ENDPOINT_PHOTO, CLE_ENDPOINT_VOIX, clePause(projectId), CLE_ARRET_SERVEUR]);
+    .in("cle", [CLE_ENDPOINT, CLE_ENDPOINT_PHOTO, CLE_ENDPOINT_VOIX, CLE_ENDPOINT_VACE, clePause(projectId), CLE_ARRET_SERVEUR]);
   const lire = (cle: string) => data?.find((r) => r.cle === cle)?.valeur || null;
   const pause = lire(clePause(projectId));
   const arret = lireArretServeur(lire(CLE_ARRET_SERVEUR));
@@ -65,6 +67,7 @@ export async function lireEtatFile(supabase: SupabaseClient, projectId: string):
     serveurVideo,
     serveurPhoto: lire(CLE_ENDPOINT_PHOTO) || serveurVideo,
     serveurVoix: lire(CLE_ENDPOINT_VOIX),
+    serveurVace: lire(CLE_ENDPOINT_VACE),
   };
 }
 
