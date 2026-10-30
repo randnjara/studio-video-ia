@@ -79,6 +79,8 @@ const consigneVideo = (consigne: string, fiches: string) =>
 // Photo de départ d'un clip. Prise unique, dans toutes les catégories : chaque clip part de la dernière image du clip
 // précédent (celui validé, sinon le dernier réussi), sur tout le film, même quand le plan continu change.
 // « attendre » : le clip précédent est encore en cours, celui-ci partira après lui.
+// « rate » : le clip précédent, envoyé dans le même lot (« lot » : sa date), a échoué. Celui-ci ne part pas de la photo
+// du plan à la place : le raccord serait cassé et la génération payée pour rien.
 // Sans clip précédent réussi (ou avec le service « Qualité max », qui ne rend pas cette image) : la photo du plan.
 // « consigne » : la consigne de mouvement à envoyer (avec le mouvement de caméra d'un changement de cadrage).
 // Toutes les colonnes sont lues : sans la migration 0016, on garde simplement la photo du plan.
@@ -97,7 +99,8 @@ export async function photoDeDepart(
   sceneId: string,
   photoDuPlan: string,
   ligne?: LignePlan,
-): Promise<{ chemin: string; consigne: string } | "attendre"> {
+  lot?: string,
+): Promise<{ chemin: string; consigne: string } | "attendre" | "rate"> {
   const plan = ligne ?? ((await supabase.from("scenes").select("*").eq("id", sceneId).single()).data as LignePlan | null);
   const consigne = plan?.motion_prompt ?? "";
   const seule = { chemin: photoDuPlan, consigne };
@@ -121,6 +124,7 @@ export async function photoDeDepart(
       consigne: avecMouvement(consigne, prec.cadrage, plan.cadrage, Number(plan.duration_s) || 5),
     };
   if (essais.some((t) => t.status === "en_cours")) return "attendre";
+  if (lot && essais[0]?.created_at === lot && ["echouee", "annulee"].includes(essais[0].status)) return "rate";
   return seule;
 }
 
@@ -183,7 +187,7 @@ export async function lancerPlan(
     const depart = await photoDeDepart(supabase, plan.id, plan.image_path, plan);
     const { data: signee, error: errSigne } = await supabase.storage
       .from(BUCKET)
-      .createSignedUrl(depart === "attendre" ? plan.image_path : depart.chemin, 60 * 60);
+      .createSignedUrl(typeof depart === "string" ? plan.image_path : depart.chemin, 60 * 60);
     if (errSigne || !signee) throw new Error("Photo introuvable dans le stockage.");
 
     // La vidéo sera rangée à côté des photos du projet ; notre serveur l'y dépose lui-même
@@ -201,7 +205,7 @@ export async function lancerPlan(
     const jobId = await lancerGeneration({
       moteur,
       prompt: consigneVideo(
-        depart === "attendre" ? plan.motion_prompt : depart.consigne,
+        typeof depart === "string" ? plan.motion_prompt : depart.consigne,
         (await fichesPersonnages(supabase, plan.project_id))(String((plan as { image_description?: string }).image_description ?? "")),
       ),
       imageUrl: signee.signedUrl,
@@ -340,9 +344,13 @@ async function envoyerEssais(supabase: SupabaseClient, projectId: string, enAtte
     if (envoyes >= ENVOIS_PAR_APPEL) break;
     const plan = scenes?.find((s) => s.id === essai.scene_id);
     const depart = plan?.image_path
-      ? await photoDeDepart(supabase, plan.id, plan.image_path, plan)
+      ? await photoDeDepart(supabase, plan.id, plan.image_path, plan, essai.created_at)
       : null;
     if (depart === "attendre") continue; // reste dans la file, sans numéro RunPod
+    if (depart === "rate") {
+      await echecEssai(supabase, essai, "Le clip précédent a échoué : celui-ci n'est pas parti, pour garder le raccord. Relancez le précédent, puis celui-ci.");
+      continue;
+    }
     const { data: pris } = await supabase
       .from("takes")
       .update({ runpod_job_id: ENVOI })

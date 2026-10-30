@@ -6,7 +6,7 @@ import { cle } from "@/lib/runpod";
 // L'image est construite par GitHub à chaque changement du dossier worker/ (.github/workflows/serveur-video.yml).
 export const IMAGE_SERVEUR = "ghcr.io/randnjara/studio-video-ia-worker:latest";
 // À augmenter avec worker/VERSION : le studio fait passer notre serveur sur cette image au prochain envoi
-export const VERSION_SERVEUR = "6";
+export const VERSION_SERVEUR = "7";
 const CLE_IMAGE = "runpod_image";
 const NOM = "studio-video-eco";
 
