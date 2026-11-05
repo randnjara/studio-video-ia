@@ -1,5 +1,5 @@
 # Versions figées pour que chaque reconstruction donne le même serveur lip-sync (InfiniteTalk demande torch 2.4.1,
-# déjà dans l'image de base, et xformers 0.0.28, installé à part depuis l'index de PyTorch)
+# déjà dans l'image de base, xformers 0.0.28.post1 et la roue précompilée de flash-attn, installés à part : voir Dockerfile)
 transformers==4.49.0
 tokenizers==0.21.0
 diffusers==0.31.0
