@@ -93,7 +93,7 @@ export async function creerServeur(
 
 // Serveur du studio voix (dossier worker-voix/) : sa propre image, construite par GitHub
 // (.github/workflows/serveur-voix.yml). À augmenter avec worker-voix/VERSION.
-export const VERSION_SERVEUR_VOIX = "2";
+export const VERSION_SERVEUR_VOIX = "3";
 const IMAGE_VOIX = `ghcr.io/randnjara/studio-video-ia-voix:v${VERSION_SERVEUR_VOIX}`;
 const NOM_VOIX = "studio-voix";
 

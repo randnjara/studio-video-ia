@@ -30,7 +30,8 @@ export function VoixOffLipsync({
 }) {
   const router = useRouter();
   const [creation, setCreation] = useState(creations[0]?.id ?? "");
-  const [recaler, setRecaler] = useState(true);
+  // Décoché par défaut : sans recalage, les plans sont pris bout à bout depuis 0, sans aucune mise à l'échelle
+  const [recaler, setRecaler] = useState(false);
   const [etat, setEtat] = useState<{ enCours: boolean; message: string; erreur?: boolean }>({ enCours: false, message: "" });
   const arret = useRef(false);
   const lance = useRef(false);
@@ -40,13 +41,17 @@ export function VoixOffLipsync({
     arret.current = false;
     let depuis: number | null = 0;
     let faits = 0;
+    let sansVoix = 0;
     let recale = false;
+    const avertissements = new Set<string>();
     setEtat({ enCours: true, message: "Envoi au serveur voix…" });
     while (depuis !== null && !arret.current) {
       const r: Awaited<ReturnType<typeof lancerDecoupage>> = await lancerDecoupage(projectId, creation, recaler, depuis).catch(() => ({
         erreur: "Connexion perdue.",
       }));
       if ("erreur" in r) return setEtat({ enCours: false, message: r.erreur, erreur: true });
+      // Plans après la fin de la voix off : comptés une fois (au premier lot)
+      if (depuis === 0) sansVoix += r.sansVoix;
       setEtat({ enCours: true, message: `Découpe des plans ${depuis + 1} à ${Math.min(r.total, depuis + 20)} sur ${r.total}…` });
       // Le serveur voix peut mettre une minute à démarrer ; ensuite chaque lot prend quelques secondes
       for (;;) {
@@ -58,7 +63,9 @@ export function VoixOffLipsync({
         if ("erreur" in s) return setEtat({ enCours: false, message: s.erreur, erreur: true });
         if (s.etat === "terminee") {
           faits += s.morceaux;
+          sansVoix += s.ignores;
           recale ||= s.recale;
+          if (s.avertissement) avertissements.add(s.avertissement);
           break;
         }
       }
@@ -66,7 +73,15 @@ export function VoixOffLipsync({
     }
     setEtat({
       enCours: false,
-      message: `${faits} morceau${faits > 1 ? "x" : ""} de voix off prêt${faits > 1 ? "s" : ""}${recale ? " (coupures recalées sur les silences)" : ""}.`,
+      message: [
+        `${faits} morceau${faits > 1 ? "x" : ""} de voix off prêt${faits > 1 ? "s" : ""}${recale ? " (coupures recalées sur les silences)" : ""}.`,
+        sansVoix > 0
+          ? `${sansVoix} plan${sansVoix > 1 ? "s" : ""} sans voix : ${sansVoix > 1 ? "ils tombent" : "il tombe"} après la fin de cette voix off (pas de lip-sync pour ${sansVoix > 1 ? "eux" : "lui"}).`
+          : "",
+        ...avertissements,
+      ]
+        .filter(Boolean)
+        .join(" "),
     });
     router.refresh();
   }

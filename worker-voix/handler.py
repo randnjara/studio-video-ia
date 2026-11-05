@@ -264,7 +264,7 @@ def decouper_voix_off(entree):
         reponse.raise_for_status()
         with open(source, "wb") as f:
             f.write(reponse.content)
-        decoupes, recale = preparer(
+        prepare = preparer(
             source,
             morceaux,
             float(entree.get("fin_prevue") or max(m["fin"] for m in morceaux)),
@@ -274,7 +274,7 @@ def decouper_voix_off(entree):
             dossier,
         )
         resultat = []
-        for m, chemin, a, b, duree in decoupes:
+        for m, chemin, a, b, duree in prepare["decoupes"]:
             with open(chemin, "rb") as f:
                 envoi = requests.put(m["upload_url"], data=f, headers={"Content-Type": "audio/wav", "x-upsert": "true"}, timeout=120)
             if not envoi.ok:
@@ -290,7 +290,15 @@ def decouper_voix_off(entree):
                     "duree": round(duree, 4),
                 }
             )
-    return {"morceaux": resultat, "recale": recale, "secondes": round(time.time() - debut, 1)}
+    return {
+        "morceaux": resultat,
+        # Plans qui tombent après la fin de la voix off : pas de morceau
+        "ignores": prepare["ignores"],
+        "recale": prepare["recale"],
+        "avertissement": prepare["avertissement"],
+        "duree_voix": round(prepare["duree"], 3),
+        "secondes": round(time.time() - debut, 1),
+    }
 
 
 def handler(job):

@@ -1,6 +1,6 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { minuter } from "@/lib/minutage";
+import { dansLaVoix, minuter } from "@/lib/minutage";
 import { BUCKET } from "@/lib/production";
 import { PRIX_SECONDE_VOIX, lancerDecoupageRunPod, lireDecoupage, type MorceauADecouper } from "@/lib/runpod";
 import { mettreAJourServeurVoix } from "@/lib/runpod-admin";
@@ -51,11 +51,11 @@ export async function lancerLotDecoupage(
   supabase: SupabaseClient,
   projectId: string,
   p: { creationId: string; recaler: boolean; depuis: number },
-): Promise<{ jobId: string; total: number; suivant: number | null } | { erreur: string }> {
+): Promise<{ jobId: string; total: number; sansVoix: number; suivant: number | null } | { erreur: string }> {
   const [{ data: creation }, minutage, { serveur, arrete }] = await Promise.all([
     supabase
       .from("voix_creations")
-      .select("id, status, audio_path, mixage_path, voix(langue)")
+      .select("id, status, audio_path, mixage_path, duree_s, voix(langue)")
       .eq("id", p.creationId)
       .eq("project_id", projectId)
       .maybeSingle(),
@@ -70,7 +70,14 @@ export async function lancerLotDecoupage(
   if (arrete) return { erreur: "Les serveurs sont arrêtés par le responsable. Redémarrez-les pour découper la voix off." };
   if (minutage.length === 0) return { erreur: "Aucun plan : importez d'abord le tableau." };
 
-  const lot = minutage.slice(p.depuis, p.depuis + MORCEAUX_PAR_LOT);
+  // Seuls les plans couverts par la voix off partent (une voix d'une partie du film ne couvre que ses premiers plans).
+  // Avec le recalage, le minutage peut être comprimé de 20 % au plus : quelques plans de plus sont envoyés, le serveur
+  // voix ignore ceux qui restent hors de la voix.
+  const dureeVoix = creation.duree_s !== null && creation.duree_s !== undefined ? Number(creation.duree_s) : null;
+  const { couverts, sansVoix, finPrevue } = dansLaVoix(minutage, dureeVoix, p.recaler ? 1.2 : 1);
+  if (couverts.length === 0) return { erreur: "Aucun plan ne tombe dans cette voix off." };
+
+  const lot = couverts.slice(p.depuis, p.depuis + MORCEAUX_PAR_LOT);
   if (lot.length === 0) return { erreur: "Rien à découper." };
   const dossier = `${projectId}/voix-off/${p.creationId}`;
   // Le serveur voix passe sur l'image qui sait découper (une seule fois, au premier lot)
@@ -101,11 +108,11 @@ export async function lancerLotDecoupage(
       cle: `${p.creationId}:${source}`,
       langue,
       recaler: p.recaler,
-      finPrevue: minutage[minutage.length - 1].fin,
+      finPrevue,
       morceaux,
     });
-    const suivant = p.depuis + lot.length < minutage.length ? p.depuis + lot.length : null;
-    return { jobId, total: minutage.length, suivant };
+    const suivant = p.depuis + lot.length < couverts.length ? p.depuis + lot.length : null;
+    return { jobId, total: couverts.length, sansVoix, suivant };
   } catch (e) {
     return { erreur: (e instanceof Error ? e.message : String(e)).slice(0, 300) };
   }
@@ -116,7 +123,11 @@ export async function finirLotDecoupage(
   supabase: SupabaseClient,
   projectId: string,
   p: { creationId: string; jobId: string },
-): Promise<{ etat: "en_cours" } | { etat: "terminee"; morceaux: number; recale: boolean } | { erreur: string }> {
+): Promise<
+  | { etat: "en_cours" }
+  | { etat: "terminee"; morceaux: number; ignores: number; recale: boolean; avertissement: string | null }
+  | { erreur: string }
+> {
   let statut;
   try {
     statut = await lireDecoupage(p.jobId);
@@ -139,7 +150,9 @@ export async function finirLotDecoupage(
       duration_s: Math.round(m.duree * 1000) / 1000,
       texte: String(m.texte ?? "").slice(0, 2000),
     }));
-  if (lignes.length === 0) return { erreur: "Le serveur voix n'a renvoyé aucun morceau." };
+  const fin = { etat: "terminee" as const, ignores: statut.ignores.length, recale: statut.recale, avertissement: statut.avertissement };
+  // Tous les plans du lot tombent après la fin de la voix : rien à enregistrer, ce n'est pas une erreur
+  if (lignes.length === 0) return statut.ignores.length > 0 ? { ...fin, morceaux: 0 } : { erreur: "Le serveur voix n'a renvoyé aucun morceau." };
   const { error } = await supabase.from("voice_clips").upsert(lignes);
   if (error) return { erreur: error.message };
   // Le temps de calcul compte dans le budget du mois, avec la voix découpée
@@ -150,5 +163,5 @@ export async function finirLotDecoupage(
       .update({ cost_usd: Math.round((Number(c?.cost_usd ?? 0) + statut.secondes * PRIX_SECONDE_VOIX) * 10000) / 10000 })
       .eq("id", p.creationId);
   }
-  return { etat: "terminee", morceaux: lignes.length, recale: statut.recale };
+  return { ...fin, morceaux: lignes.length };
 }
