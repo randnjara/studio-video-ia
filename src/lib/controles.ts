@@ -1,3 +1,4 @@
+import { memeNom } from "@/lib/noms";
 // Alertes calculées sur le tableau des plans, pour ne pas refaire les erreurs vues avec ChatGPT
 // (gestes copiés en boucle, cadrages identiques, voix off trop longue, consignes vidéo pas en anglais).
 // Aucun appel extérieur : tout se calcule à l'affichage.
@@ -137,16 +138,16 @@ export function alertesPlans(plans: PlanControle[], mouvementParDefaut = "", cat
 
     // Lieux : un changement de décor au milieu d'une phrase, ou un lieu tenu un seul plan, casse le réalisme
     const suiv = plans[i + 1];
-    if (prec && p.lieu && prec.lieu && p.lieu !== prec.lieu) {
+    if (prec && p.lieu && prec.lieu && !memeNom(p.lieu, prec.lieu)) {
       if (prec.voiceover_text.trim() && !/[.!?…»"”]\s*$/.test(prec.voiceover_text.trim()))
         ajouter(p.id, `Changement de lieu au milieu d'une phrase (plan ${i} → ${i + 1}) : gardez « ${prec.lieu} » jusqu'à la fin de la phrase.`);
-      if (suiv?.lieu && suiv.lieu !== p.lieu)
+      if (suiv?.lieu && !memeNom(suiv.lieu, p.lieu))
         ajouter(p.id, `Un seul plan dans « ${p.lieu} » : restez plus longtemps dans un même lieu, ne changez que le cadrage, l'angle ou le geste.`);
     }
 
     const duree = Number(p.duration_s || 5);
     // Prise unique : un changement de lieu se fait par la caméra, pendant le clip
-    if (prec && p.lieu && prec.lieu && p.lieu !== prec.lieu && !MOTS_MOUVEMENT.test(p.motion_prompt))
+    if (prec && p.lieu && prec.lieu && !memeNom(p.lieu, prec.lieu) && !MOTS_MOUVEMENT.test(p.motion_prompt))
       ajouter(p.id, `Changement de lieu sans mouvement de caméra : le clip part de la dernière image dans « ${prec.lieu} », écrivez comment la caméra va vers « ${p.lieu} » au milieu du clip.`);
     // Un zoom ou un changement à la première ou à la dernière seconde se voit au raccord avec le clip voisin
     const moment = momentMouvement(p.motion_prompt, duree);

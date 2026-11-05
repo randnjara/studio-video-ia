@@ -4,6 +4,7 @@ import { MOUVEMENT_PAR_DEFAUT, STATUTS_PLAN, couleurStatut, dureeLisible } from 
 import { lireCategorie, plansContinus } from "@/lib/categories";
 import { alertesPlans } from "@/lib/controles";
 import { lotsPromptsPhotos, suivrePhotos } from "@/lib/photos";
+import { cleNom } from "@/lib/noms";
 import { signerLiens } from "@/lib/production";
 import { MOTEURS, PRIX_PHOTO_ESTIME_USD, endpointEco, moteursDisponibles } from "@/lib/runpod";
 import { lireEtatFile } from "@/lib/file-attente";
@@ -166,11 +167,13 @@ export default async function PagePlans({
   const nbAlertes = [...alertes.values()].reduce((n, a) => n + a.length, 0);
   const lieux = refs.filter((r) => r.genre === "lieu").map((r) => r.nom);
   // Lieux des plans sans photo de référence : le décor sera réinventé à chaque photo
-  const cleLieu = (t: string) => t.trim().toLowerCase();
-  const lieuxAvecPhoto = new Set(lieux.map(cleLieu));
-  const lieuxSansPhoto = [...new Set(plans.map((p) => p.lieu?.trim()).filter((l): l is string => Boolean(l)))].filter(
-    (l) => !lieuxAvecPhoto.has(cleLieu(l)),
-  );
+  // (même lieu malgré majuscules, accents ou espaces différents : « JARDIN CELESTE » = « Jardin céleste »)
+  const lieuxAvecPhoto = new Set(lieux.map(cleNom));
+  const lieuxSansPhoto = new Map<string, string>();
+  for (const p of plans) {
+    const cle = cleNom(p.lieu);
+    if (cle && !lieuxAvecPhoto.has(cle) && !lieuxSansPhoto.has(cle)) lieuxSansPhoto.set(cle, p.lieu.trim());
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -196,9 +199,9 @@ export default async function PagePlans({
       {sp.decor && (
         <p className="message-ok">Décor gardé : les prochaines photos de ce lieu reprendront cette pièce.</p>
       )}
-      {lieuxSansPhoto.length > 0 && (
+      {lieuxSansPhoto.size > 0 && (
         <p className="message-erreur">
-          {lieuxSansPhoto.length > 1 ? "Ces lieux n'ont" : "Ce lieu n'a"} pas de photo de référence : {lieuxSansPhoto.join(", ")}.
+          {lieuxSansPhoto.size > 1 ? "Ces lieux n'ont" : "Ce lieu n'a"} pas de photo de référence : {[...lieuxSansPhoto.values()].join(", ")}.
           Sans elle, le décor change d'une photo à l'autre. En créant les photos ici, la première réussie dans ce lieu devient
           sa référence et les suivantes attendent pour reprendre le même décor. Vous pouvez aussi cliquer sur « Garder ce
           décor » sous une photo réussie, ou ajouter une photo du lieu à l'étape Infos.
@@ -479,7 +482,7 @@ export default async function PagePlans({
                             🎬 {[plan.cadrage, plan.angle, plan.lieu, plan.intention].filter(Boolean).join(" · ")}
                           </p>
                         )}
-                        {photo && plan.lieu && !lieuxAvecPhoto.has(cleLieu(plan.lieu)) && (
+                        {photo && plan.lieu && !lieuxAvecPhoto.has(cleNom(plan.lieu)) && (
                           <form action={garderDecor.bind(null, id, plan.id)} className="mt-1">
                             <BoutonEnvoi className="bouton-discret px-2 py-0.5 text-xs" enCours="…">
                               📌 Garder ce décor pour « {plan.lieu} »
