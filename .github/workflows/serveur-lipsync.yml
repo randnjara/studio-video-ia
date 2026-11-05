@@ -7,6 +7,9 @@ on:
   push:
     branches: [main]
     paths: ["worker-lipsync/**", ".github/workflows/serveur-lipsync.yml"]
+  # Dans une PR : l'image est construite (et vérifiée) sans être publiée
+  pull_request:
+    paths: ["worker-lipsync/**", ".github/workflows/serveur-lipsync.yml"]
   workflow_dispatch:
 
 permissions:
@@ -25,6 +28,7 @@ jobs:
           df -h /
       - uses: actions/checkout@v4
       - uses: docker/login-action@v3
+        if: github.event_name != 'pull_request'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -37,7 +41,7 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: worker-lipsync
-          push: true
+          push: ${{ github.event_name != 'pull_request' }}
           tags: |
             ghcr.io/${{ github.repository }}-worker:lipsync
             ghcr.io/${{ github.repository }}-worker:lipsync-${{ github.sha }}
