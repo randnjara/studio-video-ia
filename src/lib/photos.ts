@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { GENRES } from "@/lib/libelles";
+import { cleNom } from "@/lib/noms";
 import { type EtatFile, attente, lireEtatFile } from "@/lib/file-attente";
 import { ANNULATIONS_PAR_APPEL, BUCKET, aSuivre } from "@/lib/production";
 import { PRIX_PHOTO_ESTIME_USD, annulerJob, lancerPhotoRunPod, lireStatut } from "@/lib/runpod";
@@ -217,7 +218,7 @@ const echec = (supabase: SupabaseClient, id: string, erreur: string) =>
     .eq("id", id);
 
 // Un lieu a-t-il déjà sa photo de référence ?
-const cleLieu = (t: string) => normaliser(t).replace(/[^a-z0-9]+/g, " ").trim();
+const cleLieu = cleNom;
 const lieuAvecPhoto = (lieu: string, refs: Reference[]) =>
   refs.some((r) => r.genre === "lieu" && cleLieu(r.nom) === cleLieu(lieu));
 
