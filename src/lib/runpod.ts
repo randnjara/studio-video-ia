@@ -340,13 +340,20 @@ export async function lancerDecoupageRunPod(input: {
 export type MorceauDecoupe = { id: string; scene_id: string; debut: number; fin: number; duree: number; texte: string; audio_path: string };
 export async function lireDecoupage(
   jobId: string,
-): Promise<{ etat: "en_cours" } | { etat: "echouee"; erreur: string } | { etat: "terminee"; morceaux: MorceauDecoupe[]; recale: boolean; secondes: number | null }> {
+): Promise<
+  | { etat: "en_cours" }
+  | { etat: "echouee"; erreur: string }
+  | { etat: "terminee"; morceaux: MorceauDecoupe[]; ignores: string[]; recale: boolean; avertissement: string | null; secondes: number | null }
+> {
   const data = await appel("voix", `/status/${encodeURIComponent(jobId)}`);
   if (data.status === "COMPLETED") {
     if (data.output?.error) return { etat: "echouee", erreur: String(data.output.error).slice(0, 500) };
     const morceaux = Array.isArray(data.output?.morceaux) ? (data.output.morceaux as MorceauDecoupe[]) : [];
     const secondes = typeof data.executionTime === "number" ? data.executionTime / 1000 : null;
-    return { etat: "terminee", morceaux, recale: Boolean(data.output?.recale), secondes };
+    // « ignores » : plans qui tombent après la fin de la voix off (pas de morceau)
+    const ignores = Array.isArray(data.output?.ignores) ? (data.output.ignores as unknown[]).map(String) : [];
+    const avertissement = data.output?.avertissement ? String(data.output.avertissement).slice(0, 300) : null;
+    return { etat: "terminee", morceaux, ignores, recale: Boolean(data.output?.recale), avertissement, secondes };
   }
   if (["FAILED", "TIMED_OUT", "CANCELLED"].includes(data.status)) return { etat: "echouee", erreur: String(data.error ?? data.status).slice(0, 500) };
   return { etat: "en_cours" };

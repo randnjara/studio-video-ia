@@ -4,9 +4,14 @@ La voix off entière est d'abord convertie par ffmpeg en WAV 16 kHz mono (ce qu'
 morceau est pris à l'échantillon près entre son début et sa fin : les morceaux mis bout à bout redonnent exactement la
 voix off, sans trou ni chevauchement.
 
+Sans recalage, les temps reçus sont pris tels quels (aucune mise à l'échelle). Les plans qui commencent après la fin de
+la voix off sont ignorés (pas de morceau) ; le dernier plan à moitié couvert est coupé à la fin de la voix.
+
 Recalage (option) : quand la durée réelle de la voix diffère du minutage du tableau (voix plus lente ou plus rapide que
 prévu), les temps du tableau sont d'abord mis à l'échelle, puis chaque coupure est déplacée vers le silence le plus
 proche entre deux mots (mots repérés par Whisper, silences repérés par ffmpeg), pour ne jamais couper un mot.
+Au-delà de 20 % d'écart, la voix ne correspond pas à ces plans (voix d'une partie du film seulement, autre voix…) :
+rien n'est mis à l'échelle, les coupures sont seulement posées dans les silences proches, et un avertissement est rendu.
 """
 
 import os
@@ -19,6 +24,10 @@ import soundfile as sf
 FREQUENCE = 16000
 # Écart de durée à partir duquel le minutage du tableau est recalé (2 %)
 ECART_MAX = 0.02
+# Au-delà de cet écart, la voix n'est jamais étirée ni comprimée (20 %)
+ECART_ECHELLE_MAX = 0.20
+# Morceau le plus court gardé (s) : en dessous, le plan est considéré sans voix
+MORCEAU_MIN_S = 0.1
 # Distance maximale entre une coupure prévue et le silence où elle est déplacée
 FENETRE_S = 0.6
 WHISPER = os.environ.get("WHISPER_MODEL", "small")
@@ -81,9 +90,11 @@ def pauses_whisper(chemin, langue, cle):
     return pauses
 
 
-def recaler(bornes, duree_reelle, fin_prevue, coupures):
-    """Met les coupures à l'échelle de la durée réelle, puis les déplace vers la pause la plus proche (± FENETRE_S)."""
-    echelle = duree_reelle / fin_prevue if fin_prevue > 0 else 1.0
+def recaler(bornes, duree_reelle, fin_prevue, coupures, echelle=None):
+    """Met les coupures à l'échelle de la durée réelle (ou de « echelle » si elle est donnée, 1 = pas de mise à
+    l'échelle), puis les déplace vers la pause la plus proche (± FENETRE_S)."""
+    if echelle is None:
+        echelle = duree_reelle / fin_prevue if fin_prevue > 0 else 1.0
     milieux = sorted((a + b) / 2 for a, b in coupures)
     resultat = {}
     for b in sorted(bornes):
@@ -108,36 +119,50 @@ def ecart(duree_reelle, fin_prevue):
 
 
 def decouper(son, frequence, morceaux, dossier):
-    """Écrit chaque morceau (WAV 16 kHz mono 16 bits) et renvoie [(morceau, chemin local, début, fin, durée)]."""
+    """Écrit chaque morceau (WAV 16 kHz mono 16 bits). Renvoie ([(morceau, chemin local, début, fin, durée)], plans
+    ignorés) : un plan qui tombe après la fin de la voix (ou dont il resterait moins de MORCEAU_MIN_S) n'a pas de morceau,
+    sans faire échouer les autres."""
     total = len(son)
-    sortie = []
+    sortie, ignores = [], []
     for i, m in enumerate(morceaux):
         a = max(0, min(total, round(m["debut"] * frequence)))
         b = max(0, min(total, round(m["fin"] * frequence)))
-        if b - a < frequence // 10:
-            raise ValueError(f"Morceau du plan {m.get('scene_id')} trop court ou hors de la voix ({m['debut']:.2f}–{m['fin']:.2f} s)")
+        if b - a < round(MORCEAU_MIN_S * frequence):
+            ignores.append(m["scene_id"])
+            continue
         chemin = os.path.join(dossier, f"morceau-{i}.wav")
         sf.write(chemin, son[a:b], frequence, subtype="PCM_16")
         sortie.append((m, chemin, a / frequence, b / frequence, (b - a) / frequence))
-    return sortie
+    return sortie, ignores
 
 
 def preparer(source, morceaux, fin_prevue, recalage, langue, cle, dossier):
-    """Décode la voix, recale le minutage si demandé, et découpe. Renvoie (morceaux découpés, recalé ?)."""
+    """Décode la voix, recale le minutage si demandé, et découpe.
+    Renvoie {"decoupes", "ignores" (plans sans voix), "recale" (bool), "avertissement" (texte ou None), "duree"}."""
     wav = os.path.join(dossier, "voix-16k.wav")
     son, frequence = en_wav_16k(source, wav)
     duree = len(son) / frequence
     recale = False
+    avertissement = None
     morceaux = [dict(m) for m in morceaux]
-    if recalage and ecart(duree, fin_prevue) > ECART_MAX:
+    e = ecart(duree, fin_prevue)
+    if recalage and e > ECART_MAX:
+        echelle = None
+        if e > ECART_ECHELLE_MAX:
+            # Voix bien plus courte (ou plus longue) que ces plans : on ne l'étire jamais
+            echelle = 1.0
+            avertissement = (
+                f"La voix off ({duree:.1f} s) et les plans ({fin_prevue:.1f} s) diffèrent de {e * 100:.0f} % : "
+                "pas de mise à l'échelle, coupures seulement posées dans les silences proches."
+            )
         coupures = silences(wav) + pauses_whisper(wav, langue, cle)
         bornes = {m["debut"] for m in morceaux} | {m["fin"] for m in morceaux}
-        nouvelles = recaler(bornes, duree, fin_prevue, coupures)
+        nouvelles = recaler(bornes, duree, fin_prevue, coupures, echelle)
         for m in morceaux:
             m["debut"], m["fin"] = nouvelles[m["debut"]], nouvelles[m["fin"]]
         recale = True
-    else:
-        # Sans recalage, la dernière fin ne dépasse pas la voix
-        for m in morceaux:
-            m["fin"] = min(m["fin"], duree)
-    return decouper(son, frequence, morceaux, dossier), recale
+    # Le dernier plan à moitié couvert s'arrête à la fin de la voix ; ceux d'après sont ignorés par decouper()
+    for m in morceaux:
+        m["fin"] = min(m["fin"], duree)
+    decoupes, ignores = decouper(son, frequence, morceaux, dossier)
+    return {"decoupes": decoupes, "ignores": ignores, "recale": recale, "avertissement": avertissement, "duree": duree}
