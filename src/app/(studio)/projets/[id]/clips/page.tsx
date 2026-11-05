@@ -2,7 +2,7 @@ import Link from "next/link";
 import { BoutonEnvoi } from "@/components/bouton-envoi";
 import { CONTROLES_CLIP, STATUTS_PLAN, couleurStatut } from "@/lib/libelles";
 import { signerLiens, suivreEssais } from "@/lib/production";
-import { MOTEURS, type Moteur, estMoteur, moteurParDefaut } from "@/lib/runpod";
+import { MOTEURS, type Moteur, endpointLipsync, estMoteur, moteurParDefaut } from "@/lib/runpod";
 import { lireEtatFile } from "@/lib/file-attente";
 import { requireProfile } from "@/lib/session";
 import { ControleFile } from "../controle-file";
@@ -29,6 +29,7 @@ type Plan = {
   status: string;
   validated_take_id: string | null;
   takes: Essai[];
+  voice_clips: { audio_path: string; duration_s: number | null }[];
 };
 
 const ERREURS: Record<string, string> = {
@@ -36,6 +37,7 @@ const ERREURS: Record<string, string> = {
   "sans-photo": "Ce plan n'a pas de photo : complétez-le dans « Plans ».",
   "sans-prompt": "Ce plan n'a pas de mouvement : complétez-le dans « Plans ».",
   "sans-accord": "L'accord des personnes photographiées n'est pas coché : voyez « Plans ».",
+  "sans-voix": "Ce plan n'a pas encore son morceau de voix off : cliquez « Découper la voix off » dans « Plans ».",
   budget: "Le plafond GPU du mois est atteint. Le responsable peut l'augmenter dans « Équipe et budget ».",
   essai: "La génération n'a pas pu démarrer. Réessayez.",
   "serveur-arrete": "Notre serveur RunPod est arrêté : redémarrez-le (bouton ci-dessous ou « Équipe et budget ») avant de regénérer.",
@@ -49,7 +51,7 @@ const FILTRES = [
 ] as const;
 
 const SELECT =
-  "id, position, image_path, voiceover_text, status, validated_take_id, takes!takes_scene_id_fkey(id, status, runpod_job_id, moteur, video_path, cost_usd, error, controle, created_at)";
+  "id, position, image_path, voiceover_text, status, validated_take_id, takes!takes_scene_id_fkey(id, status, runpod_job_id, moteur, video_path, cost_usd, error, controle, created_at), voice_clips!voice_clips_scene_id_fkey(audio_path, duration_s)";
 
 const moteurDe = (t: Essai): Moteur => (estMoteur(t.moteur) ? t.moteur : "qualite");
 
@@ -78,7 +80,7 @@ export default async function PageClips({
       .order("position")
       .order("created_at", { referencedTable: "takes", ascending: false });
 
-  const [premiere, defaut, etat] = await Promise.all([lire(), moteurParDefaut(), lireEtatFile(supabase, id)]);
+  const [premiere, defaut, etat, lipsync] = await Promise.all([lire(), moteurParDefaut(), lireEtatFile(supabase, id), endpointLipsync()]);
   let plans = (premiere.data ?? []) as Plan[];
 
   // Range d'abord les vidéos qui ont fini pendant que la page était fermée (seulement s'il y en a en cours)
@@ -183,6 +185,8 @@ export default async function PageClips({
           const photo = plan.image_path ? liens.get(plan.image_path) : undefined;
           const tourne = plan.takes.some((t) => t.status === "en_cours");
           const prochainMoteur = plan.takes[0] ? moteurDe(plan.takes[0]) : defaut;
+          // Lip-sync : seulement si le plan a son morceau de voix off découpé
+          const aSaVoix = plan.voice_clips.some((v) => v.audio_path && v.duration_s !== null);
           return (
             <section key={plan.id} id={`plan-${plan.id}`} className="carte flex scroll-mt-24 flex-col gap-4">
               <div className="flex flex-wrap items-center gap-3">
@@ -204,6 +208,25 @@ export default async function PageClips({
                       ↻ Regénérer
                     </BoutonEnvoi>
                   </form>
+                  {lipsync &&
+                    prochainMoteur !== "lipsync" &&
+                    (aSaVoix ? (
+                      <form action={regenerer.bind(null, id, plan.id)}>
+                        <input type="hidden" name="moteur" value="lipsync" />
+                        <BoutonEnvoi
+                          className="bouton-discret px-3 py-1.5 text-sm"
+                          enCours="Lancement…"
+                          disabled={tourne}
+                          confirmer={`Générer ce plan en lip-sync (la bouche suit la voix off) pour environ ${MOTEURS.lipsync.prix5s.toFixed(2)} $ ?`}
+                        >
+                          🗣 Lip-sync
+                        </BoutonEnvoi>
+                      </form>
+                    ) : (
+                      <Link href={`/projets/${id}/plans#voix-off`} className="bouton-discret px-3 py-1.5 text-sm">
+                        ✂ Découper la voix off
+                      </Link>
+                    ))}
                   {plan.status !== "refusee" && (
                     <form action={refuserClips.bind(null, id, plan.id)}>
                       <BoutonEnvoi

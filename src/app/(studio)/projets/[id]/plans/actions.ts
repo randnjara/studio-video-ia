@@ -5,10 +5,11 @@ import { redirect } from "next/navigation";
 import { lireEtatFile } from "@/lib/file-attente";
 import { journaliser } from "@/lib/journal";
 import { MOUVEMENT_PAR_DEFAUT } from "@/lib/libelles";
+import { segmentValide } from "@/lib/minutage";
 import { demanderEssais, marquerEnProduction } from "@/lib/production";
 import { demanderPhotos, propagerPhoto, suivrePhotos } from "@/lib/photos";
 import { agrandirStockage, mettreAJourServeur } from "@/lib/runpod-admin";
-import { endpointEco, endpointVace, endpointPhoto, estMoteur, moteursDisponibles } from "@/lib/runpod";
+import { endpointDuMoteur, endpointPhoto, estMoteur, moteursDisponibles } from "@/lib/runpod";
 import { requireProfile } from "@/lib/session";
 import { type EtatServeur, surveiller } from "@/lib/surveillance";
 
@@ -209,22 +210,24 @@ export async function envoyerALaGeneration(projectId: string, formData: FormData
   const disponibles = await moteursDisponibles();
   const moteur = estMoteur(demande) && disponibles.includes(demande) ? demande : disponibles[0];
   if (moteur !== "qualite" && (await lireEtatFile(supabase, projectId)).serveurArrete) retour(projectId, "?erreur=serveur-arrete");
-  const serveur = moteur === "qualite" ? null : moteur === "fidele-480" ? await endpointVace() : await endpointEco();
-  if (serveur) await mettreAJourServeur(supabase, serveur).catch(() => undefined);
+  const serveur = await endpointDuMoteur(moteur);
+  if (serveur) await mettreAJourServeur(supabase, serveur, moteur).catch(() => undefined);
 
   const { data: scenes } = await supabase
     .from("scenes")
-    .select("id, motion_prompt, image_path, consent_confirmed, duration_s, status, takes!takes_scene_id_fkey(status)")
+    .select("id, motion_prompt, image_path, consent_confirmed, duration_s, status, takes!takes_scene_id_fkey(status, moteur)")
     .eq("project_id", projectId)
     .order("position");
 
   const aLancer = (scenes ?? []).filter((s) => {
-    const essais = s.takes as { status: string }[];
+    const essais = s.takes as { status: string; moteur: string }[];
     if (essais.some((t) => t.status === "en_cours")) return false;
-    // « Tous » : seulement les plans prêts qui n'ont encore aucune vidéo réussie
+    // « Tous » : seulement les plans prêts qui n'ont encore aucune vidéo réussie (en lip-sync : aucune vidéo lip-sync,
+    // « Générer toutes les scènes en lip-sync » refait aussi les plans déjà générés par un autre moteur)
     // Un plan sans photo, sans mouvement ou sans accord ne peut pas partir
     if (!s.image_path || !s.motion_prompt || !s.consent_confirmed) return false;
-    return tous ? !essais.some((t) => t.status === "terminee") : choisis.has(s.id);
+    const reussi = (t: { status: string; moteur: string }) => t.status === "terminee" && (moteur !== "lipsync" || t.moteur === "lipsync");
+    return tous ? !essais.some(reussi) : choisis.has(s.id);
   });
   if (aLancer.length === 0) retour(projectId, "?erreur=selection-vide");
 
@@ -422,6 +425,9 @@ export type LigneTableau = {
   pose_fin: string;
   duree: number | null;
   plan_continu?: number | null;
+  // Minutage du plan dans la voix off (secondes), pour la découpe du lip-sync
+  debut?: number | null;
+  fin?: number | null;
 };
 
 // Import d'un tableau de scènes (CSV, par exemple le tableau maître d'un projet préparé ailleurs) : un plan par ligne
@@ -457,16 +463,27 @@ export async function importerTableau(projectId: string, lignes: LigneTableau[],
     duration_s: l.duree && l.duree >= 2 && l.duree <= 10 ? l.duree : 5,
     consent_confirmed: accord,
   }));
-  let { error } = await supabase
+  let { data: crees, error } = await supabase
     .from("scenes")
     .insert(
       avecPlan
         ? lignesBase.map((b, i) => ({ ...b, plan_continu: lignes[i].plan_continu ? lignes[i].plan_continu! + decalage : null }))
         : lignesBase,
-    );
+    )
+    .select("id, position");
   // Base sans la migration 0016 : les plans sont créés sans regroupement
-  if (error && avecPlan && /plan_continu/.test(error.message)) ({ error } = await supabase.from("scenes").insert(lignesBase));
+  if (error && avecPlan && /plan_continu/.test(error.message))
+    ({ data: crees, error } = await supabase.from("scenes").insert(lignesBase).select("id, position"));
   if (error) retour(projectId, "?erreur=import");
+  // Minutage « debut » / « fin » du tableau : gardé dans un morceau de voix off encore à découper (fichier vide), pour que
+  // « Découper la voix off » coupe exactement là où le tableau le dit
+  const minutes = (crees ?? []).flatMap((c) => {
+    const l = lignes[c.position - debut];
+    return l && segmentValide(l.debut ?? null, l.fin ?? null)
+      ? [{ scene_id: c.id, source: "ia", audio_path: "", debut_s: l.debut, fin_s: l.fin, texte: court(l.voix, 2000) }]
+      : [];
+  });
+  if (minutes.length > 0) await supabase.from("voice_clips").insert(minutes);
   await Promise.all([
     journaliser(supabase, profile.id, "import", "plan", null, { project_id: projectId, nombre: lignes.length, source: "tableau" }),
     marquerEnProduction(supabase, projectId),

@@ -6,7 +6,7 @@ import { alertesPlans } from "@/lib/controles";
 import { lotsPromptsPhotos, suivrePhotos } from "@/lib/photos";
 import { cleNom } from "@/lib/noms";
 import { signerLiens } from "@/lib/production";
-import { MOTEURS, PRIX_PHOTO_ESTIME_USD, endpointEco, moteursDisponibles } from "@/lib/runpod";
+import { MOTEURS, PRIX_PHOTO_ESTIME_USD, endpointEco, endpointLipsync, moteursDisponibles } from "@/lib/runpod";
 import { lireEtatFile } from "@/lib/file-attente";
 import { requireProfile } from "@/lib/session";
 import { promptVerification } from "@/lib/verification";
@@ -29,6 +29,7 @@ import { CopierVerification } from "./copier-verification";
 import { SuiviPhotos } from "./suivi-photos";
 import { RemplacerPhoto } from "./remplacer-photo";
 import { ControleFile } from "../controle-file";
+import { VoixOffLipsync } from "./voix-off";
 import { PhotoZoom } from "@/components/photo-zoom";
 
 type Plan = {
@@ -51,6 +52,7 @@ type Plan = {
   status: string;
   validated_take_id: string | null;
   takes: { status: string }[];
+  voice_clips?: { audio_path: string; duration_s: number | null; debut_s: number | null }[];
   photos: Photo[];
 };
 
@@ -73,6 +75,7 @@ const ERREURS: Record<string, string> = {
   "sans-photo": "Ajoutez une photo au plan avant de générer.",
   "sans-prompt": "Décrivez le mouvement voulu avant de générer.",
   "sans-accord": "Cochez la case d'accord des personnes photographiées avant de générer.",
+  "sans-voix": "Lip-sync : aucun plan choisi n'a son morceau de voix off. Cliquez d'abord « Découper la voix off ».",
   budget: "Le plafond GPU du mois est atteint. Le responsable peut l'augmenter dans « Équipe et budget ».",
   essai: "La génération n'a pas pu démarrer. Réessayez.",
   import: "Les plans n'ont pas pu être créés. Réessayez.",
@@ -102,12 +105,12 @@ export default async function PagePlans({
   const { supabase, profile } = await requireProfile();
 
   // Le cadre du projet vérifie déjà la connexion et l'existence du projet : tout part en même temps
-  const [{ data: projet }, { data }, { data: versions }, moteurs, { data: refsLues }, serveur, etat] = await Promise.all([
+  const [{ data: projet }, { data }, { data: versions }, moteurs, { data: refsLues }, serveur, etat, { data: voixOff }, serveurLipsync] = await Promise.all([
     // Toutes les colonnes : la catégorie et le plan continu sont lus si la migration 0016 est passée
     supabase.from("projects").select("*").eq("id", id).maybeSingle(),
     supabase
       .from("scenes")
-      .select("*, takes!takes_scene_id_fkey(status), photos(*)")
+      .select("*, takes!takes_scene_id_fkey(status), photos(*), voice_clips!voice_clips_scene_id_fkey(audio_path, duration_s, debut_s)")
       .eq("project_id", id)
       .order("position"),
     supabase
@@ -121,6 +124,14 @@ export default async function PagePlans({
     supabase.from("film_refs").select("id, nom, genre, description, image_path").eq("project_id", id).order("created_at"),
     endpointEco(),
     lireEtatFile(supabase, id),
+    // Voix off terminées du studio voix, à découper pour le lip-sync (sans la migration 0014, la liste reste vide)
+    supabase
+      .from("voix_creations")
+      .select("id, nom, duree_s")
+      .eq("project_id", id)
+      .eq("status", "terminee")
+      .order("created_at", { ascending: false }),
+    endpointLipsync(),
   ]);
   const plans = (data ?? []) as Plan[];
   const refs = (refsLues ?? []) as Ref[];
@@ -356,6 +367,19 @@ export default async function PagePlans({
           </div>
         </details>
       </section>
+
+      {plans.length > 0 && (
+        <VoixOffLipsync
+          projectId={id}
+          creations={(voixOff ?? []).map((v) => ({ id: v.id, nom: v.nom, duree: v.duree_s !== null ? Number(v.duree_s) : null }))}
+          nbPlans={plans.length}
+          nbDecoupes={plans.filter((p) => p.voice_clips?.some((v) => v.audio_path && v.duration_s !== null)).length}
+          nbMinutes={plans.filter((p) => p.voice_clips?.some((v) => v.debut_s !== null)).length}
+          lipsync={Boolean(serveurLipsync)}
+          auto={Boolean(sp.importe)}
+          generer={envoyerALaGeneration.bind(null, id)}
+        />
+      )}
 
       {/* 2. Le tableau des plans, et l'envoi à la génération */}
       <section className="flex flex-col gap-4">

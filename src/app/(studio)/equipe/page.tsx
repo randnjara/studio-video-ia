@@ -1,13 +1,14 @@
 import { redirect } from "next/navigation";
 import { requireProfile, type Profile } from "@/lib/session";
 import { BoutonEnvoi } from "@/components/bouton-envoi";
-import { CLE_ENDPOINT_PHOTO, CLE_ENDPOINT_VACE, CLE_ENDPOINT_VOIX, CLE_VOLUME, PRIX_SECONDE_VOIX, endpointEco } from "@/lib/runpod";
+import { CLE_ENDPOINT_LIPSYNC, CLE_ENDPOINT_PHOTO, CLE_ENDPOINT_VACE, CLE_ENDPOINT_VOIX, CLE_VOLUME, PRIX_SECONDE_VOIX, endpointEco } from "@/lib/runpod";
 import {
   CLE_CACHE_PHOTO,
   CLE_CACHE_VIDEO,
   depenseRunPodMois,
   PRIX_VOLUME_MOIS_USD,
   SERVEURS_CACHE,
+  SERVEUR_LIPSYNC,
   SERVEUR_VACE,
   TAILLE_VOLUME_GO,
 } from "@/lib/runpod-admin";
@@ -18,6 +19,7 @@ import {
   ajouterStockageEco,
   changerAcces,
   creerServeursCacheAction,
+  creerServeurLipsyncAction,
   creerServeurVaceAction,
   passerAuCache,
   changerRole,
@@ -130,6 +132,7 @@ export default async function Equipe({
     cree?: string;
     acces?: string;
     vace?: string;
+    lipsync?: string;
   }>;
 }) {
   const sp = await searchParams;
@@ -168,13 +171,14 @@ export default async function Equipe({
   const { data: reglagesCache } = await supabase
     .from("reglages")
     .select("cle, valeur")
-    .in("cle", [CLE_CACHE_VIDEO, CLE_CACHE_PHOTO, CLE_ENDPOINT_PHOTO, CLE_ENDPOINT_VOIX, CLE_ENDPOINT_VACE, CLE_ARRET_SERVEUR]);
+    .in("cle", [CLE_CACHE_VIDEO, CLE_CACHE_PHOTO, CLE_ENDPOINT_PHOTO, CLE_ENDPOINT_VOIX, CLE_ENDPOINT_VACE, CLE_ENDPOINT_LIPSYNC, CLE_ARRET_SERVEUR]);
   const reglage = (c: string) => reglagesCache?.find((x) => x.cle === c)?.valeur ?? null;
   const cacheVideo = reglage(CLE_CACHE_VIDEO);
   const cachePhoto = reglage(CLE_CACHE_PHOTO);
   const serveurPhoto = reglage(CLE_ENDPOINT_PHOTO);
   const serveurVoix = reglage(CLE_ENDPOINT_VOIX);
   const serveurVace = reglage(CLE_ENDPOINT_VACE);
+  const serveurLipsync = reglage(CLE_ENDPOINT_LIPSYNC);
   const serveurArrete = Boolean(lireArretServeur(reglage(CLE_ARRET_SERVEUR))?.arrete);
 
   const compte = new Map(comptes.map((u) => [u.id, u]));
@@ -469,6 +473,45 @@ export default async function Equipe({
           </ol>
         </section>
       )}
+
+      <section id="lipsync" className="carte flex flex-col gap-3">
+        <h2 className="text-lg font-bold">Serveur lip-sync (InfiniteTalk)</h2>
+        <p className="text-sm text-sourdine">
+          La bouche suit la voix off, comme « image → vidéo + voix » d&apos;ElevenLabs : chaque plan part de sa photo (ou de la
+          dernière image du clip précédent) et de son morceau de voix off. La vidéo sort muette ; au montage, la voix off
+          d&apos;origine reste sur sa propre piste. Rien n&apos;est facturé quand il ne tourne pas (environ 0,12 $ le plan de 5 s en
+          480p).
+        </p>
+        {sp.lipsync && <p className="message-ok">Serveur lip-sync enregistré. Indiquez son modèle dans la console RunPod.</p>}
+        <ol className="flex list-decimal flex-col gap-3 pl-5 text-sm">
+          <li>
+            {serveurLipsync ? (
+              <span>
+                Serveur enregistré : <code>{serveurLipsync}</code>. Le moteur « Lip-sync (voix off) » est proposé dans les
+                onglets Plans et Clips.
+              </span>
+            ) : (
+              <form action={creerServeurLipsyncAction} className="flex flex-wrap items-end gap-2">
+                <BoutonEnvoi enCours="Création chez RunPod…">Créer le serveur lip-sync</BoutonEnvoi>
+                <span className="text-xs text-sourdine">ou collez l&apos;identifiant d&apos;un serveur déjà créé :</span>
+                <input name="endpoint" placeholder="ex. abc123xyz" className="champ w-40 py-1 text-sm" aria-label="Identifiant du serveur RunPod" />
+              </form>
+            )}
+          </li>
+          <li>
+            Dans la console RunPod, ouvrez{" "}
+            {serveurLipsync ? (
+              <a className="lien" href={`https://console.runpod.io/serverless/user/endpoint/${serveurLipsync}`} target="_blank" rel="noreferrer">
+                {SERVEUR_LIPSYNC.nom}
+              </a>
+            ) : (
+              SERVEUR_LIPSYNC.nom
+            )}
+            , « Manage » puis « Edit Endpoint », champ <b>Model</b> : <code className="select-all">{SERVEUR_LIPSYNC.modele}</code>,
+            puis « Save ». Sans cela, le premier clip télécharge Wan 2.1 (long et facturé).
+          </li>
+        </ol>
+      </section>
 
       {endpoint && !serveurPhoto && (
         <section id="cache" className="carte flex flex-col gap-3">

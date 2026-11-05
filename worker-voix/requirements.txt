@@ -9,3 +9,5 @@ soundfile==0.14.0
 requests==2.34.2
 runpod==1.10.0
 hf_transfer==0.1.9
+# Recalage de la voix off sur les silences entre les mots (lip-sync)
+faster-whisper==1.1.1

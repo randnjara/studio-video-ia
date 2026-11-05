@@ -3,6 +3,7 @@
 import { unstable_rethrow } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { Roue } from "@/components/bouton-envoi";
+import { lireTemps } from "@/lib/minutage";
 import { importerTableau, type LigneTableau } from "./actions";
 
 // Import d'un tableau de scènes enregistré en CSV (Excel ou Google Sheets : « Enregistrer sous… CSV »).
@@ -99,7 +100,7 @@ const norm = (t: string) =>
     .trim();
 
 // Mots-clés reconnus dans les titres de colonnes (le premier titre qui correspond l'emporte)
-const COLONNES: Record<keyof Omit<LigneTableau, "duree" | "plan_continu">, string[]> = {
+const COLONNES: Record<keyof Omit<LigneTableau, "duree" | "plan_continu" | "debut" | "fin">, string[]> = {
   voix: ["dialogue", "voix", "replique", "texte"],
   mouvement: ["mouvement", "motion", "prompt video"],
   description: ["description", "prompt image", "image"],
@@ -139,6 +140,9 @@ function convertir(lignes: string[][], personnage: string): { plans: LigneTablea
   const duree = titres.findIndex((t) => t.includes("duree reelle") || t === "duree");
   // Lignes de 5 s qui forment un seul plan à l'écran (même numéro = même photo de départ)
   const continu = titres.findIndex((t) => t === "plan continu");
+  // Minutage du plan dans la voix off (« 00:05 ») : il sert à découper la voix off pour le lip-sync
+  const colDebut = titres.findIndex((t) => t === "debut" || t === "debut s" || t === "start");
+  const colFin = titres.findIndex((t) => t === "fin" || t === "fin s" || t === "end");
   const lire = (l: string[], i?: number) => {
     const v = i === undefined || i < 0 ? "" : (l[i] ?? "").trim();
     return vide(v) ? "" : v;
@@ -164,6 +168,8 @@ function convertir(lignes: string[][], personnage: string): { plans: LigneTablea
       pose_fin: lire(l, index.pose_fin),
       duree: Number(lire(l, duree).replace(",", ".")) || null,
       plan_continu: Number.parseInt(lire(l, continu), 10) || null,
+      debut: lireTemps(lire(l, colDebut)),
+      fin: lireTemps(lire(l, colFin)),
     };
   });
   return {
@@ -192,7 +198,7 @@ export function ImportTableau({ projectId, personnageParDefaut = "" }: { project
       <p className="text-sm text-sourdine">
         Le fichier rempli par ChatGPT, ou un autre tableau en CSV : une ligne par plan.
         Colonnes reconnues : voix ou dialogue, mouvement, description, action, cadrage, angle, lieu ou décor, intention, pose
-        de début et de fin, durée. Un scénario Markdown « ## SCÈNE 01 … » est aussi accepté.
+        de début et de fin, durée, et le minutage « debut » / « fin » (pour découper la voix off en lip-sync). Un scénario Markdown « ## SCÈNE 01 … » est aussi accepté.
       </p>
       <input
         type="file"

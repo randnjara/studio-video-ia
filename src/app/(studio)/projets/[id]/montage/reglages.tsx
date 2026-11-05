@@ -1,7 +1,7 @@
 "use client";
 
-import { DUREE_MIN, type Element, type Fondu, type Piste, type Place, TRANSITIONS, type Timeline, type Zoom } from "@/lib/montage";
-import { deplacerDansPiste, majElement } from "./edition";
+import { DUREE_MIN, type Element, type Fondu, type Media, type Piste, type Place, TRANSITIONS, type Timeline, type Zoom, voixLiee } from "@/lib/montage";
+import { delier, deplacerDansPiste, majElement, relier, remplacer } from "./edition";
 
 // Réglages de l'élément choisi : durée, coupe, transitions, zoom lent, volume
 export function Reglages({
@@ -11,6 +11,7 @@ export function Reglages({
   place,
   modifiable,
   aSon,
+  sonsDisponibles = [],
   modifier,
   onCouper,
   onDupliquer,
@@ -22,6 +23,7 @@ export function Reglages({
   place?: Place;
   modifiable: boolean;
   aSon: boolean;
+  sonsDisponibles?: Media[]; // voix et sons du projet, pour « Remplacer par »
   modifier: (fn: (t: Timeline) => Timeline, historique?: boolean) => void;
   onCouper: () => void;
   onDupliquer: () => void;
@@ -35,6 +37,7 @@ export function Reglages({
     );
   }
   const principale = piste === timeline.pistes[0];
+  const sel = { piste: piste.id, element: element.id };
   const index = piste.elements.findIndex((e) => e.id === element.id);
   const dernier = index === piste.elements.length - 1;
   const visuel = element.nature !== "audio";
@@ -227,8 +230,55 @@ export function Reglages({
           />
         </label>
       )}
-      {element.nature === "video" && element.takeId && (
+      {element.nature === "video" && element.takeId && !element.voix && (
         <p className="text-xs text-sourdine">Les clips générés n'ont pas de son : ajoutez la voix off et la musique sur les pistes audio.</p>
+      )}
+
+      {/* Lip-sync : clip muet calé sur la voix off, qui reste sur sa propre piste */}
+      {element.voix && (
+        <div className="flex flex-col gap-2 rounded-md bg-surface-2 p-2 text-xs">
+          {voixLiee(timeline, element) ? (
+            <>
+              <p>
+                🔗 Lip-sync lié à « {element.voix.nom} » (à {element.voix.debut.toFixed(2)} s de la voix) : le clip suit la voix si
+                vous la déplacez. Volume, fondus et musique se règlent sur les pistes audio, sans rien regénérer.
+              </p>
+              <button type="button" className="bouton-discret self-start px-2 py-1 text-xs" onClick={() => modifier((t) => delier(t, sel))}>
+                Délier de la voix
+              </button>
+            </>
+          ) : (
+            <>
+              <p>Clip lip-sync délié : il se place bout à bout comme les autres plans (la bouche peut ne plus tomber juste).</p>
+              <button type="button" className="bouton-discret self-start px-2 py-1 text-xs" onClick={() => modifier((t) => relier(t, sel))}>
+                🔗 Relier à la voix off
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {element.nature === "audio" && sonsDisponibles.filter((m) => m.nature === "audio" && m.chemin !== element.chemin).length > 0 && (
+        <label className="flex flex-col gap-1">
+          <span className="etiquette mb-0 text-xs">Remplacer par</span>
+          <select
+            className="champ py-1 text-sm"
+            value=""
+            onChange={(ev) => {
+              const media = sonsDisponibles.find((m) => m.chemin === ev.target.value);
+              if (media) modifier((t) => remplacer(t, sel, media));
+            }}
+          >
+            <option value="">— garder ce son —</option>
+            {sonsDisponibles
+              .filter((m) => m.nature === "audio" && m.chemin !== element.chemin)
+              .map((m) => (
+                <option key={m.chemin} value={m.chemin}>
+                  {m.nom}
+                </option>
+              ))}
+          </select>
+        </label>
       )}
 
       <div className="flex flex-wrap gap-2 border-t border-ligne pt-3">

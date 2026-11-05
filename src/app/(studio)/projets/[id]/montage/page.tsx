@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { BoutonEnvoi } from "@/components/bouton-envoi";
 import { STATUTS_MONTAGE, couleurStatut, dateCourte, dureeLisible } from "@/lib/libelles";
-import { type Media, lireTimeline, placer, timelineParDefaut } from "@/lib/montage";
+import { type Media, type Timeline, lireTimeline, placer, timelineParDefaut } from "@/lib/montage";
 import { signerLiens } from "@/lib/production";
 import { getClient } from "@/lib/session";
 import { changerStatutMontage, creerMontage, renommerMontage, supprimerMontage } from "./actions";
@@ -18,7 +18,24 @@ type Montage = {
   timeline?: unknown;
 };
 
-type Clip = { takeId: string; planNumero: number; duree: number; videoPath: string | null; voix: string };
+// « lipsync » : clip lip-sync, avec la voix off qui a guidé la bouche et l'endroit de cette voix où il commence
+type Clip = {
+  takeId: string;
+  planNumero: number;
+  duree: number;
+  videoPath: string | null;
+  voix: string;
+  lipsync?: { creationId: string | null; debut: number; fin: number | null; muette: boolean };
+};
+type Essai = {
+  id: string;
+  video_path: string | null;
+  moteur?: string;
+  audio_debut_s?: number | string | null;
+  audio_fin_s?: number | string | null;
+  video_muette?: boolean;
+  voice_clips?: { voix_creation_id: string | null } | null;
+};
 
 const MESSAGES: Record<string, string> = {
   cree: "Montage créé. Ajoutez voix off et musique, réglez les plans, regardez l'aperçu, puis envoyez-le à valider.",
@@ -45,7 +62,9 @@ export default async function PageMontage({
   const [{ data: scenes }, { data: projet }, montages, { data: voixStudio }] = await Promise.all([
     supabase
       .from("scenes")
-      .select("id, position, duration_s, voiceover_text, image_path, validated_take_id, takes!takes_scene_id_fkey(id, video_path)")
+      .select(
+        "id, position, duration_s, voiceover_text, image_path, validated_take_id, takes!takes_scene_id_fkey(id, video_path, moteur, audio_debut_s, audio_fin_s, video_muette, voice_clips!takes_voice_clip_id_fkey(voix_creation_id))",
+      )
       .eq("project_id", id)
       .order("position"),
     supabase.from("projects").select("aspect_ratio").eq("id", id).single(),
@@ -53,7 +72,7 @@ export default async function PageMontage({
     // Voix du studio voix (la version mixée si elle existe) ; sans la migration 0014, la liste reste vide
     supabase
       .from("voix_creations")
-      .select("nom, audio_path, mixage_path, duree_s")
+      .select("id, nom, audio_path, mixage_path, duree_s")
       .eq("project_id", id)
       .eq("status", "terminee")
       .order("created_at", { ascending: false }),
@@ -66,31 +85,69 @@ export default async function PageMontage({
   const photos: Media[] = [];
   (scenes ?? []).forEach((s, i) => {
     if (s.image_path) photos.push({ chemin: s.image_path, nature: "image", nom: `Photo plan ${i + 1}`, duree: null });
-    for (const t of s.takes as { id: string; video_path: string | null }[]) {
-      const clip = {
+    for (const t of s.takes as unknown as Essai[]) {
+      const lipsync =
+        t.moteur === "lipsync" && t.audio_debut_s !== null && t.audio_debut_s !== undefined
+          ? {
+              creationId: t.voice_clips?.voix_creation_id ?? null,
+              debut: Number(t.audio_debut_s),
+              fin: t.audio_fin_s !== null && t.audio_fin_s !== undefined ? Number(t.audio_fin_s) : null,
+              muette: t.video_muette !== false,
+            }
+          : undefined;
+      const clip: Clip = {
         takeId: t.id,
         planNumero: i + 1,
-        duree: Number(s.duration_s || 5),
+        // Lip-sync : le clip dure exactement son morceau de voix
+        duree: lipsync?.fin !== null && lipsync?.fin !== undefined ? lipsync.fin - lipsync.debut : Number(s.duration_s || 5),
         videoPath: t.video_path,
         voix: s.voiceover_text,
+        lipsync,
       };
       clips.set(t.id, clip);
       if (t.id === s.validated_take_id && t.video_path) disponibles.push(clip);
     }
   });
-  const enMedia = (c: Clip): Media => ({ chemin: c.videoPath!, nature: "video", nom: `Plan ${c.planNumero}`, duree: c.duree, takeId: c.takeId });
-  const medias = disponibles.map(enMedia);
+  const voixParId = new Map<string, Media>();
   const voix: Media[] = (voixStudio ?? []).flatMap((v) => {
     const chemin = (v.mixage_path ?? v.audio_path) as string | null;
-    return chemin
-      ? [{ chemin, nature: "audio" as const, nom: `${v.nom || "Voix"}${v.mixage_path ? " (mixée)" : ""}`, duree: v.duree_s !== null ? Number(v.duree_s) : null }]
-      : [];
+    if (!chemin) return [];
+    const media = { chemin, nature: "audio" as const, nom: `${v.nom || "Voix"}${v.mixage_path ? " (mixée)" : ""}`, duree: v.duree_s !== null ? Number(v.duree_s) : null };
+    voixParId.set(v.id as string, media);
+    return [media];
   });
+  // Clip lip-sync : muet, avec la voix off d'où vient son morceau (la plus récente si le morceau n'en garde pas la trace)
+  const enMedia = (c: Clip): Media => {
+    const v = c.lipsync ? ((c.lipsync.creationId ? voixParId.get(c.lipsync.creationId) : undefined) ?? voix[0]) : undefined;
+    return {
+      chemin: c.videoPath!,
+      nature: "video",
+      nom: `Plan ${c.planNumero}${c.lipsync ? " · lip-sync" : ""}`,
+      duree: c.duree,
+      takeId: c.takeId,
+      ...(c.lipsync && v
+        ? { muet: c.lipsync.muette, voix: { chemin: v.chemin, nom: v.nom, duree: v.duree, debut: c.lipsync.debut } }
+        : {}),
+    };
+  };
+  const medias = disponibles.map(enMedia);
 
   // L'éditeur s'ouvre sur un montage à la fois (le plus récent par défaut)
   const ouvert = montages.find((m) => m.id === sp.ouvert) ?? montages[0];
+  // Montage enregistré avant le lip-sync : ses clips lip-sync apprennent leur voix off (bouton « Relier à la voix off »)
+  const avecVoix = (t: Timeline | null): Timeline | null =>
+    t && {
+      ...t,
+      pistes: t.pistes.map((p) => ({
+        ...p,
+        elements: p.elements.map((e) => {
+          const c = e.takeId && !e.voix ? clips.get(e.takeId) : undefined;
+          return c?.lipsync && c.videoPath ? { ...e, voix: enMedia(c).voix, muet: c.lipsync.muette } : e;
+        }),
+      })),
+    };
   const timeline = ouvert
-    ? (lireTimeline(ouvert.timeline) ??
+    ? (avecVoix(lireTimeline(ouvert.timeline)) ??
       timelineParDefaut(
         ouvert.take_ids.flatMap((t) => {
           const c = clips.get(t);

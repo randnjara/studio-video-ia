@@ -33,4 +33,8 @@ from chatterbox.vc import ChatterboxVC  # noqa: E402
 
 ChatterboxMultilingualTTS.from_pretrained(device="cpu")
 ChatterboxVC.from_pretrained("cpu")
+# Whisper (petit modèle) : repère les mots pour recaler la découpe de la voix off (lip-sync)
+from faster_whisper import WhisperModel  # noqa: E402
+
+WhisperModel("small", device="cpu", compute_type="int8")
 print("Modèles prêts")

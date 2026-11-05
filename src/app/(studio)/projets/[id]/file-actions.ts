@@ -72,7 +72,7 @@ async function requireResponsable() {
 export async function arreterServeur(chemin: string) {
   const { supabase, profile } = await requireResponsable();
   const etat = await lireEtatFile(supabase, "");
-  const ids = [...new Set([etat.serveurVideo, etat.serveurPhoto, etat.serveurVoix, etat.serveurVace].filter((x): x is string => Boolean(x)))];
+  const ids = [...new Set([etat.serveurVideo, etat.serveurPhoto, etat.serveurVoix, etat.serveurVace, etat.serveurLipsync].filter((x): x is string => Boolean(x)))];
   if (ids.length === 0) retourServeur(chemin, "file=sans-serveur");
 
   // Calculs en cours chez RunPod, tous projets confondus (clé secrète : le responsable ne voit pas tous les espaces)
