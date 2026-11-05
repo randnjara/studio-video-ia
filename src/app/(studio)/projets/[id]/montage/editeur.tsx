@@ -8,7 +8,7 @@ import { Bibliotheque } from "./bibliotheque";
 import { type Selection, ajouter, corrigerDurees, couper, dupliquer, supprimer, trouver } from "./edition";
 import { Exporter } from "./exporter";
 import { Pistes } from "./pistes";
-import { chargerSons } from "./rendu";
+import { avecSon, chargerSons } from "./rendu";
 import { Reglages } from "./reglages";
 
 // Le banc de montage : aperçu, médias, réglages, pistes et export.
@@ -390,7 +390,7 @@ export function Editeur({ projectId, montageId, titre, format, modifiable, initi
   const { piste: pisteSel, element: elementSel } = trouver(timeline, selection);
   const placeSel = places.find((p) => p.element.id === selection?.element);
   const [L, H] = APERCU[format] ?? APERCU["9:16"];
-  const sonsManquants = places.some((p) => (p.element.nature === "audio" || (p.element.nature === "video" && !p.element.takeId)) && !sons.has(p.element.chemin));
+  const sonsManquants = places.some((p) => avecSon(p.element) && !sons.has(p.element.chemin));
 
   return (
     <div className="flex flex-col gap-4">
@@ -484,6 +484,7 @@ export function Editeur({ projectId, montageId, titre, format, modifiable, initi
               place={placeSel}
               modifiable={modifiable}
               aSon={Boolean(elementSel && sons.has(elementSel.chemin))}
+              sonsDisponibles={[...voix, ...timeline.bibliotheque.filter((m) => m.nature === "audio")]}
               modifier={modifier}
               onCouper={couperIci}
               onDupliquer={dupliquerSelection}

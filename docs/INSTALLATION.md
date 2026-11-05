@@ -86,6 +86,29 @@ Le studio voix a son propre petit serveur (dossier `worker-voix/`), sur une cart
 
 Ensuite : menu **Voix** pour le catalogue et pour ajouter la voix d'une personne (avec son accord), et lien **🎙 Studio voix** en haut de chaque projet pour créer les voix, les régler dans la table de mixage (calculée par le navigateur, gratuite) et les envoyer au montage.
 
+## 8. Lip-sync sur la voix off (RunPod, migration 0018)
+
+Comme « image → vidéo + voix » d'ElevenLabs : chaque plan reçoit sa photo de départ (ou la dernière image du clip précédent) et son morceau de voix off ; la bouche suit exactement la voix. La vidéo sort **muette** ; au montage, la voix off d'origine reste sur sa propre piste (volume, fondus, musique et ambiance réglables sans rien regénérer).
+
+| Étape | Où | Outil |
+| --- | --- | --- |
+| Découpe de la voix off en un morceau par plan (WAV 16 kHz mono), recalage facultatif sur les silences (Whisper) | Serveur voix (`worker-voix/`, version 2) | ffmpeg, faster-whisper |
+| Clip lip-sync, 25 images/s, autant d'images que la voix en demande, sans piste audio, + dernière image | Serveur lip-sync (`worker-lipsync/`) | InfiniteTalk (Apache 2.0) sur Wan 2.1 I2V 14B 480p, LoRA rapide lightx2v |
+| Voix off entière à 0 s sur la piste « Voix off », clips calés à leur début dans la voix | Montage (navigateur) | Mediabunny |
+
+1. La migration `supabase/migrations/0018_lipsync_voix_off.sql` est déjà appliquée sur Supabase (colonnes de `voice_clips` et `takes`, moteur `lipsync`, clé `runpod_endpoint_lipsync`).
+2. Après la fusion dans `main`, GitHub construit deux images : `ghcr.io/randnjara/studio-video-ia-voix:v2` (le serveur voix apprend à découper) et `ghcr.io/randnjara/studio-video-ia-worker:lipsync` (`.github/workflows/serveur-lipsync.yml`, environ 30 minutes la première fois ; aussi `:lipsync-v1`). Le paquet `studio-video-ia-worker` doit rester **public** (il l’est déjà pour le serveur vidéo). Le studio passe tout seul le serveur voix sur la version 2 à la première découpe.
+3. Page **Équipe et budget** → **Serveur lip-sync** → **Créer le serveur lip-sync** (cartes de 80 Go, 0 machine au repos, 2 au maximum, 80 Go de disque). L'identifiant est rangé dans `reglages.runpod_endpoint_lipsync`. Vous pouvez aussi créer le serveur à la main dans RunPod → **Serverless** → **New Endpoint** → **Import from Docker Registry** → image `ghcr.io/randnjara/studio-video-ia-worker:lipsync-v1`, cartes 80 Go (A100 / H100), « Max workers » 2, « Idle timeout » 30 s, disque 80 Go, champ **Model** `Wan-AI/Wan2.1-I2V-14B-480P` ; puis collez son identifiant (ex. `abc123xyz`, visible dans l'adresse de la page du serveur) dans le champ à côté du bouton.
+4. Dans la console RunPod, serveur `studio-lipsync` → **Manage** → **Edit Endpoint**, champ **Model** : `Wan-AI/Wan2.1-I2V-14B-480P`, puis **Save**. Sans cela, le premier clip télécharge Wan 2.1 (long et facturé). Les poids InfiniteTalk (`MeiGen-AI/InfiniteTalk`, fichier `single/infinitetalk.safetensors`) et le LoRA rapide sont téléchargés au premier démarrage de chaque machine.
+
+La clé `RUNPOD_API_KEY` reste la seule clé : elle se range uniquement comme **secret** du Worker Cloudflare (partie 5), jamais dans le code ni dans la base.
+
+Utilisation : studio voix → créer la voix off ; onglet **ChatGPT** → le tableau rempli contient « debut » et « fin » (minutage dans la voix off) ; onglet **Plans** → importer le tableau : la découpe de la voix off part toute seule (ou bouton **✂ Découper la voix off**), puis **🗣 Générer toutes les scènes en lip-sync** (ou le moteur « Lip-sync (voix off) » dans la barre d'envoi, ou le bouton **🗣 Lip-sync** d'un plan dans « Clips »). Au montage, un nouveau montage pose la voix off entière à 0 s et lie chaque clip lip-sync (🔗) ; **Délier de la voix** remet un clip bout à bout, **Relier à la voix off** le recale ; **Remplacer par** change le fichier d'un son sans perdre sa place ni ses liens.
+
+Réglages du serveur (variables d'environnement du serveur RunPod, facultatives) : `STEPS` (6), `AUDIO_GUIDE` (2 ; plus haut = bouche plus fidèle), `TEXT_GUIDE` (1), `SHIFT` (2), `LORA_REPO` vide pour la version normale en 40 étapes (meilleure, 5 à 6 fois plus lente).
+
+Tests sans carte graphique : `npm run test:lipsync` (montage : décalage voix/bouche < 2 images, régler la voix ne touche pas la vidéo), `python3 worker-voix/test_decoupage.py` (morceaux exacts, recalage), `python3 worker-lipsync/test_video.py` (durée = voix ± 1 image, pas de piste audio).
+
 ## Catégorie du film et plans continus (migration 0016)
 
 Appliquez la migration `supabase/migrations/0016_categorie.sql` (SQL Editor → coller → **Run**). Elle ajoute la **catégorie** du film (interview, documentaire, film, promotion, tutoriel, clip) et le **plan continu** des lignes du tableau. Sans elle, le studio marche comme avant : la catégorie choisie n'est pas gardée et les lignes ne sont pas regroupées.

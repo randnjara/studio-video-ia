@@ -23,10 +23,14 @@ import { DIMENSIONS, type Place, type Timeline, dessiner, placer, programmerSons
 // l'encodeur vidéo de l'ordinateur (WebCodecs, via la librairie libre Mediabunny). Gratuit, rien n'est envoyé.
 
 const TAUX = 48000;
-const IMAGES_PAR_SECONDE = 24;
+// 25 images/s quand le film contient du lip-sync (les clips InfiniteTalk sont à 25 images/s : une image du film = une
+// image du clip, la bouche ne glisse pas d'une image sur l'autre)
+const imagesParSeconde = (t: Timeline) => (t.pistes.some((p) => p.elements.some((e) => e.voix)) ? 25 : 24);
 
-// Un fichier a-t-il du son à mixer ? Les clips générés par le studio sont muets.
-export const avecSon = (e: { nature: string; takeId?: string }) => e.nature === "audio" || (e.nature === "video" && !e.takeId);
+// Un fichier a-t-il du son à mixer ? Les clips générés par le studio sont muets (le lip-sync aussi : sa voix est sur la
+// piste « Voix off »). L'export ne mixe donc que les pistes audio et le son des vidéos importées.
+export const avecSon = (e: { nature: string; takeId?: string; muet?: boolean }) =>
+  e.nature === "audio" || (e.nature === "video" && !e.takeId && !e.muet);
 
 let decodeur: OfflineAudioContext | null = null;
 const sonsEnCache = new Map<string, Promise<AudioBuffer | null>>();
@@ -118,6 +122,7 @@ export async function exporter(
   }
   const { places, duree } = placer(timeline);
   if (duree <= 0) throw new Error("Le montage est vide.");
+  const IMAGES_PAR_SECONDE = imagesParSeconde(timeline);
   const [largeur, hauteur] = (DIMENSIONS[format] ?? DIMENSIONS["9:16"])[qualite];
   const qualiteVideo = qualite === "720p" ? QUALITY_HIGH : QUALITY_MEDIUM;
 

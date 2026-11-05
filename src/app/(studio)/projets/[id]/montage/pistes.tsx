@@ -303,6 +303,7 @@ export function Pistes({
                           <span className="pointer-events-none relative block truncate px-2 pt-1 font-semibold">
                             {e.entree !== "coupe" ? `${symboleTransition(e.entree)} ` : ""}
                             {e.zoom !== "aucun" ? "🔍 " : ""}
+                            {e.lien && e.voix ? "🔗 " : ""}
                             {e.nom}
                           </span>
                           {(p.element.nature === "audio" || (piste.nature === "audio" && e.volume !== 1)) && (

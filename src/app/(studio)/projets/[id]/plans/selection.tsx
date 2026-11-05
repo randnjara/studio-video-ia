@@ -53,7 +53,9 @@ export function BarreSelection({
       <div className="min-w-0 flex-1 text-sm">
         <p className="font-semibold">Envoyer à la génération vidéo</p>
         <p className="text-sourdine">
-          Cochez les plans à transformer en clips, ou envoyez d'un coup tous ceux qui n'ont pas encore de vidéo.
+          {moteur.id === "lipsync"
+            ? "Lip-sync : seuls les plans cochés qui ont leur morceau de voix off partent (bouton « Découper la voix off » plus haut)."
+            : "Cochez les plans à transformer en clips, ou envoyez d'un coup tous ceux qui n'ont pas encore de vidéo."}
         </p>
       </div>
       {moteurs.length > 1 ? (

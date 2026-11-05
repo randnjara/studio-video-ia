@@ -93,7 +93,7 @@ export async function creerServeur(
 
 // Serveur du studio voix (dossier worker-voix/) : sa propre image, construite par GitHub
 // (.github/workflows/serveur-voix.yml). À augmenter avec worker-voix/VERSION.
-export const VERSION_SERVEUR_VOIX = "1";
+export const VERSION_SERVEUR_VOIX = "2";
 const IMAGE_VOIX = `ghcr.io/randnjara/studio-video-ia-voix:v${VERSION_SERVEUR_VOIX}`;
 const NOM_VOIX = "studio-voix";
 
@@ -220,16 +220,18 @@ export async function depenseRunPodMois(): Promise<{ total: number; serveur: num
 
 const IMAGE_VERSION = `ghcr.io/randnjara/studio-video-ia-worker:v${VERSION_SERVEUR}`;
 
-// RunPod garde l'image en cache : on lui indique la version exacte quand le dossier worker/ a changé
-export async function mettreAJourServeur(supabase: SupabaseClient, endpointId: string) {
+// RunPod garde l'image en cache : on lui indique la version exacte quand le dossier worker/ (ou worker-lipsync/ pour le
+// serveur lip-sync, qui a sa propre image) a changé
+export async function mettreAJourServeur(supabase: SupabaseClient, endpointId: string, moteur?: string) {
+  const image = moteur === "lipsync" ? IMAGE_LIPSYNC : IMAGE_VERSION;
   const cleImage = `${CLE_IMAGE}:${endpointId}`;
   const { data } = await supabase.from("reglages").select("valeur").eq("cle", cleImage).maybeSingle();
-  if (data?.valeur === IMAGE_VERSION) return;
+  if (data?.valeur === image) return;
   await v2(`/v2/serverless/${encodeURIComponent(endpointId)}`, {
     method: "PATCH",
-    body: JSON.stringify({ image: IMAGE_VERSION }),
+    body: JSON.stringify({ image }),
   });
-  await supabase.from("reglages").upsert({ cle: cleImage, valeur: IMAGE_VERSION });
+  await supabase.from("reglages").upsert({ cle: cleImage, valeur: image });
 }
 
 // Cache gratuit de RunPod : un serveur par modèle (champ « Model » du serveur, réglé dans la console RunPod).
@@ -254,6 +256,18 @@ export const SERVEUR_VACE = { nom: "studio-vace-cache", modele: "linoyts/Wan2.2-
 
 export async function creerServeurVace(): Promise<string> {
   return creerServeur(SERVEUR_VACE.nom, MODELE_CACHE, IMAGE_VERSION);
+}
+
+// Serveur lip-sync (InfiniteTalk sur Wan 2.1 image → vidéo 14B 480p), dossier worker-lipsync/ : sa propre image,
+// construite par GitHub (.github/workflows/serveur-lipsync.yml), même dépôt d'images que le serveur vidéo, étiquette
+// « lipsync ». À augmenter avec worker-lipsync/VERSION. Le gros modèle (Wan 2.1) est dans le cache de RunPod (champ
+// « Model ») ; les poids InfiniteTalk, wav2vec et le LoRA rapide sont téléchargés au premier démarrage.
+export const VERSION_SERVEUR_LIPSYNC = "1";
+const IMAGE_LIPSYNC = `ghcr.io/randnjara/studio-video-ia-worker:lipsync-v${VERSION_SERVEUR_LIPSYNC}`;
+export const SERVEUR_LIPSYNC = { nom: "studio-lipsync", modele: "Wan-AI/Wan2.1-I2V-14B-480P" } as const;
+
+export async function creerServeurLipsync(): Promise<string> {
+  return creerServeur(SERVEUR_LIPSYNC.nom, SERVEUR_LIPSYNC.nom, IMAGE_LIPSYNC, { disqueGo: 80 });
 }
 
 // Supprime l'ancien serveur (attaché au disque) puis le disque payant

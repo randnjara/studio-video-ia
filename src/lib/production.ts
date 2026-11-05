@@ -3,7 +3,7 @@ import { avecMouvement } from "@/lib/categories";
 import { journaliser } from "@/lib/journal";
 import { type EtatFile, attente, lireEtatFile } from "@/lib/file-attente";
 import { type Reference, referencesCitees } from "@/lib/photos";
-import { MOTEURS, type Moteur, annulerJob, lancerGeneration, lireStatut } from "@/lib/runpod";
+import { MOTEURS, type Moteur, annulerJob, lancerGeneration, lireStatut, serveurManquant } from "@/lib/runpod";
 
 // Outils côté serveur partagés par les pages Plans, Clips et Montage.
 
@@ -65,16 +65,52 @@ async function fichesPersonnages(supabase: SupabaseClient, projectId: string) {
   return Object.assign(texte, { photos: (description: string) => cites(description).map((r) => r.image_path) });
 }
 
-// Serveur d'un moteur : aucun pour le service tout prêt, le serveur VACE pour « Visage fidèle », sinon le serveur vidéo
-export function serveurDuMoteur(moteur: string, etat: Pick<EtatFile, "serveurVideo" | "serveurVace">) {
+// Serveur d'un moteur : aucun pour le service tout prêt, le serveur VACE pour « Visage fidèle », le serveur InfiniteTalk
+// pour le lip-sync, sinon le serveur vidéo
+export function serveurDuMoteur(moteur: string, etat: Pick<EtatFile, "serveurVideo" | "serveurVace" | "serveurLipsync">) {
   if (moteur === "qualite") return undefined;
-  return (moteur === "fidele-480" ? etat.serveurVace : etat.serveurVideo) ?? undefined;
+  if (moteur === "fidele-480") return etat.serveurVace ?? undefined;
+  if (moteur === "lipsync") return etat.serveurLipsync ?? undefined;
+  return etat.serveurVideo ?? undefined;
 }
+
+// Moteurs qui passent par la file (la page Clips les envoie) : ils ont besoin d'informations lues au moment de l'envoi
+const PAR_LA_FILE: Moteur[] = ["fidele-480", "lipsync"];
 
 const resolutionDe = (moteur: Moteur) => (moteur === "eco-720" || moteur === "qualite" ? "720p" : "480p");
 
-const consigneVideo = (consigne: string, fiches: string) =>
-  [`${consigne.trim().replace(/[.\s]+$/, "")}.`, fiches, STABILITE].filter(Boolean).join(" ");
+// Lip-sync : la bouche suit la voix off, la consigne du tableau ne décrit que gestes, regard et caméra
+const PAROLE = "The person speaks to the camera, natural lip movements following the voice, expressive face.";
+
+const consigneVideo = (consigne: string, fiches: string, lipsync = false) =>
+  [`${consigne.trim().replace(/[.\s]+$/, "")}.`, lipsync ? PAROLE : "", fiches, STABILITE].filter(Boolean).join(" ");
+
+// Morceau de voix off d'un plan, prêt pour le lip-sync (découpé : un fichier et une durée)
+export type MorceauVoix = { id: string; scene_id: string; audio_path: string; debut_s: number | null; fin_s: number | null; duration_s: number | null };
+
+export async function morceauxVoix(supabase: SupabaseClient, sceneIds: string[]) {
+  const parPlan = new Map<string, MorceauVoix>();
+  if (sceneIds.length === 0) return parPlan;
+  const { data } = await supabase
+    .from("voice_clips")
+    .select("id, scene_id, audio_path, debut_s, fin_s, duration_s, created_at")
+    .in("scene_id", sceneIds)
+    .neq("audio_path", "")
+    .not("duration_s", "is", null)
+    .order("created_at", { ascending: false });
+  for (const m of (data ?? []) as MorceauVoix[]) if (!parPlan.has(m.scene_id)) parPlan.set(m.scene_id, m);
+  return parPlan;
+}
+
+// Colonnes d'un clip lip-sync : le son qui guide la bouche, et sa place dans la voix off entière
+const champsLipsync = (m: MorceauVoix) => ({
+  voice_clip_id: m.id,
+  audio_path: m.audio_path,
+  audio_debut_s: m.debut_s,
+  audio_fin_s: m.fin_s ?? (m.debut_s !== null && m.duration_s !== null ? Number(m.debut_s) + Number(m.duration_s) : null),
+  video_muette: true,
+});
+const dureeMorceau = (m: MorceauVoix) => Number(m.duration_s) || Number(m.fin_s) - Number(m.debut_s) || 5;
 
 // Photo de départ d'un clip. Prise unique, dans toutes les catégories : chaque clip part de la dernière image du clip
 // précédent (celui validé, sinon le dernier réussi), sur tout le film, même quand le plan continu change.
@@ -156,7 +192,11 @@ export async function lancerPlan(
   if (!plan.motion_prompt) return "sans-prompt";
   if (!plan.consent_confirmed) return "sans-accord";
 
-  const duree = Number(plan.duration_s) || 5;
+  // Lip-sync : le plan doit avoir son morceau de voix off (bouton « Découper la voix off »)
+  const morceau = moteur === "lipsync" ? (await morceauxVoix(supabase, [plan.id])).get(plan.id) : undefined;
+  if (moteur === "lipsync" && !morceau) return "sans-voix";
+
+  const duree = morceau ? dureeMorceau(morceau) : Number(plan.duration_s) || 5;
   const seed = Math.floor(Math.random() * 2_000_000_000);
 
   // Le coût estimé est compté tout de suite, pour que le plafond du mois bloque à temps
@@ -170,13 +210,15 @@ export async function lancerPlan(
       moteur,
       resolution: resolutionDe(moteur),
       created_by: auteurId,
+      ...(morceau ? champsLipsync(morceau) : {}),
     })
     .select("id")
     .single();
   if (error || !essai) return error?.code === "P0001" ? "budget" : "essai";
 
-  // « Visage fidèle » passe par la file (photos des personnages, serveur VACE) : la page Clips l'envoie dans les 10 s
-  if (moteur === "fidele-480") {
+  // « Visage fidèle » (photos des personnages, serveur VACE) et le lip-sync (morceau de voix off, serveur InfiniteTalk)
+  // passent par la file : la page Clips les envoie dans les 10 s
+  if (PAR_LA_FILE.includes(moteur)) {
     if (plan.status !== "validee") await supabase.from("scenes").update({ status: "en_generation" }).eq("id", plan.id);
     await journaliser(supabase, auteurId, "generation", "essai", essai.id, { scene_id: plan.id });
     return null;
@@ -258,12 +300,16 @@ export async function demanderEssais(
   plans: Plan[],
   moteur: Moteur,
 ): Promise<{ inscrits: number; erreur: string | null }> {
-  const prets = plans.filter((p) => p.image_path && p.motion_prompt && p.consent_confirmed);
-  if (prets.length === 0) return { inscrits: 0, erreur: "selection-vide" };
+  const morceaux = moteur === "lipsync" ? await morceauxVoix(supabase, plans.map((p) => p.id)) : null;
+  // Lip-sync : seuls les plans qui ont leur morceau de voix off partent
+  const prets = plans.filter((p) => p.image_path && p.motion_prompt && p.consent_confirmed && (!morceaux || morceaux.has(p.id)));
+  if (prets.length === 0) return { inscrits: 0, erreur: morceaux ? "sans-voix" : "selection-vide" };
   const { error } = await supabase.from("takes").insert(
     prets.map((plan) => {
-      const duree = Number(plan.duration_s) || 5;
+      const morceau = morceaux?.get(plan.id);
+      const duree = morceau ? dureeMorceau(morceau) : Number(plan.duration_s) || 5;
       return {
+        ...(morceau ? champsLipsync(morceau) : {}),
         scene_id: plan.id,
         status: "en_cours",
         seed: Math.floor(Math.random() * 2_000_000_000),
@@ -323,7 +369,8 @@ async function echecEssai(supabase: SupabaseClient, essai: EssaiEnCours, erreur:
 // Envoie à RunPod quelques essais en attente
 async function envoyerEssais(supabase: SupabaseClient, projectId: string, enAttente: EssaiEnCours[], etat: EtatFile) {
   if (enAttente.length === 0) return;
-  const [{ data: projet }, { data: scenes }, fiches] = await Promise.all([
+  const lipsync = enAttente.filter((e) => e.moteur === "lipsync").map((e) => e.id);
+  const [{ data: projet }, { data: scenes }, fiches, { data: sons }] = await Promise.all([
     supabase.from("projects").select("aspect_ratio").eq("id", projectId).single(),
     supabase
       .from("scenes")
@@ -331,6 +378,10 @@ async function envoyerEssais(supabase: SupabaseClient, projectId: string, enAtte
       .select("*")
       .in("id", [...new Set(enAttente.map((e) => e.scene_id))]),
     fichesPersonnages(supabase, projectId),
+    // Lip-sync : le morceau de voix off inscrit avec chaque clip
+    lipsync.length
+      ? supabase.from("takes").select("id, audio_path, audio_debut_s, audio_fin_s").in("id", lipsync)
+      : Promise.resolve({ data: [] as { id: string; audio_path: string | null; audio_debut_s: number | null; audio_fin_s: number | null }[] }),
   ]);
   // Prise unique : un clip attend la fin du précédent. Les clips d'un même lot ont la même date : on les range dans
   // l'ordre du film pour que le premier clip du plan passe avant ses suites, et on regarde un peu plus loin dans la
@@ -363,13 +414,13 @@ async function envoyerEssais(supabase: SupabaseClient, projectId: string, enAtte
     try {
       if (!plan?.image_path || !depart) throw new Error("Photo introuvable dans le stockage.");
       const serveur = serveurDuMoteur(essai.moteur, etat);
-      if (essai.moteur !== "qualite" && !serveur)
-        throw new Error(
-          essai.moteur === "fidele-480"
-            ? "Le serveur « Visage fidèle » n'est pas encore créé (voir « Équipe et budget »)."
-            : "Notre serveur RunPod n'est pas encore créé.",
-        );
-      const duree = Number(plan.duration_s) || 5;
+      if (essai.moteur !== "qualite" && !serveur) throw new Error(serveurManquant(essai.moteur));
+      const son = essai.moteur === "lipsync" ? sons?.find((s) => s.id === essai.id) : undefined;
+      if (essai.moteur === "lipsync" && !son?.audio_path) throw new Error("Ce plan n'a pas de morceau de voix off : découpez la voix off.");
+      // Lip-sync : la vidéo dure exactement le morceau de voix (le serveur la recale à l'image près)
+      const duree = son
+        ? Math.max(0.5, Number(son.audio_fin_s) - Number(son.audio_debut_s)) || Number(plan.duration_s) || 5
+        : Number(plan.duration_s) || 5;
       // La vidéo sera rangée à côté des photos du projet ; notre serveur l'y dépose lui-même
       const videoPath = `${projectId}/essais/${essai.id}.mp4`;
       const notreServeur = essai.moteur !== "qualite";
@@ -381,18 +432,20 @@ async function envoyerEssais(supabase: SupabaseClient, projectId: string, enAtte
               return photos.length ? photos : [plan.image_path];
             })()
           : [];
-      const [{ data: signee, error: errSigne }, envoi, dernierePhoto, { data: liensVisages }] = await Promise.all([
+      const [{ data: signee, error: errSigne }, envoi, dernierePhoto, { data: liensVisages }, lienSon] = await Promise.all([
         supabase.storage.from(BUCKET).createSignedUrl(depart.chemin, 60 * 60),
         notreServeur ? supabase.storage.from(BUCKET).createSignedUploadUrl(videoPath, { upsert: true }) : Promise.resolve(null),
         notreServeur ? lienDernierePhoto(supabase, projectId, essai.id) : Promise.resolve(undefined),
         visages.length ? supabase.storage.from(BUCKET).createSignedUrls(visages, 60 * 60) : Promise.resolve({ data: [] }),
+        son?.audio_path ? supabase.storage.from(BUCKET).createSignedUrl(son.audio_path, 3 * 60 * 60) : Promise.resolve(null),
       ]);
       const referenceUrls = (liensVisages ?? []).map((l) => l.signedUrl).filter((u): u is string => Boolean(u));
       if (errSigne || !signee) throw new Error("Photo introuvable dans le stockage.");
       if (envoi && (envoi.error || !envoi.data)) throw new Error("Impossible de préparer l'envoi de la vidéo.");
+      if (son && !lienSon?.data?.signedUrl) throw new Error("Morceau de voix off introuvable dans le stockage.");
       const jobId = await lancerGeneration({
         moteur: essai.moteur,
-        prompt: consigneVideo(depart.consigne, fiches(String(plan.image_description ?? ""))),
+        prompt: consigneVideo(depart.consigne, fiches(String(plan.image_description ?? "")), essai.moteur === "lipsync"),
         imageUrl: signee.signedUrl,
         format: projet?.aspect_ratio ?? "16:9",
         duree,
@@ -401,6 +454,7 @@ async function envoyerEssais(supabase: SupabaseClient, projectId: string, enAtte
         uploadUrl: envoi?.data?.signedUrl ?? "",
         dernierePhoto,
         referenceUrls,
+        audioUrl: lienSon?.data?.signedUrl,
         serveur,
       });
       const { data: gardee, error } = await supabase

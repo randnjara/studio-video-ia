@@ -1,0 +1,30 @@
+# Versions figées pour que chaque reconstruction donne le même serveur lip-sync (InfiniteTalk demande torch 2.4.1,
+# déjà dans l'image de base, et xformers 0.0.28, installé à part depuis l'index de PyTorch)
+transformers==4.49.0
+tokenizers==0.21.0
+diffusers==0.31.0
+accelerate==1.1.1
+xfuser==0.4.1
+optimum-quanto==0.2.6
+numpy==1.26.4
+opencv-python-headless==4.10.0.84
+scikit-image==0.24.0
+imageio==2.36.1
+imageio-ffmpeg==0.5.1
+decord==0.6.0
+librosa==0.10.2.post1
+soundfile==0.12.1
+pyloudnorm==0.1.1
+einops==0.8.0
+easydict==1.13
+ftfy==6.3.1
+loguru==0.7.3
+tqdm==4.67.1
+scenedetect==0.6.5.2
+moviepy==1.0.3
+dashscope==1.20.14
+safetensors==0.4.5
+huggingface_hub==0.26.5
+hf_transfer==0.1.8
+requests==2.32.3
+runpod==1.7.7

@@ -28,6 +28,9 @@ export type Media = {
   nom: string;
   duree: number | null; // durée réelle du fichier, null pour une image
   takeId?: string; // clip généré par le studio
+  muet?: boolean; // vidéo sans son (clip lip-sync : la voix est sur sa propre piste)
+  // Clip lip-sync : la voix off qui a guidé la bouche, et l'endroit de cette voix où commence le clip (s)
+  voix?: { chemin: string; nom: string; duree: number | null; debut: number };
 };
 
 export type Element = Media & {
@@ -40,6 +43,9 @@ export type Element = Media & {
   sortie: Fondu;
   transition: number; // durée des fondus (s)
   zoom: Zoom;
+  // Clip lip-sync lié à la voix off : identifiant du bloc de voix sur une piste audio. Le clip est alors calé sur la voix
+  // (même si la voix est déplacée ou coupée) ; « Délier » le remet bout à bout comme les autres plans.
+  lien?: string | null;
 };
 
 export type Piste = {
@@ -85,13 +91,45 @@ export function nouvelElement(media: Media, debut = 0): Element {
   };
 }
 
+// Lip-sync : la voix off entière est posée à 0 s sur la piste « Voix off », et chaque clip lip-sync y est lié (calé à
+// l'endroit de la voix qui a guidé sa bouche). La vidéo reste muette : volume, fondus et musique se règlent sur les
+// pistes audio sans rien regénérer.
 export function timelineParDefaut(clips: Media[]): Timeline {
-  const principale = { ...nouvellePiste("video", "Vidéo principale"), elements: clips.map((c) => nouvelElement(c)) };
+  const voix = clips.find((c) => c.voix)?.voix;
+  const voixOff = nouvellePiste("audio", "Voix off");
+  const blocVoix = voix ? nouvelElement({ chemin: voix.chemin, nature: "audio", nom: voix.nom, duree: voix.duree }) : null;
+  if (blocVoix) voixOff.elements.push(blocVoix);
+  const elements = clips.map((c) => {
+    const e = nouvelElement(c);
+    if (blocVoix && c.voix?.chemin === voix?.chemin) e.lien = blocVoix.id;
+    return e;
+  });
+  const principale = { ...nouvellePiste("video", "Vidéo principale"), elements };
   return {
     version: 1,
-    pistes: [principale, nouvellePiste("video", "Images par-dessus"), nouvellePiste("audio", "Voix off"), nouvellePiste("audio", "Musique")],
+    pistes: [
+      principale,
+      nouvellePiste("video", "Images par-dessus"),
+      voixOff,
+      nouvellePiste("audio", "Musique"),
+      ...(blocVoix ? [nouvellePiste("audio", "Ambiance")] : []),
+    ],
     bibliotheque: [],
   };
+}
+
+// Bloc de voix auquel un clip lip-sync est lié : celui du lien, sinon (bloc supprimé ou remplacé) un bloc du même fichier
+export function voixLiee(t: Timeline, e: Element): Element | null {
+  if (!e.lien || !e.voix) return null;
+  const audio = t.pistes.filter((p) => p.nature === "audio").flatMap((p) => p.elements);
+  return audio.find((x) => x.id === e.lien) ?? audio.find((x) => x.chemin === e.voix!.chemin) ?? null;
+}
+
+// Instant du film où passe l'image 0 du fichier d'un clip lié : le début de sa voix dans le film, plus l'endroit de la
+// voix où commence le clip. Un bloc de voix coupé en deux garde « debut - coupeDebut » : le calage ne bouge pas.
+export function ancre(t: Timeline, e: Element): number | null {
+  const v = voixLiee(t, e);
+  return v && e.voix ? v.debut - v.coupeDebut + e.voix.debut : null;
 }
 
 // Lecture prudente d'une timeline enregistrée (ou envoyée par le navigateur)
@@ -126,6 +164,12 @@ export type Place = {
 // fait chevaucher deux plans ; le fondu au noir ou au blanc passe par une image unie (moitié du temps chacun).
 export function placer(timeline: Timeline): { places: Place[]; duree: number } {
   const places: Place[] = [];
+  // Calage des clips lip-sync liés à la voix off : un clip lié se cale sur la place de son bloc de voix
+  const ancres = new Map<string, number>();
+  for (const e of timeline.pistes[0]?.elements ?? []) {
+    const a = ancre(timeline, e);
+    if (a !== null) ancres.set(e.id, a);
+  }
   timeline.pistes.forEach((piste, niveau) => {
     const principale = niveau === 0;
     let curseur = 0;
@@ -138,7 +182,21 @@ export function placer(timeline: Timeline): { places: Place[]; duree: number } {
       let entree: Fondu = e.entree;
       let sortie: Fondu = e.sortie;
       let pousse = 0;
-      if (principale) {
+      const calage = principale ? ancres.get(e.id) : undefined;
+      if (calage !== undefined) {
+        // Clip lié à la voix off : l'image suit la voix à l'image près, quelle que soit la place des plans voisins.
+        // Ses fondus se font sur place (sans décaler le clip).
+        debut = calage + e.coupeDebut;
+        if (avant && e.entree !== "coupe") fonduEntree = dureeFondu(e, avant);
+        if (apres && PASSAGE.includes(apres.entree)) {
+          fonduSortie = dureeFondu(apres, e) / 2;
+          sortie = apres.entree;
+        } else if (apres && ancres.has(apres.id)) {
+          fonduSortie = 0;
+          sortie = "coupe";
+        }
+        curseur = debut + e.longueur;
+      } else if (principale) {
         if (avant && CHEVAUCHE.includes(e.entree)) {
           fonduEntree = dureeFondu(e, avant);
           debut = curseur - fonduEntree;

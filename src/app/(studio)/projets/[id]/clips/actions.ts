@@ -5,8 +5,8 @@ import { redirect } from "next/navigation";
 import { lireEtatFile } from "@/lib/file-attente";
 import { journaliser } from "@/lib/journal";
 import { CONTROLES_CLIP } from "@/lib/libelles";
-import { lancerPlan, suivreEssais } from "@/lib/production";
-import { endpointEco, endpointVace, estMoteur, moteurParDefaut } from "@/lib/runpod";
+import { lancerPlan, serveurDuMoteur, suivreEssais } from "@/lib/production";
+import { endpointDuMoteur, estMoteur, moteurParDefaut } from "@/lib/runpod";
 import { mettreAJourServeur } from "@/lib/runpod-admin";
 import { requireProfile } from "@/lib/session";
 import { type EtatServeur, surveiller } from "@/lib/surveillance";
@@ -42,17 +42,11 @@ export async function actualiserEssais(projectId: string): Promise<{ restants: n
   const parties = essais.filter(
     (e): e is typeof e & { runpod_job_id: string } => e.moteur !== "qualite" && Boolean(e.runpod_job_id) && e.runpod_job_id !== "envoi",
   );
-  // Le serveur surveillé est celui du moteur des clips en cours (« Visage fidèle » a le sien)
-  const fidele = essais.some((e) => e.moteur === "fidele-480");
-  const serveur = essais.some((e) => e.moteur !== "qualite")
-    ? await surveiller(
-        supabase,
-        projectId,
-        "video",
-        fidele ? etat.serveurVace : etat.serveurVideo,
-        etat,
-        parties.filter((e) => (e.moteur === "fidele-480") === fidele),
-      )
+  // Le serveur surveillé est celui du moteur des clips en cours (« Visage fidèle » et le lip-sync ont le leur)
+  const premier = essais.find((e) => e.moteur !== "qualite");
+  const suivi = premier ? serveurDuMoteur(premier.moteur, etat) : undefined;
+  const serveur = premier
+    ? await surveiller(supabase, projectId, "video", suivi ?? null, etat, parties.filter((e) => serveurDuMoteur(e.moteur, etat) === suivi))
     : null;
   return { restants, serveur };
 }
@@ -120,7 +114,8 @@ export async function supprimerClip(projectId: string, sceneId: string, takeId: 
   retour(projectId, `#plan-${sceneId}`);
 }
 
-export async function regenerer(projectId: string, sceneId: string) {
+// Un nouvel essai, avec le même moteur que le précédent, ou le moteur demandé (bouton « Lip-sync »)
+export async function regenerer(projectId: string, sceneId: string, formData?: FormData) {
   const { supabase, profile } = await requireProfile();
   const [{ data: projet }, { data: plan }, { data: dernier }] = await Promise.all([
     supabase.from("projects").select("aspect_ratio").eq("id", projectId).single(),
@@ -141,11 +136,12 @@ export async function regenerer(projectId: string, sceneId: string) {
       .maybeSingle(),
   ]);
   if (!plan) retour(projectId, "?erreur=plan");
-  const moteur = estMoteur(dernier?.moteur) ? dernier.moteur : await moteurParDefaut();
+  const demande = formData?.get("moteur");
+  const moteur = estMoteur(demande) ? demande : estMoteur(dernier?.moteur) ? dernier.moteur : await moteurParDefaut();
   if (moteur !== "qualite" && (await lireEtatFile(supabase, projectId)).serveurArrete)
     retour(projectId, `?erreur=serveur-arrete#plan-${sceneId}`);
-  const serveur = moteur === "qualite" ? null : moteur === "fidele-480" ? await endpointVace() : await endpointEco();
-  if (serveur) await mettreAJourServeur(supabase, serveur).catch(() => undefined);
+  const serveur = await endpointDuMoteur(moteur);
+  if (serveur) await mettreAJourServeur(supabase, serveur, moteur).catch(() => undefined);
   const erreur = await lancerPlan(supabase, profile.id, plan, projet?.aspect_ratio ?? "16:9", moteur);
   retour(projectId, erreur ? `?erreur=${erreur}#plan-${sceneId}` : `?lances=1#plan-${sceneId}`);
 }

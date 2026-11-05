@@ -11,6 +11,9 @@ et lui donne le timbre d'une autre voix. Elle ne dépend pas de la langue : c'es
 d'une personne (MMS dit le texte, puis la conversion lui donne la voix voulue).
 
 Le résultat (WAV) est déposé directement dans le stockage Supabase grâce au lien d'envoi fourni par le site.
+
+Enfin, « decouper » coupe la voix off du film en un morceau par plan (WAV 16 kHz mono, ffmpeg) pour le lip-sync,
+avec recalage facultatif sur les silences entre les mots (Whisper) : voir decoupage.py.
 """
 
 import os
@@ -242,8 +245,58 @@ def generer(entree):
     return {"audio_path": entree["audio_path"], "duree": round(len(son) / frequence, 2), "secondes": round(secondes, 1)}
 
 
+def decouper_voix_off(entree):
+    """Un morceau de voix off par plan, déposé dans le stockage du studio (un lien d'envoi par morceau)."""
+    from decoupage import preparer
+
+    morceaux = entree.get("morceaux") or []
+    if not entree.get("source_url") or not morceaux:
+        return {"error": "Il faut la voix off et le minutage des plans."}
+    for m in morceaux:
+        for champ in ("scene_id", "debut", "fin", "audio_path", "upload_url"):
+            if m.get(champ) in (None, ""):
+                return {"error": f"Champ manquant dans un morceau : {champ}"}
+        m["debut"], m["fin"] = float(m["debut"]), float(m["fin"])
+    debut = time.time()
+    with tempfile.TemporaryDirectory() as dossier:
+        source = os.path.join(dossier, "voix-off")
+        reponse = requests.get(entree["source_url"], timeout=300)
+        reponse.raise_for_status()
+        with open(source, "wb") as f:
+            f.write(reponse.content)
+        decoupes, recale = preparer(
+            source,
+            morceaux,
+            float(entree.get("fin_prevue") or max(m["fin"] for m in morceaux)),
+            bool(entree.get("recaler")),
+            str(entree.get("langue") or ""),
+            str(entree.get("cle") or entree["source_url"].split("?")[0]),
+            dossier,
+        )
+        resultat = []
+        for m, chemin, a, b, duree in decoupes:
+            with open(chemin, "rb") as f:
+                envoi = requests.put(m["upload_url"], data=f, headers={"Content-Type": "audio/wav", "x-upsert": "true"}, timeout=120)
+            if not envoi.ok:
+                return {"error": f"Envoi d'un morceau refusé ({envoi.status_code}) : {envoi.text[:200]}"}
+            resultat.append(
+                {
+                    "id": m.get("id"),
+                    "scene_id": m["scene_id"],
+                    "texte": m.get("texte", ""),
+                    "audio_path": m["audio_path"],
+                    "debut": round(a, 4),
+                    "fin": round(b, 4),
+                    "duree": round(duree, 4),
+                }
+            )
+    return {"morceaux": resultat, "recale": recale, "secondes": round(time.time() - debut, 1)}
+
+
 def handler(job):
     try:
+        if job["input"].get("moteur") == "decouper":
+            return decouper_voix_off(job["input"])
         return generer(job["input"])
     except Exception as e:
         traceback.print_exc()

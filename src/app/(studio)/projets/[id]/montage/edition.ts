@@ -138,3 +138,56 @@ export function corrigerDurees(t: Timeline, durees: Map<string, number>): Timeli
   });
   return change ? { ...t, pistes, bibliotheque } : t;
 }
+
+// Lip-sync : délie un clip de la voix off (il redevient un plan bout à bout comme les autres)
+export function delier(t: Timeline, s: Selection): Timeline {
+  const { piste, element } = trouver(t, s);
+  if (!piste || !element) return t;
+  return majElement(t, piste.id, element.id, { lien: null });
+}
+
+// Lip-sync : relie un clip à sa voix off. Si la voix n'est plus sur une piste audio, elle est reposée à 0 s sur la piste
+// « Voix off » (créée au besoin).
+export function relier(t: Timeline, s: Selection): Timeline {
+  const { piste, element } = trouver(t, s);
+  if (!piste || !element?.voix) return t;
+  const voix = element.voix;
+  let timeline = t;
+  let bloc = timeline.pistes.filter((p) => p.nature === "audio").flatMap((p) => p.elements).find((e) => e.chemin === voix.chemin);
+  if (!bloc) {
+    bloc = nouvelElement({ chemin: voix.chemin, nature: "audio", nom: voix.nom, duree: voix.duree });
+    let cible = timeline.pistes.find((p) => p.nature === "audio" && /voix/i.test(p.nom));
+    if (!cible) {
+      cible = nouvellePiste("audio", "Voix off");
+      timeline = { ...timeline, pistes: [...timeline.pistes, cible] };
+    }
+    const nouveau = bloc;
+    timeline = majPiste(timeline, cible.id, (p) => ({ ...p, elements: trier([...p.elements, nouveau]) }));
+  }
+  return majElement(timeline, piste.id, element.id, { lien: bloc.id });
+}
+
+// Remplace le fichier d'un bloc (une autre voix, une autre musique…) en gardant sa place, ses réglages et ses liens
+export function remplacer(t: Timeline, s: Selection, media: Media): Timeline {
+  const { piste, element } = trouver(t, s);
+  if (!piste || !element || media.nature !== element.nature) return t;
+  const d = media.duree ?? element.duree;
+  const coupeDebut = d ? Math.min(element.coupeDebut, Math.max(0, d - DUREE_MIN)) : element.coupeDebut;
+  const longueur = d ? Math.max(DUREE_MIN, Math.min(element.longueur, d - coupeDebut)) : element.longueur;
+  const timeline = majElement(t, piste.id, element.id, { chemin: media.chemin, nom: media.nom, duree: media.duree, coupeDebut, longueur });
+  // Les clips lip-sync liés à ce bloc suivent le nouveau fichier
+  const principale = timeline.pistes[0];
+  return {
+    ...timeline,
+    pistes: timeline.pistes.map((p) =>
+      p.id !== principale.id
+        ? p
+        : {
+            ...p,
+            elements: p.elements.map((e) =>
+              e.lien === element.id && e.voix ? { ...e, voix: { ...e.voix, chemin: media.chemin, nom: media.nom, duree: media.duree } } : e,
+            ),
+          },
+    ),
+  };
+}

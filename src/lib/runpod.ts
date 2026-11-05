@@ -9,10 +9,13 @@ import { getClient } from "@/lib/session";
 //   (bouton dans « Équipe et budget », identifiant gardé dans la table reglages) ;
 // - « fidele-480 » : Wan 2.2 VACE sur un serveur à part. Il part de la même photo de départ (la dernière image du clip
 //   précédent) et regarde en plus la photo du personnage pendant tout le clip : le visage ne dérive plus d'un clip
-//   enchaîné à l'autre (MAMAN 2). Disponible dès que ce serveur est créé.
+//   enchaîné à l'autre (MAMAN 2). Disponible dès que ce serveur est créé ;
+// - « lipsync » : InfiniteTalk (Wan 2.1 image → vidéo + son) sur un serveur à part (dossier worker-lipsync/). Il reçoit la
+//   photo de départ et le morceau de voix off du plan : la bouche suit exactement la voix. La vidéo sort muette (25 images/s,
+//   autant d'images que la voix en demande) ; au montage, la voix off d'origine reste sur sa propre piste.
 const PUBLIC = "https://api.runpod.ai/v2/wan-2-2-i2v-720";
 
-export type Moteur = "qualite" | "eco-480" | "eco-720" | "fidele-480";
+export type Moteur = "qualite" | "eco-480" | "eco-720" | "fidele-480" | "lipsync";
 
 // Prix estimés d'un clip de 5 s, comptés tout de suite pour que le plafond du mois bloque à temps.
 // Pour notre serveur, le coût réel est recalculé ensuite à partir du temps de GPU.
@@ -20,6 +23,7 @@ export const MOTEURS: Record<Moteur, { libelle: string; prix5s: number }> = {
   "eco-480": { libelle: "Économique 480p", prix5s: 0.05 },
   "eco-720": { libelle: "Économique 720p", prix5s: 0.12 },
   "fidele-480": { libelle: "Visage fidèle 480p (VACE)", prix5s: 0.08 },
+  lipsync: { libelle: "Lip-sync (voix off)", prix5s: 0.12 },
   qualite: { libelle: "Qualité max 720p", prix5s: 0.3 },
 };
 
@@ -58,6 +62,22 @@ export const endpointVace = cache(async (): Promise<string | null> => {
   return data?.valeur || null;
 });
 
+// Serveur lip-sync (InfiniteTalk), dossier worker-lipsync/ : moteur « lipsync »
+export const CLE_ENDPOINT_LIPSYNC = "runpod_endpoint_lipsync";
+export const endpointLipsync = cache(async (): Promise<string | null> => {
+  const supabase = await getClient();
+  const { data } = await supabase.from("reglages").select("valeur").eq("cle", CLE_ENDPOINT_LIPSYNC).maybeSingle();
+  return data?.valeur || null;
+});
+
+// Serveur à utiliser pour un moteur (aucun pour le service tout prêt)
+export async function endpointDuMoteur(moteur: Moteur): Promise<string | null> {
+  if (moteur === "qualite") return null;
+  if (moteur === "fidele-480") return endpointVace();
+  if (moteur === "lipsync") return endpointLipsync();
+  return endpointEco();
+}
+
 export const endpointPhoto = cache(async (): Promise<string | null> => {
   const supabase = await getClient();
   const { data } = await supabase.from("reglages").select("valeur").eq("cle", CLE_ENDPOINT_PHOTO).maybeSingle();
@@ -65,10 +85,11 @@ export const endpointPhoto = cache(async (): Promise<string | null> => {
 });
 
 export async function moteursDisponibles(): Promise<Moteur[]> {
-  const [eco, vace] = await Promise.all([endpointEco(), endpointVace()]);
+  const [eco, vace, lipsync] = await Promise.all([endpointEco(), endpointVace(), endpointLipsync()]);
   const tous: Moteur[] = eco ? ["eco-480", "eco-720", "qualite"] : ["qualite"];
-  // Visage fidèle en premier : c'est le choix par défaut du menu, le visage ne dérive plus d'un clip à l'autre
-  return vace ? ["fidele-480", ...tous] : tous;
+  // Visage fidèle en premier : c'est le choix par défaut du menu, le visage ne dérive plus d'un clip à l'autre.
+  // Le lip-sync vient en dernier : il ne part que pour les plans qui ont leur morceau de voix off.
+  return [...(vace ? (["fidele-480"] as Moteur[]) : []), ...tous, ...(lipsync ? (["lipsync"] as Moteur[]) : [])];
 }
 
 export async function moteurParDefaut(): Promise<Moteur> {
@@ -110,22 +131,16 @@ async function base(moteur: Cible, serveur?: string) {
   if (moteur === "qualite") return PUBLIC;
   const id =
     serveur ??
-    (moteur === "photo"
-      ? await endpointPhoto()
-      : moteur === "voix"
-        ? await endpointVoix()
-        : moteur === "fidele-480"
-          ? await endpointVace()
-          : await endpointEco());
-  if (!id)
-    throw new Error(
-      moteur === "voix"
-        ? "Le serveur voix n'est pas encore créé (voir « Équipe et budget »)."
-        : moteur === "fidele-480"
-          ? "Le serveur « Visage fidèle » n'est pas encore créé (voir « Équipe et budget »)."
-        : "Notre serveur RunPod n'est pas encore créé (voir « Équipe et budget »).",
-    );
+    (moteur === "photo" ? await endpointPhoto() : moteur === "voix" ? await endpointVoix() : await endpointDuMoteur(moteur));
+  if (!id) throw new Error(serveurManquant(moteur));
   return `https://api.runpod.ai/v2/${encodeURIComponent(id)}`;
+}
+
+export function serveurManquant(moteur: string) {
+  if (moteur === "voix") return "Le serveur voix n'est pas encore créé (voir « Équipe et budget »).";
+  if (moteur === "fidele-480") return "Le serveur « Visage fidèle » n'est pas encore créé (voir « Équipe et budget »).";
+  if (moteur === "lipsync") return "Le serveur lip-sync n'est pas encore créé (voir « Équipe et budget »).";
+  return "Notre serveur RunPod n'est pas encore créé (voir « Équipe et budget »).";
 }
 
 async function appel(moteur: Cible, chemin: string, init?: RequestInit, serveur?: string, dejaRelance = false) {
@@ -177,10 +192,27 @@ export async function lancerGeneration(p: {
   dernierePhoto?: { chemin: string; uploadUrl: string };
   // « Visage fidèle » : photos des personnages cités, regardées pendant tout le clip
   referenceUrls?: string[];
+  // Lip-sync : le morceau de voix off (WAV 16 kHz mono) qui guide la bouche ; « duree » est alors sa durée exacte
+  audioUrl?: string;
   serveur?: string;
 }): Promise<string> {
   const input =
-    p.moteur === "qualite"
+    p.moteur === "lipsync"
+      ? {
+          mode: "lipsync",
+          prompt: p.prompt,
+          image_url: p.imageUrl,
+          audio_url: p.audioUrl,
+          negative_prompt: PROMPT_NEGATIF,
+          resolution: "480p",
+          format: p.format,
+          duration: p.duree,
+          seed: p.seed,
+          video_path: p.videoPath,
+          upload_url: p.uploadUrl,
+          ...(p.dernierePhoto ? { last_frame_path: p.dernierePhoto.chemin, last_frame_upload_url: p.dernierePhoto.uploadUrl } : {}),
+        }
+      : p.moteur === "qualite"
       ? {
           prompt: p.prompt,
           image: p.imageUrl,
@@ -273,6 +305,51 @@ export async function lancerVoixRunPod(input: {
     }),
   });
   return String(data.id);
+}
+
+// Découpe de la voix off en morceaux, un par plan (ffmpeg sur le serveur voix, WAV 16 kHz mono pour le lip-sync).
+// « recaler » : les coupures sont recalées sur les silences entre les mots (alignement Whisper) quand la durée réelle de
+// la voix diffère du minutage du tableau.
+export type MorceauADecouper = { id: string; scene_id: string; debut: number; fin: number; texte: string; audio_path: string; upload_url: string };
+export async function lancerDecoupageRunPod(input: {
+  sourceUrl: string;
+  cle: string;
+  langue: string;
+  recaler: boolean;
+  finPrevue: number;
+  morceaux: MorceauADecouper[];
+}): Promise<string> {
+  const data = await appel("voix", "/run", {
+    method: "POST",
+    body: JSON.stringify({
+      input: {
+        moteur: "decouper",
+        source_url: input.sourceUrl,
+        cle: input.cle,
+        langue: input.langue,
+        recaler: input.recaler,
+        fin_prevue: input.finPrevue,
+        morceaux: input.morceaux,
+      },
+      policy: POLICE_PHOTO,
+    }),
+  });
+  return String(data.id);
+}
+
+export type MorceauDecoupe = { id: string; scene_id: string; debut: number; fin: number; duree: number; texte: string; audio_path: string };
+export async function lireDecoupage(
+  jobId: string,
+): Promise<{ etat: "en_cours" } | { etat: "echouee"; erreur: string } | { etat: "terminee"; morceaux: MorceauDecoupe[]; recale: boolean; secondes: number | null }> {
+  const data = await appel("voix", `/status/${encodeURIComponent(jobId)}`);
+  if (data.status === "COMPLETED") {
+    if (data.output?.error) return { etat: "echouee", erreur: String(data.output.error).slice(0, 500) };
+    const morceaux = Array.isArray(data.output?.morceaux) ? (data.output.morceaux as MorceauDecoupe[]) : [];
+    const secondes = typeof data.executionTime === "number" ? data.executionTime / 1000 : null;
+    return { etat: "terminee", morceaux, recale: Boolean(data.output?.recale), secondes };
+  }
+  if (["FAILED", "TIMED_OUT", "CANCELLED"].includes(data.status)) return { etat: "echouee", erreur: String(data.error ?? data.status).slice(0, 500) };
+  return { etat: "en_cours" };
 }
 
 export type StatutRunPod =

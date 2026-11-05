@@ -5,13 +5,14 @@ import { redirect } from "next/navigation";
 import { FORMAT_NOM_UTILISATEUR, LONGUEUR_MOT_DE_PASSE } from "@/lib/identifiant";
 import { journaliser } from "@/lib/journal";
 import { noterConnexion } from "@/lib/journal-connexion";
-import { CLE_ENDPOINT, CLE_ENDPOINT_PHOTO, CLE_ENDPOINT_VACE, CLE_ENDPOINT_VOIX, CLE_VOLUME, endpointEco } from "@/lib/runpod";
+import { CLE_ENDPOINT, CLE_ENDPOINT_LIPSYNC, CLE_ENDPOINT_PHOTO, CLE_ENDPOINT_VACE, CLE_ENDPOINT_VOIX, CLE_VOLUME, endpointEco } from "@/lib/runpod";
 import {
   CLE_CACHE_PHOTO,
   CLE_CACHE_VIDEO,
   ajouterStockage,
   creerServeur,
   creerServeursCache,
+  creerServeurLipsync,
   creerServeurVace,
   creerServeurVoix,
   supprimerAncienServeurEtDisque,
@@ -298,6 +299,26 @@ export async function creerServeurVaceAction() {
   await journaliser(supabase, profile.id, "creation-serveur-vace", "reglage", null, { id });
   revalidatePath("/", "layout");
   redirect("/equipe?vace=1#vace");
+}
+
+// Serveur lip-sync (InfiniteTalk) : le moteur « Lip-sync (voix off) » apparaît dans les choix dès qu'il est créé.
+// Son identifiant peut aussi être collé à la main (serveur créé dans la console RunPod).
+export async function creerServeurLipsyncAction(formData: FormData) {
+  const { supabase, profile } = await requireResponsable();
+  const colle = String(formData.get("endpoint") ?? "").trim();
+  if (colle && !/^[a-z0-9]{6,40}$/i.test(colle)) redirect("/equipe?erreur=serveur&detail=Identifiant%20RunPod%20invalide#lipsync");
+  let id = colle;
+  if (!id) {
+    try {
+      id = await creerServeurLipsync();
+    } catch (e) {
+      redirect(`/equipe?erreur=serveur&detail=${encodeURIComponent(e instanceof Error ? e.message : String(e))}#lipsync`);
+    }
+  }
+  await supabase.from("reglages").upsert({ cle: CLE_ENDPOINT_LIPSYNC, valeur: id, updated_at: new Date().toISOString() });
+  await journaliser(supabase, profile.id, "creation-serveur-lipsync", "reglage", null, { id, colle: Boolean(colle) });
+  revalidatePath("/", "layout");
+  redirect("/equipe?lipsync=1#lipsync");
 }
 
 // Étape 3 : le studio utilise les nouveaux serveurs ; l'ancien serveur et le disque payant sont supprimés
