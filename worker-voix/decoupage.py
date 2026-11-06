@@ -87,6 +87,20 @@ def mots_whisper(chemin, langue, prompt=None, nom=WHISPER):
     modele = modele_whisper(nom)
     if modele is None:
         raise RuntimeError("Whisper (faster-whisper) n'est pas installé sur le serveur voix.")
+    try:
+        return _transcrire(modele, chemin, langue, prompt)
+    except RuntimeError as e:
+        # ctranslate2 sans code pour cette carte (ex. Blackwell) : même transcription sur le processeur, plus lente
+        if "cuda" not in str(e).lower() and "kernel" not in str(e).lower():
+            raise
+        print(f"Whisper sur la carte impossible ({e}) : passage au processeur")
+        from faster_whisper import WhisperModel
+
+        _transcriptions[f"__modele__{nom}"] = WhisperModel(nom, device="cpu", compute_type="int8")
+        return _transcrire(_transcriptions[f"__modele__{nom}"], chemin, langue, prompt)
+
+
+def _transcrire(modele, chemin, langue, prompt):
     segments, info = modele.transcribe(
         chemin,
         language=langue if langue in LANGUES_WHISPER else None,

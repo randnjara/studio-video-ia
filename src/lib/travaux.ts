@@ -5,7 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 // visible par toute l'équipe. Sans la migration 0020, rien n'est noté.
 export async function noterEvenementServeur(
   supabase: SupabaseClient,
-  type: "serveur-arret" | "serveur-redemarrage" | "serveur-image" | "serveur-creation",
+  type: "serveur-arret" | "serveur-redemarrage" | "serveur-image" | "serveur-creation" | "serveur-sante",
   message: string,
   details: Record<string, unknown> = {},
   serveur: string | null = null,

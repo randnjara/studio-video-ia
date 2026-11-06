@@ -21,6 +21,10 @@ vrai(lireEtatRunPod({ status: "CANCELLED" }).etape === "annule", "annulé");
 vrai(JSON.stringify(lireProgression("calcul|60|image 60/125")) === JSON.stringify({ etape: "calcul", message: "image 60/125", progression: 60 }), "format texte");
 vrai(lireProgression("plan 12/48")?.message === "plan 12/48", "texte libre");
 vrai(erreurLisible("ModuleNotFoundError: No module named 'flash_attn'").includes("image du serveur"), "module manquant");
+// Carte Blackwell sur une ancienne image (panne du serveur voix en prod)
+vrai(erreurLisible("RuntimeError: CUDA error: no kernel image is available for execution on the device").includes("n'est pas gérée par l'image"), "no kernel image");
+vrai(erreurLisible("Carte NVIDIA RTX PRO 6000 Blackwell Server Edition MIG 1g.24gb (sm_120) non compatible avec l'image : torch 2.6.0+cu124 (CUDA 12.4) gère sm_50…sm_90.").startsWith("Carte NVIDIA RTX PRO 6000"), "message du worker gardé");
+vrai(erreurLisible("worker is unhealthy").includes("mauvaise santé"), "worker unhealthy");
 
 // Frise : envoyé 10:00:00 → file 10:00:02 → démarrage 10:00:40 → calcul 10:01:30 (30 %, puis 80 %) → envoi → terminé
 const t0 = Date.parse("2026-11-06T10:00:00Z");

@@ -32,6 +32,7 @@ export const LIBELLES_TYPES: Record<string, string> = {
   "serveur-redemarrage": "Serveurs redémarrés",
   "serveur-image": "Nouvelle image du serveur",
   "serveur-creation": "Serveur créé",
+  "serveur-sante": "Machine en mauvaise santé (RunPod)",
 };
 
 export const estFinale = (e: string) => (FINALES as string[]).includes(e);
@@ -40,6 +41,10 @@ export const estFinale = (e: string) => (FINALES as string[]).includes(e);
 export function erreurLisible(detail: string | null | undefined): string {
   const t = String(detail ?? "");
   if (!t) return "Le serveur n'a pas donné de raison.";
+  if (/non compatible avec l'image/i.test(t)) return t.split("\n")[0].slice(0, 300);
+  if (/no kernel image is available|sm_\d+ is not compatible/i.test(t))
+    return "La carte graphique attribuée n'est pas gérée par l'image du serveur (CUDA trop ancien) : limitez le serveur aux cartes compatibles ou mettez l'image à jour.";
+  if (/unhealthy/i.test(t)) return "RunPod signale une machine en mauvaise santé (le serveur plante au démarrage).";
   if (/out of memory|CUDA out of memory|OutOfMemory/i.test(t)) return "La mémoire de la carte graphique est pleine : réessayez, ou en résolution plus petite.";
   if (/TIMED_OUT|timeout|timed out|executionTimeout/i.test(t)) return "Le calcul a dépassé le temps permis par RunPod.";
   if (/CANCELLED|annul/i.test(t)) return "Le travail a été annulé.";
