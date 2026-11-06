@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit",
     "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
-    "test:lipsync": "node --experimental-strip-types --no-warnings tests/montage-lipsync.test.ts && node --experimental-strip-types --no-warnings tests/voix-off-minutage.test.ts && node --experimental-strip-types --no-warnings tests/voix-off-import.test.ts && node --experimental-strip-types --no-warnings tests/risques.test.ts && node --experimental-strip-types --no-warnings tests/calage.test.ts && node --experimental-strip-types --no-warnings tests/audio-d-abord.test.ts && node --experimental-strip-types --no-warnings tests/travaux.test.ts"
+    "test:lipsync": "node --experimental-strip-types --no-warnings tests/montage-lipsync.test.ts && node --experimental-strip-types --no-warnings tests/voix-off-minutage.test.ts && node --experimental-strip-types --no-warnings tests/voix-off-import.test.ts && node --experimental-strip-types --no-warnings tests/risques.test.ts && node --experimental-strip-types --no-warnings tests/calage.test.ts && node --experimental-strip-types --no-warnings tests/audio-d-abord.test.ts && node --experimental-strip-types --no-warnings tests/travaux.test.ts && node --experimental-strip-types --no-warnings tests/debit-voix.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "1.6.0",

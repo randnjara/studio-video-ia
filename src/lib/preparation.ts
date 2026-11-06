@@ -1,4 +1,5 @@
 import { REGLES_RISQUES } from "@/lib/risques";
+import { MOTS_PAR_SECONDE_MAX } from "@/lib/debit-voix";
 import { CATEGORIES, type Categorie } from "@/lib/categories";
 import { ANGLES, CADRAGES } from "@/lib/libelles";
 
@@ -159,7 +160,7 @@ N'en recopie pas le contenu (ni la voix, ni le geste, ni les noms) : chaque plan
 - Une photo de référence n'est utilisée que si son nom est écrit dans « prompt_image » ou dans « lieu ». Au maximum 3 références par plan (par exemple 2 personnages + 1 lieu).
 - Le studio ajoute LUI-MÊME à chaque photo : même visage, même âge, même tenue que la référence, style du film, image plein cadre sans texte ni bande floue, anatomie correcte des mains. Et à chaque vidéo : visage stable, gestes naturels, pas de déformation.
 - Donc tes cellules ne contiennent QUE ce qui est propre au plan. Jamais de phrase générale recopiée de ligne en ligne (« photorealistic », « 4K », « same face », « cinematic lighting »…).
-- Après l'import, le studio signale automatiquement : gestes répétés sur 10 lignes voisines, même cadrage + angle pour deux plans continus de suite, plan continu trop court ou trop long pour la catégorie, voix trop longue pour la durée, consignes vidéo pas en anglais. Vise zéro alerte.
+- Après l'import, le studio signale automatiquement : gestes répétés sur 10 lignes voisines, même cadrage + angle pour deux plans continus de suite, plan continu trop court ou trop long pour la catégorie, voix trop longue pour une durée estimée (plus de ${MOTS_PAR_SECONDE_MAX} mots par seconde ; jamais quand la durée vient de la voix off audio), consignes vidéo pas en anglais. Vise zéro alerte.
 
 === RÈGLES ABSOLUES, VALABLES POUR TOUT LE FILM (elles passent avant toutes les autres) ===
 1. COMPRENDRE AVANT D'AGIR. Lis et comprends toute la voix off, puis chaque réplique, AVANT de décider quoi que ce soit. Chaque geste, chaque mouvement de caméra, chaque changement de cadrage, de lieu ou de personnage doit venir de ce que dit le texte à ce moment précis. Si le texte ne le demande pas, rien ne change : la personne continue de parler dans le même cadre.
@@ -207,7 +208,7 @@ Ces règles valent pour « prompt_video », « pose_debut », « pose_fin » et 
 Relis tout le tableau et corrige-le jusqu'à ce que tout soit vrai :
 - La voix off complète se retrouve dans « voix », mot pour mot, dans l'ordre, sans doublon.
 - Aucune phrase identique au début ou à la fin de tous les prompt_image ou de tous les prompt_video.
-${audio ? "- Exactement une ligne par réplique audio, mêmes numero, debut, fin, duree et voix que dans le fichier fourni (jamais modifiés) ; les tranches « Xs-Ys » de chaque prompt_video couvrent exactement sa durée réelle." : `- Numéros continus ; aucune durée au-dessus de 5 ; chaque durée tient sa parole (mots ÷ 2,5 ≤ durée) ; « debut » et « fin » se suivent sans trou.`}
+${audio ? "- Exactement une ligne par réplique audio, mêmes numero, debut, fin, duree et voix que dans le fichier fourni (jamais modifiés, jamais raccourcis : la durée est celle de l'audio, une réplique n'y est jamais « trop longue ») ; les tranches « Xs-Ys » de chaque prompt_video couvrent exactement sa durée réelle." : `- Numéros continus ; aucune durée au-dessus de 5 ; chaque durée tient sa parole (au plus ${MOTS_PAR_SECONDE_MAX} mots par seconde : sinon allonge la durée ou coupe la réplique, sans jamais enlever de mots) ; « debut » et « fin » se suivent sans trou.`}
 - « plan_continu » rempli sur chaque ligne (1, 2, 3… dans l'ordre) ; durée de chaque plan continu (somme de ses lignes) entre ${cat.planMin} et ${cat.planMax} s ; aucun changement de cadrage au milieu d'une phrase.
 - Dans chaque plan continu : même cadrage, même angle, même lieu, même prompt_image mot pour mot, chaque pose_debut reprend mot pour mot la pose_fin de la ligne précédente, caméra fixe.
 - Prise unique : prompt_image identique sur tout le film ; chaque pose_debut reprend la pose_fin de la ligne précédente, sur tout le film ; la première ligne de chaque nouveau plan continu a son mouvement de caméra AU MILIEU de la ligne, jamais dans la première ni la dernière seconde.

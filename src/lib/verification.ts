@@ -1,6 +1,7 @@
 // Prompt de vérification du script et des plans, à coller dans un assistant gratuit (ChatGPT, Claude, Gemini…).
 // Rien n'est envoyé par le studio : la personne copie le texte et le colle elle-même.
 import { REGLES_RISQUES } from "@/lib/risques";
+import { MOTS_PAR_SECONDE_MAX } from "@/lib/debit-voix";
 import { CATEGORIES, type Categorie, plansContinus } from "@/lib/categories";
 
 type PlanVerif = {
@@ -17,6 +18,7 @@ type PlanVerif = {
   pose_fin?: string;
   image_path?: string | null;
   plan_continu?: number | null;
+  minutageAudio?: boolean; // durée lue dans la voix off audio : jamais modifiée, jamais « trop longue »
 };
 
 // Colonnes du fichier corrigé rendu par l'assistant, réimporté dans l'onglet Plans (mise à jour des plans existants)
@@ -39,6 +41,17 @@ export const COLONNES_CORRECTION = [
   "prompt_video",
 ] as const;
 export const FICHIER_CORRIGE = "tableau_corrige.csv";
+
+// Durées et longueur des répliques : celles lues dans la voix off audio ne se discutent pas ; les autres (estimées depuis le
+// texte) ne sont signalées qu'au-delà de MOTS_PAR_SECONDE_MAX mots par seconde
+export function regleDebit(plans: { minutageAudio?: boolean }[]) {
+  const audio = plans.flatMap((p, i) => (p.minutageAudio ? [i + 1] : []));
+  const liste = audio.length === plans.length ? "TOUS les plans" : audio.length ? `les plans ${audio.join(", ")}` : "";
+  return `=== DURÉES ET LONGUEUR DES RÉPLIQUES ===
+${liste ? `${liste[0].toUpperCase()}${liste.slice(1)} ${audio.length > 1 ? "ont" : "a"} une durée mesurée dans la voix off AUDIO (« duree » = le temps réel de la réplique prononcée) : ne change jamais leur « duree » ni leur « voix », ne les signale jamais comme trop longues et ne propose jamais de raccourcir leur texte.
+` : ""}${audio.length === plans.length ? "" : `Pour ${audio.length ? "les autres plans" : "les plans"} (durée estimée depuis le texte), ne signale une réplique trop longue que si elle dépasse ${MOTS_PAR_SECONDE_MAX} mots par seconde de « duree » : allonge alors le plan (5 s au plus) ou coupe la réplique en deux lignes, jamais en supprimant des mots.
+`}`;
+}
 
 const cellule = (v: string) => `"${String(v ?? "").replace(/"/g, '""').replace(/\r?\n/g, " ")}"`;
 
@@ -104,6 +117,7 @@ ${projet.scenario_text.trim() || "(aucun script enregistré)"}
 === TABLEAU ACTUEL DES PLANS (CSV, séparateur point-virgule, dans l'ordre du montage) ===
 ${tableau}
 
+${regleDebit(plans)}
 === CE QUE TU DOIS VÉRIFIER ===
 1. Respect du script : chaque moment important a son plan, dans le bon ordre, sans plan en double.
 2. Lieux : le moins de lieux possible (un seul pour un film de 2 minutes ou moins : c'est le geste qui fait varier), de longues séquences par lieu ; jamais de changement de lieu au milieu d'une phrase ou d'une idée, ni de lieu tenu un seul plan. Un témoignage reste dans un seul lieu (un souvenir se raconte depuis ce lieu). Corrige « lieu », les poses et les prompts en conséquence.

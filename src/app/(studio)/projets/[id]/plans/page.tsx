@@ -3,6 +3,7 @@ import { BoutonEnvoi } from "@/components/bouton-envoi";
 import { MOUVEMENT_PAR_DEFAUT, STATUTS_PLAN, couleurStatut, dureeLisible } from "@/lib/libelles";
 import { lireCategorie, plansContinus } from "@/lib/categories";
 import { alertesPlans } from "@/lib/controles";
+import { minutageDeLAudio } from "@/lib/debit-voix";
 import { risquesPlans } from "@/lib/risques";
 import { lotsPromptsPhotos, suivrePhotos } from "@/lib/photos";
 import { cleNom } from "@/lib/noms";
@@ -212,7 +213,9 @@ export default async function PagePlans({
   const apercu = parStatut.map(([st, n]) => `${n} ${(STATUTS_PLAN[st] ?? st).toLowerCase()}`).join(" · ");
   const ouvert = Boolean(sp.ajoute || sp.enregistre || sp.importe || sp.refuse || sp.ouvert);
   const decrits = plans.filter((p) => p.image_description.trim()).length;
-  const alertes = alertesPlans(plans, MOUVEMENT_PAR_DEFAUT, lireCategorie(projet?.categorie), Boolean(serveurLipsync));
+  // Minutage lu dans l'audio réel : pas d'alerte « voix off trop longue » (le texte est exactement ce qui est prononcé)
+  const plansMinutes = plans.map((p) => ({ ...p, minutageAudio: minutageDeLAudio(p.voice_clips) }));
+  const alertes = alertesPlans(plansMinutes, MOUVEMENT_PAR_DEFAUT, lireCategorie(projet?.categorie), Boolean(serveurLipsync));
   // Plans à risque (R1 à R7), du plus risqué au moins risqué, avec la correction proposée de prompt_video
   const risques = risquesPlans(plans, Boolean(serveurLipsync));
   const continus = plansContinus(plans);
@@ -477,7 +480,7 @@ export default async function PagePlans({
 
         {nbAlertes > 0 && (
           <p className="rounded-lg bg-alerte/10 px-4 py-3 text-sm text-alerte">
-            ⚠ {nbAlertes} alerte{nbAlertes > 1 ? "s" : ""} sur les plans (gestes ou poses de fin répétés, voix off trop longue, consigne pas en
+            ⚠ {nbAlertes} alerte{nbAlertes > 1 ? "s" : ""} sur les plans (gestes ou poses de fin répétés, voix off trop longue pour une durée estimée, consigne pas en
             anglais) : voyez le détail sous chaque plan avant de créer les photos ou les vidéos.
           </p>
         )}
@@ -551,7 +554,7 @@ export default async function PagePlans({
           <CopierVerification
             texte={promptVerification(
               projet,
-              plans,
+              plansMinutes,
               [...new Set(refs.filter((r) => r.genre === "produit").map((r) => r.nom))],
               lireCategorie(projet.categorie),
             )}
