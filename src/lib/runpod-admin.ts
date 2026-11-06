@@ -265,7 +265,7 @@ export async function creerServeurVace(): Promise<string> {
 // construite par GitHub (.github/workflows/serveur-lipsync.yml), même dépôt d'images que le serveur vidéo, étiquette
 // « lipsync ». À augmenter avec worker-lipsync/VERSION. Le gros modèle (Wan 2.1) est dans le cache de RunPod (champ
 // « Model ») ; les poids InfiniteTalk, wav2vec et le LoRA rapide sont téléchargés au premier démarrage.
-export const VERSION_SERVEUR_LIPSYNC = "3";
+export const VERSION_SERVEUR_LIPSYNC = "4";
 const IMAGE_LIPSYNC = `ghcr.io/randnjara/studio-video-ia-worker:lipsync-v${VERSION_SERVEUR_LIPSYNC}`;
 export const SERVEUR_LIPSYNC = { nom: "studio-lipsync", modele: "Wan-AI/Wan2.1-I2V-14B-480P" } as const;
 
