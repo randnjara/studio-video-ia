@@ -71,6 +71,9 @@ def modele_whisper(nom=WHISPER):
         return None
     cle = f"__modele__{nom}"
     if cle not in _transcriptions:
+        from progression import signaler
+
+        signaler("demarrage", None, f"chargement de Whisper {nom}", forcer=True)
         try:
             _transcriptions[cle] = WhisperModel(nom, device="cuda", compute_type="float16")
         except Exception:
@@ -84,7 +87,7 @@ def mots_whisper(chemin, langue, prompt=None, nom=WHISPER):
     modele = modele_whisper(nom)
     if modele is None:
         raise RuntimeError("Whisper (faster-whisper) n'est pas installé sur le serveur voix.")
-    segments, _ = modele.transcribe(
+    segments, info = modele.transcribe(
         chemin,
         language=langue if langue in LANGUES_WHISPER else None,
         word_timestamps=True,
@@ -92,12 +95,17 @@ def mots_whisper(chemin, langue, prompt=None, nom=WHISPER):
         initial_prompt=(prompt or None),
         condition_on_previous_text=True,
     )
-    return [
-        {"mot": m.word.strip(), "debut": float(m.start), "fin": float(m.end)}
-        for s in segments
-        for m in (s.words or [])
-        if m.word.strip()
-    ]
+    from progression import signaler
+
+    duree = float(getattr(info, "duration", 0) or 0)
+    mots = []
+    # Whisper rend la transcription morceau par morceau : le studio voit « 45 % de l'audio »
+    for s in segments:
+        mots.extend({"mot": m.word.strip(), "debut": float(m.start), "fin": float(m.end)} for m in (s.words or []) if m.word.strip())
+        if duree > 0:
+            pct = min(99.0, float(s.end) / duree * 100)
+            signaler("calcul", pct, f"Whisper : {pct:.0f} % de l'audio ({len(mots)} mots)")
+    return mots
 
 
 def pauses_whisper(chemin, langue, cle):

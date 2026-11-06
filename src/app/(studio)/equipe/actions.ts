@@ -1,5 +1,6 @@
 "use server";
 
+import { noterEvenementServeur } from "@/lib/travaux";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { FORMAT_NOM_UTILISATEUR, LONGUEUR_MOT_DE_PASSE } from "@/lib/identifiant";
@@ -296,6 +297,7 @@ export async function creerServeurVaceAction() {
     redirect(`/equipe?erreur=serveur&detail=${encodeURIComponent(e instanceof Error ? e.message : String(e))}#vace`);
   }
   await supabase.from("reglages").upsert({ cle: CLE_ENDPOINT_VACE, valeur: id, updated_at: new Date().toISOString() });
+  await noterEvenementServeur(supabase, "serveur-creation", "Serveur « Visage fidèle » enregistré", { id }, id);
   await journaliser(supabase, profile.id, "creation-serveur-vace", "reglage", null, { id });
   revalidatePath("/", "layout");
   redirect("/equipe?vace=1#vace");
@@ -316,6 +318,7 @@ export async function creerServeurLipsyncAction(formData: FormData) {
     }
   }
   await supabase.from("reglages").upsert({ cle: CLE_ENDPOINT_LIPSYNC, valeur: id, updated_at: new Date().toISOString() });
+  await noterEvenementServeur(supabase, "serveur-creation", "Serveur lip-sync enregistré", { id }, id);
   await journaliser(supabase, profile.id, "creation-serveur-lipsync", "reglage", null, { id, colle: Boolean(colle) });
   revalidatePath("/", "layout");
   redirect("/equipe?lipsync=1#lipsync");

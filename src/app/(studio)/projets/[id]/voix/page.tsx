@@ -52,6 +52,7 @@ export default async function PageVoix({ params }: { params: Promise<{ id: strin
         duree: c.duree_s !== null ? Number(c.duree_s) : null,
         cout: c.cost_usd !== null ? Number(c.cost_usd) : null,
         erreur: c.status === "echouee" ? c.error : null,
+        jobId: c.runpod_job_id,
       }))}
     />
   );

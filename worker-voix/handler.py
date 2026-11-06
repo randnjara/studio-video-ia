@@ -29,6 +29,8 @@ import runpod
 import soundfile as sf
 import torch
 
+from progression import commencer, signaler
+
 APPAREIL = "cuda" if torch.cuda.is_available() else "cpu"
 # Langues comprises par Chatterbox multilingue
 LANGUES_CHATTERBOX = {
@@ -48,6 +50,7 @@ EN_MEMOIRE = {}
 def modele(nom, charger):
     """Garde chaque modèle en mémoire après son premier usage (ils tiennent tous ensemble sur la carte)."""
     if nom not in EN_MEMOIRE:
+        signaler("demarrage", None, f"chargement du modèle {nom}", forcer=True)
         debut = time.time()
         EN_MEMOIRE[nom] = charger()
         print(f"{nom} prêt en {time.time() - debut:.0f} s")
@@ -196,6 +199,7 @@ def generer(entree):
     emotion = min(max(float(entree.get("emotion", 0.5)), 0.25), 2.0)
 
     debut = time.time()
+    signaler("calcul", 5, "préparation de la voix", forcer=True)
     with tempfile.TemporaryDirectory() as dossier:
         reference = None
         if entree.get("reference_url"):
@@ -236,6 +240,7 @@ def generer(entree):
     tampon = BytesIO()
     sf.write(tampon, son, frequence, format="WAV", subtype="PCM_16")
     secondes = time.time() - debut
+    signaler("envoi", None, f"dépôt de la voix ({len(son) / frequence:.1f} s)", forcer=True)
     envoi = requests.put(
         entree["upload_url"],
         data=tampon.getvalue(),
@@ -260,6 +265,7 @@ def decouper_voix_off(entree):
                 return {"error": f"Champ manquant dans un morceau : {champ}"}
         m["debut"], m["fin"] = float(m["debut"]), float(m["fin"])
     debut = time.time()
+    signaler("calcul", 0, f"découpe de {len(morceaux)} plans", forcer=True)
     with tempfile.TemporaryDirectory() as dossier:
         source = os.path.join(dossier, "voix-off")
         reponse = requests.get(entree["source_url"], timeout=300)
@@ -276,7 +282,9 @@ def decouper_voix_off(entree):
             dossier,
         )
         resultat = []
-        for m, chemin, a, b, duree in prepare["decoupes"]:
+        total = len(prepare["decoupes"])
+        for k, (m, chemin, a, b, duree) in enumerate(prepare["decoupes"]):
+            signaler("envoi", k / max(1, total) * 100, f"plan {k + 1}/{total} déposé")
             with open(chemin, "rb") as f:
                 envoi = requests.put(m["upload_url"], data=f, headers={"Content-Type": "audio/wav", "x-upsert": "true"}, timeout=120)
             if not envoi.ok:
@@ -313,6 +321,7 @@ def telecharger_wav16k(url, dossier):
     with open(source, "wb") as f:
         f.write(reponse.content)
     wav = os.path.join(dossier, "voix-16k.wav")
+    signaler("calcul", 0, "décodage de l'audio", forcer=True)
     son, frequence = en_wav_16k(source, wav)
     return wav, son, frequence
 
@@ -336,6 +345,7 @@ def aligner_plans(entree):
         wav, son, frequence = telecharger_wav16k(entree["source_url"], dossier)
         mots = mots_whisper(wav, str(entree.get("langue") or ""), prompt_initial([p.get("texte", "") for p in plans]), WHISPER_TRANSCRIPTION)
     duree = len(son) / frequence
+    signaler("calcul", 99, f"alignement de {len(plans)} plans sur {len(mots)} mots", forcer=True)
     resultat = aligner(plans, mots, duree)
     # Indices du ton de chaque plan (débit, pauses, volume, montée/descente), lus dans l'audio
     from ton import description, indices, ton
@@ -371,12 +381,14 @@ def transcrire_voix(entree):
     with tempfile.TemporaryDirectory() as dossier:
         wav, son, frequence = telecharger_wav16k(entree["source_url"], dossier)
         mots = mots_whisper(wav, str(entree.get("langue") or ""), prompt_initial([entree.get("texte", "")]), WHISPER_TRANSCRIPTION)
+        signaler("calcul", 99, f"répliques et ton ({len(mots)} mots)", forcer=True)
         repliques = transcrire(son, frequence, mots)
     return {"repliques": repliques, "duree_voix": round(len(son) / frequence, 3), "secondes": round(time.time() - debut, 1)}
 
 
 def handler(job):
     try:
+        commencer(job)
         if job["input"].get("moteur") == "decouper":
             return decouper_voix_off(job["input"])
         if job["input"].get("moteur") == "aligner":

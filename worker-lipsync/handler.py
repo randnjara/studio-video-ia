@@ -33,7 +33,20 @@ from einops import rearrange  # noqa: E402
 from huggingface_hub import hf_hub_download  # noqa: E402
 from PIL import Image, ImageOps  # noqa: E402
 
-from video import echantillons_minimum, ecrire_mp4_muet, nombre_images  # noqa: E402
+from progression import commencer, signaler  # noqa: E402
+from video import FENETRE, echantillons_minimum, ecrire_mp4_muet, nombre_images  # noqa: E402
+
+# Suivi du calcul : InfiniteTalk avance par fenêtres de 81 images, chacune en ETAPES étapes (barre tqdm) ; chaque étape
+# faite est comptée pour donner au studio « images ~60/125 »
+SUIVI = {"fait": 0, "total": 1, "images": 0}
+
+
+def suivi_tqdm(iterable=None, *args, **kwargs):
+    for x in iterable if iterable is not None else []:
+        yield x
+        SUIVI["fait"] += 1
+        part = min(1.0, SUIVI["fait"] / max(1, SUIVI["total"]))
+        signaler("calcul", part * 100, f"images ~{round(part * SUIVI['images'])}/{SUIVI['images']} · étape {SUIVI['fait']}/{SUIVI['total']}")
 
 CACHE_RUNPOD = "/runpod-volume/huggingface-cache/hub"
 WAN = os.environ.get("WAN_MODEL", "Wan-AI/Wan2.1-I2V-14B-480P")
@@ -84,6 +97,7 @@ def charger():
 
     debut = time.time()
     wan_dir = dans_cache(WAN)
+    signaler("demarrage" if wan_dir else "telechargement", None, "chargement de Wan 2.1 et InfiniteTalk" if wan_dir else "téléchargement de Wan 2.1 (réglez « Model » sur le serveur)", forcer=True)
     if not wan_dir:
         from huggingface_hub import snapshot_download
 
@@ -109,6 +123,10 @@ def charger():
     encodeur.feature_extractor._freeze_parameters()
     ETAT["encodeur"] = encodeur
     ETAT["extracteur"] = Wav2Vec2FeatureExtractor.from_pretrained(WAV2VEC, local_files_only=True)
+    # Les étapes de diffusion d'InfiniteTalk passent par tqdm : on les compte pour le studio
+    import wan.multitalk as multitalk
+
+    multitalk.tqdm = suivi_tqdm
     print(f"InfiniteTalk prêt en {time.time() - debut:.0f} s ({ETAPES} étapes, voix {GUIDAGE_VOIX}, texte {GUIDAGE_TEXTE})")
 
 
@@ -166,6 +184,9 @@ def generer(entree):
         photo.save(image, quality=95)
         voix, duree = preparer_voix(telecharger(entree["audio_url"], os.path.join(dossier, "voix.wav")))
         nombre = nombre_images(duree)
+        fenetres = 1 + max(0, -(-(max(nombre, FENETRE) + 8 - FENETRE) // (FENETRE - IMAGES_MOUVEMENT)))
+        SUIVI.update(fait=0, total=fenetres * ETAPES, images=nombre)
+        signaler("calcul", 0, f"voix de {duree:.2f} s → {nombre} images", forcer=True)
         empreinte = os.path.join(dossier, "voix.pt")
         torch.save(empreinte_voix(voix), empreinte)
         options = SimpleNamespace(
@@ -193,6 +214,7 @@ def generer(entree):
         chemin = os.path.join(dossier, "clip.mp4")
         derniere = ecrire_mp4_muet(iter(images), nombre, largeur, hauteur, chemin)
         calcul = time.time() - debut
+        signaler("envoi", None, f"dépôt du clip muet ({nombre} images)", forcer=True)
         with open(chemin, "rb") as f:
             deposer(entree["upload_url"], f, "video/mp4")
     resultat = {
@@ -218,6 +240,7 @@ def generer(entree):
 def handler(job):
     try:
         entree = job["input"]
+        commencer(job)
         if entree.get("mode", "lipsync") != "lipsync":
             return {"error": f"Métier inconnu : {entree.get('mode')}"}
         return generer(entree)

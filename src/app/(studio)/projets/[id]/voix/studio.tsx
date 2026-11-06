@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { AGES, GENRES, type Voix, avecEmotion, nomLangue } from "@/lib/voix";
 import { actualiserVoix, creerVoix, importerEnregistrement, supprimerCreation } from "./actions";
 import { ConsoleMixage } from "./console-mixage";
+import { FriseTravail } from "@/components/frise-travail";
 
 export type CreationAffichee = {
   id: string;
@@ -22,6 +23,7 @@ export type CreationAffichee = {
   duree: number | null;
   cout: number | null;
   erreur: string | null;
+  jobId: string | null; // travail du serveur voix, suivi en direct (frise)
 };
 
 const TAILLE_MAX = 50 * 1024 * 1024;
@@ -357,6 +359,15 @@ export function Studio({
                 </div>
                 {c.texte && <p className="line-clamp-2 text-sm text-sourdine">{c.texte}</p>}
                 {c.erreur && <p className="message-erreur text-sm">{c.erreur}</p>}
+                {c.jobId &&
+                  (c.status === "en_cours" ? (
+                    <FriseTravail jobId={c.jobId} compacte />
+                  ) : (
+                    <details className="text-xs">
+                      <summary className="cursor-pointer text-sourdine">🧾 Suivi du serveur</summary>
+                      <FriseTravail jobId={c.jobId} />
+                    </details>
+                  ))}
                 {c.status === "terminee" && (c.urlMixage ?? c.urlAudio) && (
                   // eslint-disable-next-line jsx-a11y/media-has-caption
                   <audio src={(c.urlMixage ?? c.urlAudio)!} controls preload="none" className="w-full" />

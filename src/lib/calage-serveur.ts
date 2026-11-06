@@ -51,6 +51,7 @@ export async function lancerWhisper(
   try {
     const jobId = await lancerVoixWhisper({
       moteur,
+      projetId: projectId,
       sourceUrl: lien.signedUrl,
       langue: langueDe(creation, langue),
       plans: moteur === "aligner" ? (plans ?? []).map((p) => ({ scene_id: p.id, texte: String(p.voiceover_text ?? "") })) : undefined,

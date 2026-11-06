@@ -1,5 +1,6 @@
 "use server";
 
+import { noterEvenementServeur } from "@/lib/travaux";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { CLE_ARRET_SERVEUR, VALEUR_PAUSE, clePause, lireArretServeur, lireEtatFile, valeurReprise } from "@/lib/file-attente";
@@ -104,6 +105,7 @@ export async function arreterServeur(chemin: string) {
     updated_at: new Date().toISOString(),
   });
   await journaliser(supabase, profile.id, "arret-serveur", "reglage", null, { serveurs: ids });
+  await noterEvenementServeur(supabase, "serveur-arret", `${ids.length} serveur(s) arrêté(s), ${jobs.length} calcul(s) annulé(s)`, { serveurs: ids, calculs: jobs.length });
   retourServeur(chemin, "file=serveur-arrete");
 }
 
@@ -122,5 +124,6 @@ export async function redemarrerServeur(chemin: string) {
     updated_at: new Date().toISOString(),
   });
   await journaliser(supabase, profile.id, "redemarrage-serveur", "reglage", null);
+  await noterEvenementServeur(supabase, "serveur-redemarrage", "Serveurs redémarrés", { max: arret?.max ?? {} });
   retourServeur(chemin, "file=serveur-redemarre");
 }

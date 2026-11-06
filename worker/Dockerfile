@@ -16,6 +16,6 @@ RUN mkdir -p /app/modeles \
  && python3 -c "import urllib.request as u; \
 u.urlretrieve('https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-general-x4v3.pth', '/app/modeles/realesr-general-x4v3.pth'); \
 u.urlretrieve('https://github.com/Fannovel16/ComfyUI-Frame-Interpolation/releases/download/models/rife47.pth', '/app/modeles/rife47.pth')"
-COPY handler.py amelioration.py rife_arch.py ./
+COPY handler.py amelioration.py rife_arch.py progression.py ./
 
 CMD ["python3", "-u", "handler.py"]

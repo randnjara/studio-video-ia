@@ -127,6 +127,15 @@ La voix off AUDIO est la seule source de minutage ; son texte n'est que ce qui a
 
 Le serveur voix passe en version 4 (Whisper `medium` rangé dans l'image) ; le studio le bascule tout seul. Aucune migration n'est nécessaire : transcriptions et anciens tableaux sont gardés dans `project_versions`.
 
+## 10. Historique et suivi en direct des travaux serveur (migration 0020)
+
+Chaque travail envoyé à un serveur RunPod (voix, transformation, découpe, calage et transcription Whisper, photos, vidéos, Visage fidèle, lip-sync) est noté dans `travaux_serveur`, avec ses étapes dans `travaux_evenements` : envoyé → file d'attente RunPod → serveur qui démarre → modèle en téléchargement → calcul (avec le % envoyé par le serveur : « 45 % de l'audio », « étape 3/4 », « images ~60/125 », « plan 12/48 ») → envoi du résultat → terminé, échoué (message lisible et détail technique) ou annulé. Les arrêts, redémarrages, créations de serveurs et changements d'image y sont aussi.
+
+- Là où l'action est lancée, une frise en direct (✓ / ⏳ / ✗, heure, durée, %) remplace le texte d'attente et reste visible ensuite (« Voir le détail »). Sans nouvelle du serveur depuis 4 min, elle le dit et propose « Annuler » (et « Relancer » pour le calage et la découpe).
+- Page « 🧾 Historique » (menu de gauche, et lien dans chaque projet) : filtres par projet, type, statut et date, avec la durée, le coût, qui l'a lancé et l'erreur.
+- Appliquez `supabase/migrations/0020_travaux_serveur.sql` (SQL Editor → coller → **Run**). Sans elle, tout fonctionne comme avant, mais rien n'est noté et l'historique affiche un message.
+- Les trois images des serveurs passent en nouvelle version (vidéo v8, voix v5, lip-sync v2) pour envoyer ces nouvelles ; le studio les bascule tout seul au prochain envoi.
+
 ## Catégorie du film et plans continus (migration 0016)
 
 Appliquez la migration `supabase/migrations/0016_categorie.sql` (SQL Editor → coller → **Run**). Elle ajoute la **catégorie** du film (interview, documentaire, film, promotion, tutoriel, clip) et le **plan continu** des lignes du tableau. Sans elle, le studio marche comme avant : la catégorie choisie n'est pas gardée et les lignes ne sont pas regroupées.

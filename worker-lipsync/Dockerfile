@@ -48,5 +48,5 @@ RUN python3 -c "from huggingface_hub import snapshot_download as s, hf_hub_downl
 s('TencentGameMate/chinese-wav2vec2-base', local_dir='/app/poids/chinese-wav2vec2-base'); \
 h('TencentGameMate/chinese-wav2vec2-base', 'model.safetensors', revision='refs/pr/1', local_dir='/app/poids/chinese-wav2vec2-base')"
 
-COPY handler.py video.py ./
+COPY handler.py video.py progression.py ./
 CMD ["python3", "-u", "handler.py"]
