@@ -8,6 +8,7 @@ import { requireProfile } from "@/lib/session";
 import { ControleFile } from "../controle-file";
 import { refuserClips, regenerer, retirerValidation, supprimerClip, validerClip } from "./actions";
 import { SuiviEssais } from "./suivi-essais";
+import { VideoAvecVoix } from "./video-avec-voix";
 import { FriseTravail } from "@/components/frise-travail";
 
 type Essai = {
@@ -16,6 +17,7 @@ type Essai = {
   runpod_job_id: string | null;
   moteur: string;
   video_path: string | null;
+  audio_path: string | null;
   cost_usd: number | null;
   error: string | null;
   controle: unknown;
@@ -52,7 +54,7 @@ const FILTRES = [
 ] as const;
 
 const SELECT =
-  "id, position, image_path, voiceover_text, status, validated_take_id, takes!takes_scene_id_fkey(id, status, runpod_job_id, moteur, video_path, cost_usd, error, controle, created_at), voice_clips!voice_clips_scene_id_fkey(audio_path, duration_s)";
+  "id, position, image_path, voiceover_text, status, validated_take_id, takes!takes_scene_id_fkey(id, status, runpod_job_id, moteur, video_path, audio_path, cost_usd, error, controle, created_at), voice_clips!voice_clips_scene_id_fkey(audio_path, duration_s)";
 
 const moteurDe = (t: Essai): Moteur => (estMoteur(t.moteur) ? t.moteur : "qualite");
 
@@ -119,7 +121,11 @@ export default async function PageClips({
 
   const liens = await signerLiens(
     supabase,
-    affiches.flatMap((p) => [p.image_path, ...p.takes.map((t) => t.video_path)]),
+    affiches.flatMap((p) => [
+      p.image_path,
+      ...p.takes.flatMap((t) => [t.video_path, t.audio_path]),
+      ...p.voice_clips.map((v) => v.audio_path),
+    ]),
   );
 
   return (
@@ -246,6 +252,9 @@ export default async function PageClips({
                 {plan.takes.map((t, k) => {
                   const video = t.video_path ? liens.get(t.video_path) : undefined;
                   const choisi = plan.validated_take_id === t.id;
+                  // Voix jouée avec l'aperçu : celle qui a guidé la bouche (lip-sync), sinon le morceau de voix off du plan
+                  const cheminVoix = t.audio_path ?? plan.voice_clips.find((v) => v.audio_path)?.audio_path;
+                  const voix = cheminVoix ? liens.get(cheminVoix) : undefined;
                   return (
                     <div key={t.id} className={`rounded-lg border p-3 ${choisi ? "border-succes bg-succes-doux" : "border-ligne"}`}>
                       <p className="mb-2 flex items-center gap-2 text-sm font-semibold">
@@ -268,7 +277,7 @@ export default async function PageClips({
                       {t.status === "echouee" && (
                         <p className="text-sm text-alerte">Échec (non facturé) : {t.error ?? "erreur inconnue"}</p>
                       )}
-                      {video && <video src={video} controls loop playsInline preload="metadata" className="w-full rounded-md bg-black" />}
+                      {video && <VideoAvecVoix video={video} voix={voix} />}
                       {aAmeliorer(t.controle).length > 0 && (
                         <p className="mt-2 text-xs text-sourdine">À améliorer : {aAmeliorer(t.controle).join(" · ")}</p>
                       )}
