@@ -19,7 +19,11 @@ WORKDIR /app
 ARG INFINITETALK_COMMIT=50aa0a94184315407a991ae804d9b58d6d311ba8
 RUN git clone https://github.com/MeiGen-AI/InfiniteTalk /app/InfiniteTalk \
  && git -C /app/InfiniteTalk checkout "$INFINITETALK_COMMIT" \
- && rm -rf /app/InfiniteTalk/.git /app/InfiniteTalk/examples /app/InfiniteTalk/assets
+ && rm -rf /app/InfiniteTalk/.git /app/InfiniteTalk/examples /app/InfiniteTalk/assets \
+ && sed -i '/^from inspect import ArgSpec$/d' /app/InfiniteTalk/wan/multitalk.py \
+ && ! grep -rn "ArgSpec" /app/InfiniteTalk --include=*.py
+# wan/multitalk.py importe « inspect.ArgSpec » (jamais utilisé), retiré de Python 3.11 : sans cette ligne supprimée,
+# chaque clip lip-sync échouait avec « ImportError: cannot import name 'ArgSpec' from 'inspect' ».
 
 COPY requirements.txt .
 # Versions liées entre elles : torch 2.7.1 + CUDA 12.8 (déjà dans l'image, Python 3.11), xformers 0.0.31.post1 (roue PyPI
