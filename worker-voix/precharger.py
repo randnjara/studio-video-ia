@@ -37,4 +37,6 @@ ChatterboxVC.from_pretrained("cpu")
 from faster_whisper import WhisperModel  # noqa: E402
 
 WhisperModel("small", device="cpu", compute_type="int8")
+# Modèle moyen : transcription et calage des plans sur la voix off
+WhisperModel("medium", device="cpu", compute_type="int8")
 print("Modèles prêts")

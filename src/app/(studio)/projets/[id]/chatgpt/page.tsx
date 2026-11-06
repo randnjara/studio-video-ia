@@ -3,6 +3,10 @@ import { CATEGORIES, lireCategorie } from "@/lib/categories";
 import { getClient } from "@/lib/session";
 import { ImportTableau } from "../plans/import-tableau";
 import { PreparationTableau } from "../plans/preparation";
+import type { Transcription } from "@/lib/preparation";
+import { TranscriptionAudio } from "./transcription-audio";
+import { remplirTableauAuto } from "./actions";
+import { remplissageDisponible } from "@/lib/remplissage-ia";
 
 // Étape 2 : ChatGPT prépare le tableau des plans à partir des informations de l'étape 1, puis on importe le fichier rempli
 export default async function PageChatGPT({
@@ -15,12 +19,23 @@ export default async function PageChatGPT({
   const { id } = await params;
   const sp = await searchParams;
   const supabase = await getClient();
-  const [{ data: projet }, { data: refsLues }, { count: plans }] = await Promise.all([
+  const [{ data: projet }, { data: refsLues }, { count: plans }, { data: voixOff }, { data: versions }] = await Promise.all([
     // Toutes les colonnes : la catégorie est lue si la migration 0016 est passée
     supabase.from("projects").select("*").eq("id", id).maybeSingle(),
     supabase.from("film_refs").select("nom, genre, description").eq("project_id", id).order("created_at"),
     supabase.from("scenes").select("id", { count: "exact", head: true }).eq("project_id", id),
+    supabase.from("voix_creations").select("id, nom, duree_s").eq("project_id", id).eq("status", "terminee").order("created_at", { ascending: false }),
+    supabase
+      .from("project_versions")
+      .select("data")
+      .eq("project_id", id)
+      .eq("kind", "scenario")
+      .order("created_at", { ascending: false })
+      .limit(10),
   ]);
+  // Dernière transcription de la voix off audio (répliques horodatées et ton), reprise dans la consigne
+  const transcription =
+    ((versions ?? []).map((v) => (v.data as { transcription?: Transcription }).transcription).find(Boolean) as Transcription | undefined) ?? null;
   if (!projet) return null;
   const refs = refsLues ?? [];
   const personnages = refs.filter((r) => r.genre === "personnage").map((r) => r.nom);
@@ -60,36 +75,89 @@ export default async function PageChatGPT({
         </ul>
       </section>
 
-      <section className="carte flex flex-col gap-4">
-        <div>
-          <h2 className="text-lg font-bold">1. Préparer le tableau dans ChatGPT ou Claude</h2>
-          <p className="text-sm text-sourdine">
-            L'assistant découpe la voix off en plans et remplit le fichier : texte de chaque plan, durée, cadrage, lieu, poses, prompt
-            de la photo et prompt de la vidéo. Tout ce dont le studio a besoin, en une seule fois.
-          </p>
-        </div>
-        <PreparationTableau
-          titre={projet.title}
-          format={projet.aspect_ratio}
-          style={projet.style_text}
-          script={projet.scenario_text}
-          resume={projet.resume}
-          categorie={categorie}
-          refs={refs}
+      {/* Flux recommandé : la voix off AUDIO d'abord. Ses répliques (Whisper) sont la liste des plans, avec leur minutage. */}
+      <section className="flex flex-col gap-4 rounded-xl border-2 border-accent p-1">
+        <p className="px-3 pt-2 text-sm font-bold text-accent">À partir de la voix off audio — recommandé</p>
+        <TranscriptionAudio
+          projectId={id}
+          creations={(voixOff ?? []).map((v) => ({ id: v.id, nom: v.nom, duree: v.duree_s !== null ? Number(v.duree_s) : null }))}
+          transcrite={transcription ? { nom: transcription.nom ?? "", repliques: transcription.repliques.length } : null}
         />
+        {transcription && (
+          <>
+            <section className="carte flex flex-col gap-4">
+              <div>
+                <h2 className="text-lg font-bold">1. Faire remplir la mise en scène par ChatGPT ou Claude</h2>
+                <p className="text-sm text-sourdine">
+                  Le fichier est pré-rempli avec les {transcription.repliques.length} répliques audio (numéro, début, fin, durée, voix) :
+                  l&apos;assistant ne remplit que l&apos;intention, les gestes, le cadrage, l&apos;angle, le lieu, les poses et les prompts,
+                  avec des repères de temps calculés sur la vraie durée de chaque plan.
+                </p>
+              </div>
+              <PreparationTableau
+                titre={projet.title}
+                format={projet.aspect_ratio}
+                style={projet.style_text}
+                script={projet.scenario_text}
+                resume={projet.resume}
+                categorie={categorie}
+                refs={refs}
+                transcription={transcription}
+              />
+            </section>
+            <section className="carte flex flex-col gap-4" id="import">
+              <div>
+                <h2 className="text-lg font-bold">2. Importer le tableau rempli</h2>
+                <p className="text-sm text-sourdine">
+                  Les plans naissent calés sur l&apos;audio : aucune correction de durée ensuite.
+                  {plans ? ` Ce projet a déjà ${plans} plan${plans > 1 ? "s" : ""} : les nouveaux s'ajoutent à la suite.` : ""}
+                </p>
+              </div>
+              <ImportTableau
+                projectId={id}
+                personnageParDefaut={personnages[0] ?? ""}
+                audio
+                remplir={remplissageDisponible() ? remplirTableauAuto.bind(null, id) : undefined}
+              />
+            </section>
+          </>
+        )}
       </section>
 
-      <section className="carte flex flex-col gap-4" id="import">
-        <div>
-          <h2 className="text-lg font-bold">2. Importer le fichier rempli</h2>
-          <p className="text-sm text-sourdine">
-            Téléchargez le fichier rempli par l'assistant et choisissez-le ici, sans le modifier. Les plans sont créés et vous passez à
-            l'étape 3.
-            {plans ? ` Ce projet a déjà ${plans} plan${plans > 1 ? "s" : ""} : les nouveaux s'ajoutent à la suite.` : ""}
-          </p>
+      {/* Ancien flux : à partir du texte de la voix off (durées estimées), si l'audio n'existe pas encore */}
+      <details className="flex flex-col gap-4" open={!transcription && !(voixOff ?? []).length}>
+        <summary className="cursor-pointer text-sm font-semibold text-sourdine">Sans voix off audio : préparer le tableau à partir du texte (durées estimées)</summary>
+        <div className="mt-4 flex flex-col gap-6">
+          <section className="carte flex flex-col gap-4">
+            <div>
+              <h2 className="text-lg font-bold">1. Préparer le tableau dans ChatGPT ou Claude</h2>
+              <p className="text-sm text-sourdine">
+                L'assistant découpe la voix off en plans et remplit le fichier : texte de chaque plan, durée estimée, cadrage, lieu,
+                poses, prompt de la photo et prompt de la vidéo. Quand la voix off audio sera prête, les plans seront calés dessus.
+              </p>
+            </div>
+            <PreparationTableau
+              titre={projet.title}
+              format={projet.aspect_ratio}
+              style={projet.style_text}
+              script={projet.scenario_text}
+              resume={projet.resume}
+              categorie={categorie}
+              refs={refs}
+            />
+          </section>
+          <section className="carte flex flex-col gap-4">
+            <div>
+              <h2 className="text-lg font-bold">2. Importer le fichier rempli</h2>
+              <p className="text-sm text-sourdine">
+                Téléchargez le fichier rempli par l'assistant et choisissez-le ici, sans le modifier.
+                {plans ? ` Ce projet a déjà ${plans} plan${plans > 1 ? "s" : ""} : les nouveaux s'ajoutent à la suite.` : ""}
+              </p>
+            </div>
+            <ImportTableau projectId={id} personnageParDefaut={personnages[0] ?? ""} remplir={remplissageDisponible() ? remplirTableauAuto.bind(null, id) : undefined} />
+          </section>
         </div>
-        <ImportTableau projectId={id} personnageParDefaut={personnages[0] ?? ""} />
-      </section>
+      </details>
     </div>
   );
 }

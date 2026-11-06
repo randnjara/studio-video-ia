@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { Categorie } from "@/lib/categories";
-import { FICHIER_A_REMPLIR, promptPreparation, tableauARemplir } from "@/lib/preparation";
+import { FICHIER_A_REMPLIR, type Transcription, promptPreparation, tableauARemplir } from "@/lib/preparation";
 
 type Ref = { nom: string; genre: string; description: string };
 
@@ -16,6 +16,7 @@ export function PreparationTableau(p: {
   resume: string;
   categorie: Categorie;
   refs: Ref[];
+  transcription?: Transcription | null;
 }) {
   const [etat, setEtat] = useState<"" | "copie" | "manuel">("");
   const [telecharge, setTelecharge] = useState(false);
@@ -27,12 +28,13 @@ export function PreparationTableau(p: {
     resume: p.resume,
     categorie: p.categorie,
     refs: p.refs,
+    transcription: p.transcription,
   });
 
   // Fichier .csv à joindre dans ChatGPT (avec un BOM pour qu'Excel lise bien les accents)
   function telecharger() {
     const lien = document.createElement("a");
-    lien.href = URL.createObjectURL(new Blob(["﻿" + tableauARemplir()], { type: "text/csv;charset=utf-8" }));
+    lien.href = URL.createObjectURL(new Blob(["﻿" + tableauARemplir(p.transcription)], { type: "text/csv;charset=utf-8" }));
     lien.download = FICHIER_A_REMPLIR;
     lien.click();
     URL.revokeObjectURL(lien.href);
@@ -53,7 +55,9 @@ export function PreparationTableau(p: {
       <div className="flex flex-wrap items-center gap-3">
         <span className="font-semibold">a.</span>
         <button type="button" className="bouton-discret" onClick={telecharger}>
-          ⬇ Télécharger le fichier à remplir (.csv)
+          {p.transcription?.repliques.length
+            ? `⬇ Télécharger le fichier pré-rempli (${p.transcription.repliques.length} répliques audio, .csv)`
+            : "⬇ Télécharger le fichier à remplir (.csv)"}
         </button>
         {telecharge && <span className="text-succes">Téléchargé : {FICHIER_A_REMPLIR}</span>}
       </div>

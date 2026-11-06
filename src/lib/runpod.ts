@@ -359,6 +359,37 @@ export async function lireDecoupage(
   return { etat: "en_cours" };
 }
 
+// Calage des plans sur la voix off audio (Whisper, horodatage par mot) et transcription en répliques avec le ton : travaux
+// du serveur voix, dont le résultat est lu tel quel
+export async function lancerVoixWhisper(input: {
+  moteur: "aligner" | "transcrire";
+  sourceUrl: string;
+  langue: string;
+  plans?: { scene_id: string; texte: string }[];
+  texte?: string;
+}): Promise<string> {
+  const data = await appel("voix", "/run", {
+    method: "POST",
+    body: JSON.stringify({
+      input: { moteur: input.moteur, source_url: input.sourceUrl, langue: input.langue, plans: input.plans, texte: input.texte },
+      policy: { executionTimeout: 20 * 60 * 1000, ttl: 60 * 60 * 1000 },
+    }),
+  });
+  return String(data.id);
+}
+
+export async function lireTravailVoix(
+  jobId: string,
+): Promise<{ etat: "en_cours"; enFile: boolean } | { etat: "echouee"; erreur: string } | { etat: "terminee"; sortie: Record<string, unknown>; secondes: number | null }> {
+  const data = await appel("voix", `/status/${encodeURIComponent(jobId)}`);
+  if (data.status === "COMPLETED") {
+    if (data.output?.error) return { etat: "echouee", erreur: String(data.output.error).slice(0, 500) };
+    return { etat: "terminee", sortie: (data.output ?? {}) as Record<string, unknown>, secondes: typeof data.executionTime === "number" ? data.executionTime / 1000 : null };
+  }
+  if (["FAILED", "TIMED_OUT", "CANCELLED"].includes(data.status)) return { etat: "echouee", erreur: String(data.error ?? data.status).slice(0, 500) };
+  return { etat: "en_cours", enFile: data.status === "IN_QUEUE" };
+}
+
 export type StatutRunPod =
   // « enFile » : RunPod ne l'a pas encore commencée (on peut l'annuler sans rien perdre)
   | { etat: "en_cours"; enFile: boolean }

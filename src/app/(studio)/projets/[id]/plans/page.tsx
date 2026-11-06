@@ -3,18 +3,20 @@ import { BoutonEnvoi } from "@/components/bouton-envoi";
 import { MOUVEMENT_PAR_DEFAUT, STATUTS_PLAN, couleurStatut, dureeLisible } from "@/lib/libelles";
 import { lireCategorie, plansContinus } from "@/lib/categories";
 import { alertesPlans } from "@/lib/controles";
+import { risquesPlans } from "@/lib/risques";
 import { lotsPromptsPhotos, suivrePhotos } from "@/lib/photos";
 import { cleNom } from "@/lib/noms";
 import { signerLiens } from "@/lib/production";
 import { MOTEURS, PRIX_PHOTO_ESTIME_USD, endpointEco, endpointLipsync, moteursDisponibles } from "@/lib/runpod";
 import { lireEtatFile } from "@/lib/file-attente";
 import { requireProfile } from "@/lib/session";
-import { promptVerification } from "@/lib/verification";
+import { type MinutageAudio, promptRefaireTableau, promptVerification } from "@/lib/verification";
 import { garderDecor,
   creerPhotos,
   regenererPhoto,
   deplacerPlan,
   envoyerALaGeneration,
+  appliquerCorrectionsRisques,
   restaurerScript,
   supprimerPlan,
   supprimerPlans,
@@ -30,6 +32,8 @@ import { SuiviPhotos } from "./suivi-photos";
 import { RemplacerPhoto } from "./remplacer-photo";
 import { ControleFile } from "../controle-file";
 import { VoixOffLipsync } from "./voix-off";
+import { revenirAuTableau } from "./voix-off-actions";
+import { promptARefaire } from "@/lib/calage";
 import { minuter } from "@/lib/minutage";
 import { PhotoZoom } from "@/components/photo-zoom";
 
@@ -53,7 +57,7 @@ type Plan = {
   status: string;
   validated_take_id: string | null;
   takes: { status: string }[];
-  voice_clips?: { audio_path: string; duration_s: number | null; debut_s: number | null; fin_s: number | null }[];
+  voice_clips?: { audio_path: string; duration_s: number | null; debut_s: number | null; fin_s: number | null; voix_creation_id: string | null }[];
   photos: Photo[];
 };
 
@@ -69,7 +73,22 @@ type Photo = {
 };
 type Ref = { id: string; nom: string; genre: string; description: string; image_path: string };
 
-type Version = { id: number; created_at: string; data: { scenario_text?: string } };
+type Version = {
+  id: number;
+  created_at: string;
+  data: {
+    scenario_text?: string;
+    // Tableau gardé avant un calage sur la voix off audio, et le résultat de ce calage
+    tableau?: { id: string; duration_s: number | string; motion_prompt: string }[];
+    calage?: {
+      voix_creation_id: string;
+      nom?: string;
+      duree?: number;
+      scindes?: string[];
+      plans?: ({ id: string } & MinutageAudio)[];
+    };
+  };
+};
 
 const ERREURS: Record<string, string> = {
   plan: "Le plan n'a pas pu être enregistré. Réessayez.",
@@ -90,6 +109,9 @@ const ERREURS: Record<string, string> = {
     "Notre serveur RunPod est arrêté : redémarrez-le (bouton du bandeau ou « Équipe et budget »), ou choisissez « Qualité max » pour les vidéos.",
   decor: "Ce plan n'a pas de lieu ou pas de photo : impossible de garder son décor.",
   "photos-importees": "Les photos n'ont pas pu être rattachées aux plans. Réessayez.",
+  restauration: "Le tableau d'avant n'a pas pu être remis. Réessayez.",
+  "import-audio": "Le tableau ne correspond pas aux répliques de la voix off audio.",
+  "correction-risques": "Les corrections n'ont pas pu être enregistrées. Réessayez.",
   correction: "Les plans n'ont pas pu être mis à jour avec le tableau corrigé. Réessayez.",
   "sans-remarque": "Pour re-générer, écrivez en quelques mots ce qui ne va pas ou ce que vous voulez.",
 };
@@ -111,7 +133,7 @@ export default async function PagePlans({
     supabase.from("projects").select("*").eq("id", id).maybeSingle(),
     supabase
       .from("scenes")
-      .select("*, takes!takes_scene_id_fkey(status), photos(*), voice_clips!voice_clips_scene_id_fkey(audio_path, duration_s, debut_s, fin_s)")
+      .select("*, takes!takes_scene_id_fkey(status), photos(*), voice_clips!voice_clips_scene_id_fkey(audio_path, duration_s, debut_s, fin_s, voix_creation_id)")
       .eq("project_id", id)
       .order("position"),
     supabase
@@ -165,6 +187,22 @@ export default async function PagePlans({
   const enCours = (p: Plan) => p.takes.some((t) => t.status === "en_cours");
   const nouveaux = plans.filter((p) => pret(p) && !enCours(p) && !p.takes.some((t) => t.status === "terminee")).length;
   const duree = plans.reduce((n, p) => n + Number(p.duration_s || 5), 0);
+  // La voix off AUDIO est la seule source de minutage : plans calés dessus (minutage écrit par le calage Whisper)
+  const caleSur = (p: Plan) => p.voice_clips?.find((v) => v.voix_creation_id && v.debut_s !== null)?.voix_creation_id ?? null;
+  const parVoix = new Map<string, number>();
+  for (const p of plans) {
+    const v = caleSur(p);
+    if (v) parVoix.set(v, (parVoix.get(v) ?? 0) + 1);
+  }
+  const [voixCalee, nbCales] = [...parVoix].sort((a, b) => b[1] - a[1])[0] ?? [null, 0];
+  const calePour = voixCalee && nbCales >= Math.max(1, plans.length * 0.9) ? voixCalee : null;
+  const listeVersions = (versions ?? []) as Version[];
+  // Dernier calage sur cette voix : ancien tableau (prompts à refaire) et minutage lu dans l'audio
+  const calage = calePour ? listeVersions.find((v) => v.data.calage?.voix_creation_id === calePour) : undefined;
+  const avant = new Map((calage?.data.tableau ?? []).map((t) => [t.id, t]));
+  const scindes = new Set(calage?.data.calage?.scindes ?? []);
+  const aRefaire = new Set(plans.filter((p) => calePour && promptARefaire(p, avant, scindes)).map((p) => p.id));
+  const minutageAudio = new Map((calage?.data.calage?.plans ?? []).map((m) => [m.id, m]));
   const refuses = plans.filter((p) => p.status === "refusee").length;
   // Résumé affiché quand le tableau est replié, et ouverture automatique après une action sur un plan
   const parStatut = Object.entries(
@@ -173,7 +211,9 @@ export default async function PagePlans({
   const apercu = parStatut.map(([st, n]) => `${n} ${(STATUTS_PLAN[st] ?? st).toLowerCase()}`).join(" · ");
   const ouvert = Boolean(sp.ajoute || sp.enregistre || sp.importe || sp.refuse || sp.ouvert);
   const decrits = plans.filter((p) => p.image_description.trim()).length;
-  const alertes = alertesPlans(plans, MOUVEMENT_PAR_DEFAUT, lireCategorie(projet?.categorie));
+  const alertes = alertesPlans(plans, MOUVEMENT_PAR_DEFAUT, lireCategorie(projet?.categorie), Boolean(serveurLipsync));
+  // Plans à risque (R1 à R7), du plus risqué au moins risqué, avec la correction proposée de prompt_video
+  const risques = risquesPlans(plans, Boolean(serveurLipsync));
   const continus = plansContinus(plans);
   const categorie = lireCategorie(projet?.categorie);
   const nbAlertes = [...alertes.values()].reduce((n, a) => n + a.length, 0);
@@ -189,7 +229,12 @@ export default async function PagePlans({
 
   return (
     <div className="flex flex-col gap-6">
-      {sp.erreur && ERREURS[sp.erreur] && <p className="message-erreur">{ERREURS[sp.erreur]}</p>}
+      {sp.erreur && ERREURS[sp.erreur] && (
+        <p className="message-erreur">
+          {ERREURS[sp.erreur]}
+          {sp.detail ? ` ${sp.detail}` : ""}
+        </p>
+      )}
       {sp.ajoute && <p className="message-ok">Plan ajouté en bas du tableau.</p>}
       {sp["photos-importees"] && (
         <p className="message-ok">
@@ -244,6 +289,17 @@ export default async function PagePlans({
         sp={sp}
       />
       {sp["script-restaure"] && <p className="message-ok">Ancien script remis dans la zone de texte.</p>}
+      {sp["corrige-audio"] && (
+        <p className="message-ok">
+          Tableau calé sur la voix off audio : {sp["corrige-audio"]} ligne(s) remise(s) au minutage et au texte de l&apos;audio.
+        </p>
+      )}
+      {sp["tableau-restaure"] && <p className="message-ok">Tableau d&apos;avant le calage remis (durées et prompts d&apos;avant).</p>}
+      {sp.corrige && (
+        <p className="message-ok">
+          {Number(sp.corrige) > 0 ? `${sp.corrige} prompt${Number(sp.corrige) > 1 ? "s" : ""} vidéo corrigé${Number(sp.corrige) > 1 ? "s" : ""}.` : "Aucun plan coché à corriger."}
+        </p>
+      )}
       {sp.importe && (
         <p className="message-ok">
           {sp.importe} plans créés. Vérifiez-les ci-dessous, puis cochez ceux à envoyer à la génération.
@@ -281,12 +337,24 @@ export default async function PagePlans({
                       <span className="shrink-0 text-sourdine">
                         {new Date(v.created_at).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}
                       </span>
-                      <span className="min-w-0 flex-1 truncate">{v.data.scenario_text?.slice(0, 90) || "(vide)"}</span>
-                      <form action={restaurerScript.bind(null, id, v.id)}>
-                        <BoutonEnvoi className="lien" enCours="…">
-                          Reprendre
-                        </BoutonEnvoi>
-                      </form>
+                      <span className="min-w-0 flex-1 truncate">
+                        {v.data.tableau
+                          ? `Tableau avant calage sur « ${v.data.calage?.nom || "la voix off"} » (${v.data.tableau.length} plans)`
+                          : v.data.scenario_text?.slice(0, 90) || "(vide)"}
+                      </span>
+                      {v.data.tableau ? (
+                        <form action={revenirAuTableau.bind(null, id, v.id)}>
+                          <BoutonEnvoi className="lien" enCours="…" confirmer="Revenir à ce tableau (durées et prompts d'avant le calage) ?">
+                            Revenir à ce tableau
+                          </BoutonEnvoi>
+                        </form>
+                      ) : (
+                        <form action={restaurerScript.bind(null, id, v.id)}>
+                          <BoutonEnvoi className="lien" enCours="…">
+                            Reprendre
+                          </BoutonEnvoi>
+                        </form>
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -376,6 +444,9 @@ export default async function PagePlans({
           nbPlans={plans.length}
           nbDecoupes={plans.filter((p) => p.voice_clips?.some((v) => v.audio_path && v.duration_s !== null)).length}
           nbMinutes={plans.filter((p) => p.voice_clips?.some((v) => v.debut_s !== null)).length}
+          calePour={calePour}
+          dejaCales={[...new Set(listeVersions.flatMap((v) => (v.data.calage ? [v.data.calage.voix_creation_id] : [])))]}
+          langueParDefaut="mg"
           minutage={minuter(
             plans.map((p) => {
               const m = p.voice_clips?.find((v) => v.debut_s !== null);
@@ -398,6 +469,8 @@ export default async function PagePlans({
           <h2 className="text-lg font-bold">Tableau des plans</h2>
           <span className="text-sm text-sourdine">
             {plans.length} plan{plans.length > 1 ? "s" : ""} · {dureeLisible(duree)} de vidéo au total
+            {calePour ? " · 🎧 calé sur la voix off audio (durée du film = durée de l'audio)" : ""}
+            {aRefaire.size ? ` · ✏ ${aRefaire.size} prompt${aRefaire.size > 1 ? "s" : ""} à refaire` : ""}
           </span>
         </div>
 
@@ -406,6 +479,72 @@ export default async function PagePlans({
             ⚠ {nbAlertes} alerte{nbAlertes > 1 ? "s" : ""} sur les plans (gestes ou poses de fin répétés, voix off trop longue, consigne pas en
             anglais) : voyez le détail sous chaque plan avant de créer les photos ou les vidéos.
           </p>
+        )}
+        {risques.length > 0 && (
+          <details id="risques" className="carte scroll-mt-24" open={Boolean(sp.corrige)}>
+            <summary className="cursor-pointer text-sm font-semibold">
+              ⚠ {risques.length} plan{risques.length > 1 ? "s" : ""} à risque (
+              {risques.filter((r) => r.niveau === "élevé").length} élevé{risques.filter((r) => r.niveau === "élevé").length > 1 ? "s" : ""}) :
+              recul de caméra, rire, émotion par la bouche, mains près du visage, parole dans le prompt…
+            </summary>
+            <form action={appliquerCorrectionsRisques.bind(null, id)} className="mt-3 flex flex-col gap-3">
+              <ol className="flex flex-col gap-3 text-sm">
+                {risques.map((r) => (
+                  <li key={r.id} className="rounded-lg border border-ligne p-3">
+                    <label className="flex items-start gap-2">
+                      <input
+                        type="checkbox"
+                        name="risques"
+                        value={r.id}
+                        defaultChecked={Boolean(r.correction)}
+                        disabled={!r.correction}
+                        className="mt-1 accent-[var(--accent)]"
+                      />
+                      <span className="flex flex-col gap-1">
+                        <span>
+                          <a href={`#plan-${r.id}`} className="lien font-semibold">
+                            Plan {r.numero}
+                          </a>{" "}
+                          <span className={`pastille ${r.niveau === "élevé" ? "bg-alerte text-surface" : "bg-surface-2 text-sourdine"}`}>
+                            risque {r.niveau} · {r.score}
+                          </span>
+                        </span>
+                        <span className="text-sourdine">{r.raisons.map((x) => x.texte).join(" · ")}</span>
+                        {r.correction ? (
+                          <span className="text-xs">
+                            Correction proposée de prompt_video : <i>{r.correction}</i>
+                          </span>
+                        ) : (
+                          <span className="text-xs text-sourdine">Risque dans la pose ou l&apos;intention : corrigez-les à la main (ou avec la vérification ci-dessous).</span>
+                        )}
+                      </span>
+                    </label>
+                  </li>
+                ))}
+              </ol>
+              <BoutonEnvoi enCours="Correction…" confirmer="Remplacer le prompt vidéo des plans cochés par la correction proposée ?">
+                ✔ Appliquer les corrections proposées
+              </BoutonEnvoi>
+            </form>
+          </details>
+        )}
+        {calePour && projet && (
+          <CopierVerification
+            titre="Refaire les prompts sur le minutage audio"
+            bouton="📋 Copier la consigne pour refaire le tableau"
+            explication={`Après le calage sur la voix off audio, ${aRefaire.size} plan(s) ont changé de durée de plus de 0,5 s : leurs repères « 0-1s / 1-3s… » ont été remis à l'échelle en attendant. Cette consigne donne à ChatGPT ou Claude, pour chaque plan, le texte réellement prononcé, le début et la fin réels, la durée, les pauses et le ton détecté, avec les règles anti-risques. Collez-la, puis importez le tableau rendu juste en dessous (« tableau corrigé ») : les prompts sont remplacés, le minutage audio est gardé.`}
+            texte={promptRefaireTableau(
+              projet,
+              plans.map((p) => ({ ...p, aRefaire: aRefaire.has(p.id) })),
+              plans.map((p) => {
+                const m = minutageAudio.get(p.id);
+                const v = p.voice_clips?.find((x) => x.voix_creation_id === calePour && x.debut_s !== null);
+                return m ?? (v ? { debut: Number(v.debut_s), fin: Number(v.fin_s) } : null);
+              }),
+              lireCategorie(projet.categorie),
+              calage?.data.calage?.nom ? `la voix off « ${calage.data.calage.nom} »` : undefined,
+            )}
+          />
         )}
         {plans.length > 0 && projet && (
           <CopierVerification
@@ -478,6 +617,16 @@ export default async function PagePlans({
                         </span>
                       )}
                       <span className={`pastille ${couleurStatut(plan.status)}`}>{STATUTS_PLAN[plan.status] ?? plan.status}</span>
+                      {calePour && caleSur(plan) === calePour && (
+                        <span className="pastille bg-surface-2 text-sourdine" title="Durée lue dans la voix off audio (Whisper)">
+                          🎧 calé sur l&apos;audio · {Number(plan.duration_s).toFixed(2)} s
+                        </span>
+                      )}
+                      {aRefaire.has(plan.id) && (
+                        <span className="pastille bg-alerte/10 text-alerte" title="La durée a changé de plus de 0,5 s : le prompt vidéo est à refaire">
+                          ✏ prompt à refaire
+                        </span>
+                      )}
                       <div className="ml-auto flex items-center gap-1 text-sm">
                         {i > 0 && (
                           <form action={deplacerPlan.bind(null, id, plan.id, -1)}>

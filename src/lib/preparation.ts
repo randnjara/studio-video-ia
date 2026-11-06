@@ -1,3 +1,4 @@
+import { REGLES_RISQUES } from "@/lib/risques";
 import { CATEGORIES, type Categorie } from "@/lib/categories";
 import { ANGLES, CADRAGES } from "@/lib/libelles";
 
@@ -58,7 +59,53 @@ const ligneExemple = () => COLONNES_STANDARD.map((c) => cellule(LIGNE_EXEMPLE[c]
 
 // Fichier à remplir par l'assistant : la ligne des colonnes et la ligne d'exemple. Même format que l'import.
 export const FICHIER_A_REMPLIR = "tableau_a_remplir.csv";
-export const tableauARemplir = () => `${COLONNES_STANDARD.join(";")}\n${ligneExemple()}\n`;
+export const tableauARemplir = (transcription?: Transcription | null) =>
+  transcription?.repliques.length
+    ? // Audio d'abord : une ligne par réplique audio, numero, debut, fin, duree et voix déjà remplis (à ne pas changer)
+      `${COLONNES_STANDARD.join(";")}\n${ligneExemple()}\n${transcription.repliques
+        .map((r, i) =>
+          COLONNES_STANDARD.map((c) =>
+            cellule(
+              c === "numero"
+                ? String(i + 1)
+                : c === "debut"
+                  ? mmss(r.debut)
+                  : c === "fin"
+                    ? mmss(r.fin)
+                    : c === "duree"
+                      ? (r.fin - r.debut).toFixed(2)
+                      : c === "voix"
+                        ? r.texte
+                        : "",
+            ),
+          ).join(";"),
+        )
+        .join("\n")}\n`
+    : `${COLONNES_STANDARD.join(";")}\n${ligneExemple()}\n`;
+
+export type Replique = { debut: number; fin: number; texte: string; ton?: string; description?: string };
+export type Transcription = { nom?: string; duree?: number | null; repliques: Replique[] };
+
+const mmss = (s: number) => {
+  const m = Math.floor(s / 60);
+  return `${String(m).padStart(2, "0")}:${(s - m * 60).toFixed(1).padStart(4, "0")}`;
+};
+
+// Section de la consigne : la voix off AUDIO transcrite, seule référence du minutage, avec le ton entendu
+export function sectionTranscription(t: Transcription) {
+  const lignes = t.repliques
+    .map((r, i) => `${i + 1}. ${mmss(r.debut)} → ${mmss(r.fin)} | ton ${r.ton ?? "?"}${r.description ? ` (${r.description})` : ""} | ${r.texte}`)
+    .join("\n");
+  return `
+=== VOIX OFF AUDIO${t.nom ? ` « ${t.nom} »` : ""} : TRANSCRIPTION HORODATÉE (LA RÉFÉRENCE DU MINUTAGE) ===
+La voix off existe déjà en audio${t.duree ? ` (${mmss(t.duree)})` : ""} : c'est la SEULE référence. Le film dure exactement ce temps. Elle est déjà découpée en répliques de 5 s au plus, aux pauses et aux fins de phrases : une ligne du tableau = une réplique, dans cet ordre, avec ce numéro, ce début, cette fin et ce texte (déjà écrits dans le fichier à remplir). Le ton (calme, joyeux, ému, rieur, interrogatif) et ses indices (débit, pauses, volume, voix qui monte ou descend) sont mesurés dans l'audio : « intention », gestes, regard et prompt_video suivent ce sens ET cette émotion réelle (sans jamais toucher à la bouche, pilotée par l'audio).
+${lignes}
+`;
+}
+
+// Audio d'abord : les lignes et le minutage viennent de l'audio, l'assistant ne remplit que la mise en scène
+const REGLES_LIGNES_AUDIO = `1. LIGNES IMPOSÉES PAR L'AUDIO. Le fichier « ${FICHIER_A_REMPLIR} » contient déjà UNE LIGNE PAR RÉPLIQUE de la voix off audio, avec « numero », « debut », « fin », « duree » et « voix » remplis d'après l'audio (transcription horodatée ci-dessus). Ne les change JAMAIS : ni le nombre de lignes, ni l'ordre, ni les numéros, ni un temps, ni un mot de « voix » (même mal orthographié : c'est ce qui est prononcé). Ne fusionne et ne coupe aucune ligne. Tu remplis UNIQUEMENT : plan_continu, intention, geste, cadrage, angle, lieu, raccord, pose_debut, pose_fin, prompt_image, prompt_video.
+2. TEMPS RÉELS. Chaque ligne dure exactement « duree » (souvent moins de 5 s, avec des décimales). Les tranches de « prompt_video » couvrent exactement cette durée, calculée sur la vraie valeur (par exemple 2.8 s : "0-1s: … 1-2s: … 2-2.8s: …" ; 4.35 s : "0-1s: … 1-3s: … 3-4.35s: …"). L'intention et le geste suivent le sens de la réplique ET le ton mesuré dans l'audio.`;
 
 export function promptPreparation(p: {
   titre: string;
@@ -68,8 +115,11 @@ export function promptPreparation(p: {
   resume?: string;
   categorie: Categorie;
   refs: Ref[];
+  // Voix off audio transcrite par Whisper (« Préparer le tableau depuis l'audio ») : répliques horodatées et ton
+  transcription?: Transcription | null;
 }) {
   const cat = CATEGORIES[p.categorie];
+  const audio = Boolean(p.transcription?.repliques.length);
   const parGenre = (g: string) =>
     p.refs
       .filter((r) => r.genre === g)
@@ -96,7 +146,7 @@ ${
 
 === VOIX OFF ===
 ${p.script.trim() || "Je te la donne juste après cette consigne (ou en fichier joint), telle quelle."}
-
+${p.transcription ? sectionTranscription(p.transcription) : ""}
 === LIGNE D'EXEMPLE (déjà dans le fichier) ===
 Le fichier contient une ligne numérotée « EXEMPLE », avec des noms inventés (Rova, Jardin). Elle montre le format exact et le niveau de détail attendu pour CHAQUE ligne, prompts compris :
 ${COLONNES_STANDARD.join(";")}
@@ -127,7 +177,7 @@ ${cat.consigne}
 - SÉQUENCE = un lieu + un moment + un sujet. Tant que le lieu, l'heure et le sujet ne changent pas, on reste dans la même séquence et dans le même lieu.
 - On CHANGE DE LIEU seulement si l'histoire change de temps, de lieu réel ou d'action (on part ailleurs, le lendemain…). Jamais pour « faire varier », jamais au milieu d'une phrase ou d'une idée. Un témoignage, une interview, une personne qui raconte un souvenir : un seul lieu pour tout le film.
 - PLAN CONTINU ≠ LIGNE. La limite de 5 s est technique : elle ne doit jamais se voir. On ne change pas de cadrage parce que 5 s sont passées ; on en change quand le texte le demande (voir la catégorie ci-dessus). Tant que le cadrage ne change pas, les lignes gardent le même plan_continu.
-- On CHANGE DE CADRAGE (plan large → plan américain → plan taille → plan poitrine) seulement en changeant de plan continu, par un lent mouvement de caméra (voir les règles de la catégorie). Une séquence s'ouvre en général par un plan plus large, puis se resserre au fil de l'émotion.
+- On CHANGE DE CADRAGE (plan large → plan américain → plan taille → plan poitrine) seulement en changeant de plan continu, par un lent mouvement de caméra (voir les règles de la catégorie). Le film s'ouvre sur le cadrage le plus large qu'il aura, puis ne fait que se resserrer au fil de l'émotion (ou garder le même cadrage) : jamais de recul ni de cadrage plus large en cours de film.
 - Deux plans continus qui se suivent changent au moins le cadrage ou l'angle, sinon le mouvement de caméra ne sert à rien. Dans un même plan continu, au contraire, rien ne change : même cadrage, même angle.
 - On GARDE L'AXE : la caméra reste du même côté de la personne pendant toute la séquence (règle des 180°), le regard part toujours du même côté.
 - RYTHME : il dépend de la catégorie (durée des plans continus donnée plus haut : ${cat.planMin} à ${cat.planMax} s).
@@ -140,28 +190,31 @@ ${cat.consigne}
   }
 
 === ÉTAPE 2 — RÈGLES DU TABLEAU ===
-1. DÉCOUPAGE. Découpe toi-même la voix off en lignes, dans l'ordre : une ligne = une réplique, ou un morceau de réplique coupé à une pause naturelle (fin de phrase, virgule, respiration). Chaque mot prononcé apparaît une seule fois dans « voix », sans traduction, correction ni oubli, dans sa langue d'origine. Les titres, numéros, noms de locuteur et indications de mise en scène ne sont pas des paroles : ne les mets pas dans « voix », sers-t'en pour l'intention et les gestes. Un plan sans parole (respiration, regard, transition) est permis : « voix » vide.
-2. NUMÉRO, DURÉE, MINUTAGE. « numero » : 1, 2, 3… sans trou. « duree » en secondes, nombre entier, JAMAIS plus de 5 : le modèle vidéo est fait pour des clips de 5 s, au-delà l'image se dégrade. 5 par défaut ; 3 ou 4 si la parole est très courte (mots ÷ 2,5, plus 1 s de respiration). Une parole de plus de 12 mots (2,5 mots par seconde) se coupe en deux lignes ou plus, à une pause naturelle (virgule, « ary », « dia », « fa »…), sans couper un mot ni un nom ; en général ces lignes restent dans le même plan continu (même numéro, même cadrage). « debut » et « fin » : minutage du plan dans la voix off, au format mm:ss ou mm:ss.d (dixièmes conseillés, ex. 00:04.6), aussi juste que possible (le premier plan commence à 00:00, chaque plan commence à la fin du précédent, et la coupure tombe dans une pause entre deux mots) : le studio coupe la voix off à ces temps pour le lip-sync.
+${audio ? REGLES_LIGNES_AUDIO : `1. DÉCOUPAGE. Découpe toi-même la voix off en lignes, dans l'ordre : une ligne = une réplique, ou un morceau de réplique coupé à une pause naturelle (fin de phrase, virgule, respiration). Chaque mot prononcé apparaît une seule fois dans « voix », sans traduction, correction ni oubli, dans sa langue d'origine. Les titres, numéros, noms de locuteur et indications de mise en scène ne sont pas des paroles : ne les mets pas dans « voix », sers-t'en pour l'intention et les gestes. Un plan sans parole (respiration, regard, transition) est permis : « voix » vide.
+2. NUMÉRO, DURÉE, MINUTAGE. « numero » : 1, 2, 3… sans trou. « duree » en secondes, nombre entier, JAMAIS plus de 5 : le modèle vidéo est fait pour des clips de 5 s, au-delà l'image se dégrade. 5 par défaut ; 3 ou 4 si la parole est très courte (mots ÷ 2,5, plus 1 s de respiration). Une parole de plus de 12 mots (2,5 mots par seconde) se coupe en deux lignes ou plus, à une pause naturelle (virgule, « ary », « dia », « fa »…), sans couper un mot ni un nom ; en général ces lignes restent dans le même plan continu (même numéro, même cadrage). « debut » et « fin » : minutage du plan dans la voix off, au format mm:ss ou mm:ss.d (dixièmes conseillés, ex. 00:04.6), aussi juste que possible (le premier plan commence à 00:00, chaque plan commence à la fin du précédent, et la coupure tombe dans une pause entre deux mots) : le studio coupe la voix off à ces temps pour le lip-sync.`}
 3. INTENTION ET GESTE. « intention » : l'émotion précise du moment, en français, tirée du sens de la réplique (pas « joie » partout : tendresse, fierté amusée, inquiétude retenue…). « geste » : le geste principal du plan en quelques mots, en français (le même que dans « prompt_video »).
-4. CADRAGE ET ANGLE. « cadrage » parmi : ${CADRAGES.join(", ")}. « angle » parmi : ${ANGLES.join(", ")}. Écris-les exactement ainsi. Toutes les lignes d'un plan continu ont le même cadrage et le même angle. Jamais le même couple cadrage + angle pour deux plans continus qui se suivent. Le plus serré sur une personne est le PLAN POITRINE : jamais de plan rapproché, de gros plan ni de très gros plan sur un personnage (en prise unique, l'IA réinvente alors le visage, qui change ensuite d'un clip à l'autre). L'émotion forte passe par un lent zoom vers le plan poitrine et par l'expression ; plans larges pour ouvrir une séquence ou changer de lieu. Pendant que le personnage parle : face ou 3/4, jamais de dos ni de profil strict.
+4. CADRAGE ET ANGLE. « cadrage » parmi : ${CADRAGES.join(", ")}. « angle » parmi : ${ANGLES.join(", ")}. Écris-les exactement ainsi. Toutes les lignes d'un plan continu ont le même cadrage et le même angle. Jamais le même couple cadrage + angle pour deux plans continus qui se suivent. Le plus serré sur une personne est le PLAN POITRINE : jamais de plan rapproché, de gros plan ni de très gros plan sur un personnage (en prise unique, l'IA réinvente alors le visage, qui change ensuite d'un clip à l'autre). L'émotion forte passe par un lent zoom vers le plan poitrine et par l'expression ; le plan le plus large ouvre le film, ensuite on ne recule plus. Pendant que le personnage parle : face ou 3/4, jamais de dos ni de profil strict.
 5. LIEU. Uniquement un nom de la liste des lieux autorisés, écrit exactement pareil. Comme un vrai tournage : le MOINS de lieux possible et de longues séquences dans chaque lieu (au moins 6 plans, souvent tout le film). D'un plan à l'autre dans un lieu, seuls le cadrage, l'angle et le geste changent ; la pièce, les meubles, la lumière et l'heure restent identiques. On change de lieu seulement quand le sujet change vraiment, JAMAIS au milieu d'une phrase ni d'une idée. Un témoignage ou une interview reste dans un seul lieu : quand la personne raconte un souvenir ailleurs, elle le raconte depuis ce lieu (pas de saut vers le lieu du souvenir). Quand le lieu change vraiment, la ligne part de la dernière image dans l'ancien lieu : écris dans son prompt_video comment on y va, au milieu de la ligne (la personne marche vers la porte, la caméra la suit dans la pièce voisine…). De même, un personnage qui arrive entre dans le cadre ou est rejoint par la caméra au milieu d'une ligne, il n'apparaît jamais d'un coup.
-6. POSES ET RACCORDS. « pose_debut » et « pose_fin » : position précise du corps, de la tête, du regard et des deux mains, en français. « raccord » : comment la ligne s'enchaîne à la précédente, un choix parmi « début de séquence » (ligne 1), « même plan » (ligne qui continue le plan continu précédent) ou « mouvement de caméra » (première ligne d'un nouveau plan continu : lent rapprochement ou recul vers le nouveau cadrage, au milieu de la ligne). SUR TOUT LE FILM, chaque ligne commence exactement là où finit la précédente (pose_debut = pose_fin de la ligne précédente, mot pour mot) : le studio part de la dernière image de la vidéo précédente. Chaque ligne finit sur une pose calme et stable (mains posées ou immobiles, visage vers la caméra), jamais au milieu d'un geste rapide, pour que la suite reparte proprement. Après 3 ou 4 lignes, reviens à une pose proche de celle de la photo du plan (le visage reste ainsi fidèle).
+6. POSES ET RACCORDS. « pose_debut » et « pose_fin » : position précise du corps, de la tête, du regard et des deux mains, en français. « raccord » : comment la ligne s'enchaîne à la précédente, un choix parmi « début de séquence » (ligne 1), « même plan » (ligne qui continue le plan continu précédent) ou « mouvement de caméra » (première ligne d'un nouveau plan continu : lent rapprochement vers le nouveau cadrage, plus serré, au milieu de la ligne ; jamais de recul). SUR TOUT LE FILM, chaque ligne commence exactement là où finit la précédente (pose_debut = pose_fin de la ligne précédente, mot pour mot) : le studio part de la dernière image de la vidéo précédente. Chaque ligne finit sur une pose calme et stable (mains posées ou immobiles, visage vers la caméra), jamais au milieu d'un geste rapide, pour que la suite reparte proprement. Après 3 ou 4 lignes, reviens à une pose proche de celle de la photo du plan (le visage reste ainsi fidèle).
 7. « prompt_image » = PROMPT DE LA PHOTO DE DÉPART, EN ANGLAIS, 30 à 70 mots. Il est identique mot pour mot sur TOUTES les lignes du film et décrit le début de la ligne 1 (une seule photo est créée pour tout le film). L'instant figé au tout début du plan : qui (nom exact), où (nom exact du lieu), la pose_debut, l'expression du visage, le cadrage et l'angle, la lumière de la séquence. Aucun verbe de mouvement, aucune suite d'actions, aucun texte écrit dans l'image. Le décor vient de la photo du lieu : ne le décris pas à nouveau, et surtout n'invente rien d'un plan à l'autre (pas de nouveau banc, de nouvelles fleurs, de colonnes, d'autre couleur de ciel ou d'autre heure) ; au plus quelques mots sur ce que l'on voit derrière la personne dans CE cadrage. Si plusieurs personnages : qui est où dans le cadre et qui parle. Pas de phrase toute faite recopiée au début ou à la fin de chaque prompt (le studio ajoute déjà le style et les règles générales) : décris ce qui est propre au plan.
-8. « prompt_video » = PROMPT DE LA VIDÉO, EN ANGLAIS, 40 à 80 mots, découpé en temps : "0-1s: … 1-3s: … 3-4s: … 4-5s: …" jusqu'à la durée du plan. Un seul geste principal, qui vient du sens de la réplique (pas un geste décoratif). LIP-SYNC : la bouche est animée automatiquement par la voix off (le studio donne à la vidéo le morceau de voix du plan) ; « prompt_video » ne décrit donc JAMAIS la parole (pas de "she speaks", "he says", "talking", ni de mouvement des lèvres ou de la bouche) : seulement les gestes, le regard, l'expression du visage et la caméra. « debut » et « fin » doivent suivre exactement la voix off (ils servent à la découper). La dernière tranche arrive exactement sur la pose_fin, tenue immobile pendant la dernière demi-seconde. Dans un plan continu, la première tranche des lignes suivantes reprend exactement le mouvement là où il s'est arrêté ("continues from the previous pose"). Caméra fixe, sauf dans la première ligne de chaque nouveau plan continu : un lent mouvement ("slow push-in", rarement "slow pull-back") AU MILIEU de la ligne, pendant le geste (par exemple "0-1s: camera still, … 1-4s: the camera slowly pushes in to a chest-up shot, her eyes on the lens … 4-5s: camera still, …"), jamais dans la première ni la dernière seconde. Sur tout le film, la première tranche de chaque ligne reprend exactement là où la précédente s'est arrêtée. Aucun geste repris dans les 10 lignes voisines. Ce qui donne vie au plan, c'est le geste des mains, le regard et l'expression du visage : jamais un changement de décor. Termine par ce qui bouge doucement dans le fond du lieu, s'il y en a (feuilles et fleurs dans le vent, nuages qui passent, eau ou cascade qui coule, voilage qui flotte) : "Background: …". La première tranche (0-1s) décrit le départ propre à ce plan (pose, regard, respiration selon l'émotion) : jamais la même phrase d'un plan à l'autre.
-9. CE QUE L'IA VIDÉO RATE (à éviter) : mains devant le visage ou la bouche pendant la parole, bras croisés, doigts entremêlés, mains qui se touchent longtemps, manger ou boire, objets qui apparaissent, personnage qui sort du cadre ou se retourne complètement en parlant, gestes rapides, plus de deux actions en 5 s, foule, reflets dans un miroir, texte à l'écran.
+8. « prompt_video » = PROMPT DE LA VIDÉO, EN ANGLAIS, 40 à 80 mots, découpé en temps : "0-1s: … 1-3s: … 3-4s: … 4-5s: …" jusqu'à la durée du plan. Un seul geste principal, qui vient du sens de la réplique (pas un geste décoratif). LIP-SYNC : la bouche est animée automatiquement par la voix off (le studio donne à la vidéo le morceau de voix du plan) ; « prompt_video » ne décrit donc JAMAIS la parole (pas de "she speaks", "he says", "talking", ni de mouvement des lèvres ou de la bouche) : seulement les gestes, le regard, l'expression du visage et la caméra. « debut » et « fin » doivent suivre exactement la voix off (ils servent à la découper). La dernière tranche arrive exactement sur la pose_fin, tenue immobile pendant la dernière demi-seconde. Dans un plan continu, la première tranche des lignes suivantes reprend exactement le mouvement là où il s'est arrêté ("continues from the previous pose"). Caméra fixe, sauf dans la première ligne de chaque nouveau plan continu : un lent rapprochement ("slow push-in", jamais de "pull-back" ni de "zoom out") AU MILIEU de la ligne, pendant le geste (par exemple "0-1s: camera still, … 1-4s: the camera slowly pushes in to a chest-up shot, her eyes on the lens … 4-5s: camera still, …"), jamais dans la première ni la dernière seconde. Sur tout le film, la première tranche de chaque ligne reprend exactement là où la précédente s'est arrêtée. Aucun geste repris dans les 10 lignes voisines. Ce qui donne vie au plan, c'est le geste des mains, le regard et l'expression du visage : jamais un changement de décor. Termine par ce qui bouge doucement dans le fond du lieu, s'il y en a (feuilles et fleurs dans le vent, nuages qui passent, eau ou cascade qui coule, voilage qui flotte) : "Background: …". La première tranche (0-1s) décrit le départ propre à ce plan (pose, regard, respiration selon l'émotion) : jamais la même phrase d'un plan à l'autre.
+9. CE QUE L'IA VIDÉO RATE (à éviter, voir aussi R1 à R7 ci-dessous) : mains devant le visage ou la bouche, bras croisés, doigts entremêlés, mains qui se touchent longtemps, manger ou boire, objets qui apparaissent, personnage qui sort du cadre ou se retourne complètement en parlant, gestes rapides, plus de deux actions en 5 s, foule, reflets dans un miroir, texte à l'écran.
+9 bis. ${REGLES_RISQUES}
+Ces règles valent pour « prompt_video », « pose_debut », « pose_fin » et « intention ». Le studio calcule après l'import un score de risque par plan et propose une correction automatique : vise zéro plan à risque.
 10. Toutes les cellules sont remplies, prompts compris (sauf « voix » d'un plan sans parole). Jamais « à définir », « idem », « … » ni « etc. ». Un fichier sans prompt_image ou prompt_video est inutilisable.
 
 === ÉTAPE 3 — VÉRIFICATION AVANT DE RENDRE ===
 Relis tout le tableau et corrige-le jusqu'à ce que tout soit vrai :
 - La voix off complète se retrouve dans « voix », mot pour mot, dans l'ordre, sans doublon.
 - Aucune phrase identique au début ou à la fin de tous les prompt_image ou de tous les prompt_video.
-- Numéros continus ; aucune durée au-dessus de 5 ; chaque durée tient sa parole (mots ÷ 2,5 ≤ durée) ; « debut » et « fin » se suivent sans trou.
+${audio ? "- Exactement une ligne par réplique audio, mêmes numero, debut, fin, duree et voix que dans le fichier fourni (jamais modifiés) ; les tranches « Xs-Ys » de chaque prompt_video couvrent exactement sa durée réelle." : `- Numéros continus ; aucune durée au-dessus de 5 ; chaque durée tient sa parole (mots ÷ 2,5 ≤ durée) ; « debut » et « fin » se suivent sans trou.`}
 - « plan_continu » rempli sur chaque ligne (1, 2, 3… dans l'ordre) ; durée de chaque plan continu (somme de ses lignes) entre ${cat.planMin} et ${cat.planMax} s ; aucun changement de cadrage au milieu d'une phrase.
 - Dans chaque plan continu : même cadrage, même angle, même lieu, même prompt_image mot pour mot, chaque pose_debut reprend mot pour mot la pose_fin de la ligne précédente, caméra fixe.
 - Prise unique : prompt_image identique sur tout le film ; chaque pose_debut reprend la pose_fin de la ligne précédente, sur tout le film ; la première ligne de chaque nouveau plan continu a son mouvement de caméra AU MILIEU de la ligne, jamais dans la première ni la dernière seconde.
 - Chaque geste, mouvement de caméra, changement de cadrage, de lieu ou de personnage vient du sens de la réplique à ce moment-là ; s'il n'est pas vraiment nécessaire, supprime-le.
 - Aucun couple cadrage + angle répété pour deux plans continus de suite ; aucun geste répété dans 10 lignes voisines.
 - Le moins de lieux possible (un seul pour 2 minutes ou moins) ; aucun changement de lieu au milieu d'une phrase ; aucun lieu tenu un seul plan ; même pièce, même lumière dans tout un lieu.
+- Aucun plan ne viole R1 à R7 (recul ou cadrage plus large, corps qui entre dans le cadre, rire, tête penchée, émotion par la bouche, main près du visage, doigts détaillés, objet tenu, cheveux devant le visage, lumière qui change, arc de plus de 15°, parole ou bouche dans prompt_video).
 - « prompt_image » et « prompt_video » remplis sur CHAQUE ligne, en anglais, sans phrase générale recopiée ; noms des personnages et des lieux exactement comme dans les listes ; au plus 3 références citées par plan.
 - Le fichier est complet jusqu'au dernier plan, quel que soit le nombre de plans.
 
