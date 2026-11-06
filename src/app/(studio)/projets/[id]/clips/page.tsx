@@ -206,11 +206,11 @@ export default async function PageClips({
                       disabled={tourne}
                       confirmer={`Générer un nouveau clip (${MOTEURS[prochainMoteur].libelle}) pour environ ${MOTEURS[prochainMoteur].prix5s.toFixed(2)} $ ?`}
                     >
-                      ↻ Regénérer
+                      ↻ Regénérer{prochainMoteur === "lipsync" ? " (lip-sync)" : ""}
                     </BoutonEnvoi>
                   </form>
+                  {/* Toujours visible, même quand le dernier essai était déjà en lip-sync */}
                   {lipsync &&
-                    prochainMoteur !== "lipsync" &&
                     (aSaVoix ? (
                       <form action={regenerer.bind(null, id, plan.id)}>
                         <input type="hidden" name="moteur" value="lipsync" />
