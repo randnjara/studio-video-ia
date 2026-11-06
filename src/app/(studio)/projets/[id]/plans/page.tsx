@@ -30,6 +30,7 @@ import { SuiviPhotos } from "./suivi-photos";
 import { RemplacerPhoto } from "./remplacer-photo";
 import { ControleFile } from "../controle-file";
 import { VoixOffLipsync } from "./voix-off";
+import { minuter } from "@/lib/minutage";
 import { PhotoZoom } from "@/components/photo-zoom";
 
 type Plan = {
@@ -52,7 +53,7 @@ type Plan = {
   status: string;
   validated_take_id: string | null;
   takes: { status: string }[];
-  voice_clips?: { audio_path: string; duration_s: number | null; debut_s: number | null }[];
+  voice_clips?: { audio_path: string; duration_s: number | null; debut_s: number | null; fin_s: number | null }[];
   photos: Photo[];
 };
 
@@ -110,7 +111,7 @@ export default async function PagePlans({
     supabase.from("projects").select("*").eq("id", id).maybeSingle(),
     supabase
       .from("scenes")
-      .select("*, takes!takes_scene_id_fkey(status), photos(*), voice_clips!voice_clips_scene_id_fkey(audio_path, duration_s, debut_s)")
+      .select("*, takes!takes_scene_id_fkey(status), photos(*), voice_clips!voice_clips_scene_id_fkey(audio_path, duration_s, debut_s, fin_s)")
       .eq("project_id", id)
       .order("position"),
     supabase
@@ -375,6 +376,16 @@ export default async function PagePlans({
           nbPlans={plans.length}
           nbDecoupes={plans.filter((p) => p.voice_clips?.some((v) => v.audio_path && v.duration_s !== null)).length}
           nbMinutes={plans.filter((p) => p.voice_clips?.some((v) => v.debut_s !== null)).length}
+          minutage={minuter(
+            plans.map((p) => {
+              const m = p.voice_clips?.find((v) => v.debut_s !== null);
+              return {
+                duree: Number(p.duration_s) || 5,
+                debut: m?.debut_s !== null && m?.debut_s !== undefined ? Number(m.debut_s) : null,
+                fin: m?.fin_s !== null && m?.fin_s !== undefined ? Number(m.fin_s) : null,
+              };
+            }),
+          ).map(({ debut, fin }) => ({ debut, fin }))}
           lipsync={Boolean(serveurLipsync)}
           auto={Boolean(sp.importe)}
           generer={envoyerALaGeneration.bind(null, id)}

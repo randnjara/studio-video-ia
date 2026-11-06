@@ -3,6 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { BoutonEnvoi } from "@/components/bouton-envoi";
+import { avertissementsDuree } from "@/lib/voix-off-import";
+import { ImportVoixOff } from "./import-voix-off";
 import { lancerDecoupage, suivreDecoupage } from "./voix-off-actions";
 
 type Creation = { id: string; nom: string; duree: number | null };
@@ -15,6 +17,7 @@ export function VoixOffLipsync({
   nbPlans,
   nbDecoupes,
   nbMinutes,
+  minutage,
   lipsync,
   auto,
   generer,
@@ -24,12 +27,15 @@ export function VoixOffLipsync({
   nbPlans: number;
   nbDecoupes: number; // plans qui ont déjà leur morceau découpé
   nbMinutes: number; // plans dont le tableau donne le minutage (debut / fin)
+  minutage: { debut: number; fin: number }[]; // plans bout à bout (ou minutage du tableau), pour comparer à la voix
   lipsync: boolean; // le serveur lip-sync existe
   auto: boolean; // tableau tout juste importé : la découpe part toute seule
   generer: (formData: FormData) => Promise<void>;
 }) {
   const router = useRouter();
   const [creation, setCreation] = useState(creations[0]?.id ?? "");
+  // Durée de la voix choisie comparée à celle des plans (voix importée ou créée dans le studio voix)
+  const avertissements = avertissementsDuree(creations.find((c) => c.id === creation)?.duree ?? null, minutage);
   // Décoché par défaut : sans recalage, les plans sont pris bout à bout depuis 0, sans aucune mise à l'échelle
   const [recaler, setRecaler] = useState(false);
   const [etat, setEtat] = useState<{ enCours: boolean; message: string; erreur?: boolean }>({ enCours: false, message: "" });
@@ -107,9 +113,17 @@ export function VoixOffLipsync({
           sans rien regénérer).
         </p>
       </div>
+      {/* Toujours visible : une voix off déjà finie (ElevenLabs, micro…) s'importe telle quelle et est choisie aussitôt */}
+      <ImportVoixOff
+        projectId={projectId}
+        onImportee={(id) => {
+          setCreation(id);
+          router.refresh();
+        }}
+      />
       {creations.length === 0 ? (
         <p className="text-sm text-sourdine">
-          Créez d&apos;abord la voix off dans le{" "}
+          Importez la voix off ci-dessus, ou créez-la dans le{" "}
           <a href={`/projets/${projectId}/voix`} className="lien">
             studio voix
           </a>
@@ -121,6 +135,7 @@ export function VoixOffLipsync({
             <label className="flex min-w-48 flex-1 flex-col gap-1">
               <span className="etiquette mb-0">Voix off</span>
               <select className="champ" value={creation} onChange={(e) => setCreation(e.target.value)} disabled={etat.enCours}>
+                {!creations.some((c) => c.id === creation) && <option value={creation}>Voix importée…</option>}
                 {creations.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.nom || "Voix"}
@@ -149,6 +164,7 @@ export function VoixOffLipsync({
               ? `minutage du tableau (debut / fin) pour ${nbMinutes} plan${nbMinutes > 1 ? "s" : ""}`
               : "pas de minutage dans le tableau : les durées des plans sont mises bout à bout"}
           </p>
+          {avertissements.length > 0 && <p className="rounded-lg bg-alerte/10 px-3 py-2 text-sm text-alerte">⚠ {avertissements.join(" ")}</p>}
           {etat.message && <p className={etat.erreur ? "message-erreur" : etat.enCours ? "text-sm" : "message-ok"}>{etat.message}</p>}
         </>
       )}
