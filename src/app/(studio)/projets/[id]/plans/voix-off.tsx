@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { BoutonEnvoi } from "@/components/bouton-envoi";
 import { avertissementsDuree } from "@/lib/voix-off-import";
+import { FriseTravail } from "@/components/frise-travail";
 import { ImportVoixOff } from "./import-voix-off";
 import { lancerCalage, lancerDecoupage, suivreCalage, suivreDecoupage } from "./voix-off-actions";
 
@@ -46,6 +47,8 @@ export function VoixOffLipsync({
   const [langue, setLangue] = useState(langueParDefaut);
   const [resultat, setResultat] = useState<Extract<Awaited<ReturnType<typeof suivreCalage>>, { etat: "terminee" }> | null>(null);
   const calages = useRef(new Set<string>(dejaCales));
+  // Travail serveur suivi en direct (frise), gardé visible après la fin
+  const [suivi, setSuivi] = useState<{ job: string; relancer: () => void } | null>(null);
   // Décoché par défaut : sans recalage, les plans sont pris bout à bout depuis 0, sans aucune mise à l'échelle
   const [recaler, setRecaler] = useState(false);
   const [etat, setEtat] = useState<{ enCours: boolean; message: string; erreur?: boolean }>({ enCours: false, message: "" });
@@ -58,9 +61,10 @@ export function VoixOffLipsync({
     calages.current.add(id);
     arret.current = false;
     setResultat(null);
-    setEtat({ enCours: true, message: "🎧 Calage des plans sur la voix off : Whisper écoute l'audio (1 à 3 min, plus si le serveur démarre)…" });
+    setEtat({ enCours: true, message: "🎧 Calage des plans sur la voix off…" });
     const r: Awaited<ReturnType<typeof lancerCalage>> = await lancerCalage(projectId, id, langue).catch(() => ({ erreur: "Connexion perdue." }));
     if ("erreur" in r) return setEtat({ enCours: false, message: r.erreur, erreur: true });
+    setSuivi({ job: r.jobId, relancer: () => ((arret.current = true), setEtat({ enCours: false, message: "" }), void caler(id)) });
     for (;;) {
       await new Promise((ok) => setTimeout(ok, 4000));
       if (arret.current) return setEtat({ enCours: false, message: "Calage arrêté." });
@@ -90,6 +94,7 @@ export function VoixOffLipsync({
         erreur: "Connexion perdue.",
       }));
       if ("erreur" in r) return setEtat({ enCours: false, message: r.erreur, erreur: true });
+      setSuivi({ job: r.jobId, relancer: () => ((arret.current = true), setEtat({ enCours: false, message: "" }), void decouper(creation)) });
       // Plans après la fin de la voix off : comptés une fois (au premier lot)
       if (depuis === 0) sansVoix += r.sansVoix;
       setEtat({ enCours: true, message: `Découpe des plans ${depuis + 1} à ${Math.min(r.total, depuis + 20)} sur ${r.total}…` });
@@ -250,6 +255,11 @@ export function VoixOffLipsync({
           )}
           {avertissements.length > 0 && <p className="rounded-lg bg-alerte/10 px-3 py-2 text-sm text-alerte">⚠ {avertissements.join(" ")}</p>}
           {etat.message && <p className={etat.erreur ? "message-erreur" : etat.enCours ? "text-sm" : "message-ok"}>{etat.message}</p>}
+          {suivi && (
+            <div className="rounded-lg border border-ligne p-2">
+              <FriseTravail jobId={suivi.job} onRelancer={suivi.relancer} />
+            </div>
+          )}
         </>
       )}
       {lipsync ? (

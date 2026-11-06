@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { FriseTravail } from "@/components/frise-travail";
 import { ImportVoixOff } from "../plans/import-voix-off";
 import { lancerTranscription, suivreTranscription } from "../plans/voix-off-actions";
 
@@ -23,14 +24,16 @@ export function TranscriptionAudio({
   const [creation, setCreation] = useState(creations[0]?.id ?? "");
   const [langue, setLangue] = useState("mg");
   const [etat, setEtat] = useState<{ enCours: boolean; message: string; erreur?: boolean }>({ enCours: false, message: "" });
+  const [job, setJob] = useState<string | null>(null);
 
   async function transcrire(id = creation) {
     if (!id || etat.enCours) return;
-    setEtat({ enCours: true, message: "Whisper écoute la voix off (1 à 3 min, plus si le serveur démarre)…" });
+    setEtat({ enCours: true, message: "" });
     const r: Awaited<ReturnType<typeof lancerTranscription>> = await lancerTranscription(projectId, id, langue).catch(() => ({
       erreur: "Connexion perdue.",
     }));
     if ("erreur" in r) return setEtat({ enCours: false, message: r.erreur, erreur: true });
+    setJob(r.jobId);
     for (;;) {
       await new Promise((ok) => setTimeout(ok, 4000));
       const s: Awaited<ReturnType<typeof suivreTranscription>> = await suivreTranscription(projectId, id, r.jobId).catch(() => ({
@@ -96,6 +99,11 @@ export function TranscriptionAudio({
         </p>
       )}
       {etat.message && <p className={etat.erreur ? "message-erreur" : etat.enCours ? "text-sm" : "message-ok"}>{etat.message}</p>}
+      {job && (
+        <div className="rounded-lg border border-ligne p-2">
+          <FriseTravail jobId={job} />
+        </div>
+      )}
     </section>
   );
 }

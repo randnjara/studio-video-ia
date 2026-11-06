@@ -90,6 +90,9 @@ export default async function CadreProjet({
             <Link href={`${base}/voix`} className="lien">
               🎙 Studio voix
             </Link>
+            <Link href={`${base}/historique`} className="lien">
+              🧾 Historique
+            </Link>
             {avecPhoto > 0 && (
               <Link href={`${base}/galerie`} className="lien">
                 🖼 Galerie des photos ({avecPhoto})

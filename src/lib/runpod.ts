@@ -1,6 +1,7 @@
 import "server-only";
 import { cache } from "react";
 import { getClient } from "@/lib/session";
+import { LIBELLES_TYPES, lireEtatRunPod, projetDuTravail, typeDuTravail } from "@/lib/travaux-etapes";
 
 // Deux façons de générer une vidéo avec le modèle Wan 2.2 (image → vidéo) :
 // - « qualite » : le service tout prêt de RunPod (Public Endpoint), 720p, environ 0,30 $ le clip de 5 s ;
@@ -157,7 +158,50 @@ async function appel(moteur: Cible, chemin: string, init?: RequestInit, serveur?
     return appel(moteur, chemin, init, serveur, true);
   }
   if (!res.ok) throw new Error(`RunPod a répondu ${res.status} : ${texte.slice(0, 200)}`);
-  return JSON.parse(texte);
+  const data = JSON.parse(texte);
+  // Historique : chaque travail envoyé, chaque nouvelle du serveur et chaque annulation sont notés (sans jamais bloquer)
+  await noterAuJournal(moteur, chemin, init, url.split("/").pop()!, data).catch(() => undefined);
+  return data;
+}
+
+// Suivi des travaux serveur (table travaux_serveur, migration 0020) : un appel à la base par envoi et par suivi.
+// Sans la migration, rien n'est noté et tout fonctionne comme avant.
+async function noterAuJournal(moteur: Cible, chemin: string, init: RequestInit | undefined, serveur: string, data: Record<string, unknown>) {
+  const supabase = await getClient();
+  if (chemin === "/run") {
+    const corps = JSON.parse(String(init?.body ?? "{}")) as { input?: Record<string, unknown> };
+    const input = corps.input ?? {};
+    const type = typeDuTravail(moteur, input);
+    await supabase.rpc("ouvrir_travail", {
+      p_project: projetDuTravail(input),
+      p_type: type,
+      p_serveur: serveur,
+      p_job: String(data.id),
+      p_message: LIBELLES_TYPES[type] ?? type,
+      p_details: { moteur, mode: input.mode ?? input.moteur ?? null, resolution: input.resolution ?? null, duree: input.duration ?? null },
+    });
+    return;
+  }
+  const job = chemin.match(/^\/(status|cancel)\/(.+)$/);
+  if (!job) return;
+  const id = decodeURIComponent(job[2]);
+  const n = job[1] === "cancel" ? { etape: "annule" as const, message: "Annulé depuis le studio", progression: null } : lireEtatRunPod(data);
+  const sortie = data.output as { cost?: unknown } | undefined;
+  const secondes = "secondes" in n ? (n.secondes ?? null) : null;
+  const cout =
+    moteur === "qualite"
+      ? Number.isFinite(Number(sortie?.cost)) ? Number(sortie?.cost) : null
+      : secondes !== null ? Math.round(secondes * (moteur === "voix" ? PRIX_SECONDE_VOIX : PRIX_SECONDE_GPU) * 10000) / 10000 : null;
+  await supabase.rpc("noter_travail", {
+    p_job: id,
+    p_etape: n.etape,
+    p_message: n.message,
+    p_progression: n.progression,
+    p_erreur: "erreur" in n ? (n.erreur ?? null) : null,
+    p_erreur_detail: "erreurDetail" in n ? (n.erreurDetail ?? null) : null,
+    p_cout: n.etape === "termine" ? cout : null,
+    p_secondes: secondes,
+  });
 }
 
 async function rallumer(id: string) {
@@ -363,6 +407,7 @@ export async function lireDecoupage(
 // du serveur voix, dont le résultat est lu tel quel
 export async function lancerVoixWhisper(input: {
   moteur: "aligner" | "transcrire";
+  projetId: string;
   sourceUrl: string;
   langue: string;
   plans?: { scene_id: string; texte: string }[];
@@ -371,7 +416,7 @@ export async function lancerVoixWhisper(input: {
   const data = await appel("voix", "/run", {
     method: "POST",
     body: JSON.stringify({
-      input: { moteur: input.moteur, source_url: input.sourceUrl, langue: input.langue, plans: input.plans, texte: input.texte },
+      input: { moteur: input.moteur, projet_id: input.projetId, source_url: input.sourceUrl, langue: input.langue, plans: input.plans, texte: input.texte },
       policy: { executionTimeout: 20 * 60 * 1000, ttl: 60 * 60 * 1000 },
     }),
   });

@@ -8,6 +8,7 @@ import { requireProfile } from "@/lib/session";
 import { ControleFile } from "../controle-file";
 import { refuserClips, regenerer, retirerValidation, supprimerClip, validerClip } from "./actions";
 import { SuiviEssais } from "./suivi-essais";
+import { FriseTravail } from "@/components/frise-travail";
 
 type Essai = {
   id: string;
@@ -253,9 +254,15 @@ export default async function PageClips({
                         {choisi && <span className="pastille bg-succes text-surface">✓ Validé</span>}
                       </p>
                       {t.status === "en_cours" && (
-                        <div className="flex aspect-video items-center justify-center rounded-md bg-surface-2 text-sm text-sourdine">
-                          Génération en cours…
+                        <div className="rounded-md bg-surface-2 p-3">
+                          <FriseTravail jobId={t.runpod_job_id} enAttente="En attente dans la file du studio (il part après le clip précédent)…" compacte />
                         </div>
+                      )}
+                      {t.status !== "en_cours" && t.runpod_job_id && t.runpod_job_id !== "envoi" && (
+                        <details className="mt-1 text-xs">
+                          <summary className="cursor-pointer text-sourdine">🧾 Suivi du serveur</summary>
+                          <FriseTravail jobId={t.runpod_job_id} />
+                        </details>
                       )}
                       {t.status === "annulee" && <p className="text-sm text-sourdine">Arrêté (non facturé).</p>}
                       {t.status === "echouee" && (

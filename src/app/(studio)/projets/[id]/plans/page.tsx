@@ -32,6 +32,7 @@ import { SuiviPhotos } from "./suivi-photos";
 import { RemplacerPhoto } from "./remplacer-photo";
 import { ControleFile } from "../controle-file";
 import { VoixOffLipsync } from "./voix-off";
+import { FriseTravail } from "@/components/frise-travail";
 import { revenirAuTableau } from "./voix-off-actions";
 import { promptARefaire } from "@/lib/calage";
 import { minuter } from "@/lib/minutage";
@@ -686,7 +687,11 @@ export default async function PagePlans({
                     <div className="flex flex-wrap items-center gap-3 text-xs text-sourdine">
                       {manque && <span className="text-alerte">À compléter : {manque}</span>}
                       {enCours(plan) && <span className="text-accent">Génération en cours…</span>}
-                      {derniere?.status === "en_cours" && <span className="text-accent">🖼 Photo en création…</span>}
+                      {derniere?.status === "en_cours" && (
+                        <span className="block w-full">
+                          <FriseTravail jobId={derniere.runpod_job_id} enAttente="🖼 Photo en attente dans la file du studio…" compacte />
+                        </span>
+                      )}
                       {derniere?.status === "echouee" && (
                         <span className="text-alerte" title={derniere.error ?? undefined}>
                           🖼 Photo ratée{derniere.error ? ` : ${derniere.error.slice(0, 120)}` : ""}

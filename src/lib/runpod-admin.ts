@@ -1,12 +1,13 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { cle } from "@/lib/runpod";
+import { noterEvenementServeur } from "@/lib/travaux";
 
 // Création de notre serveur de génération chez RunPod, avec la clé déjà enregistrée dans Cloudflare.
 // L'image est construite par GitHub à chaque changement du dossier worker/ (.github/workflows/serveur-video.yml).
 export const IMAGE_SERVEUR = "ghcr.io/randnjara/studio-video-ia-worker:latest";
 // À augmenter avec worker/VERSION : le studio fait passer notre serveur sur cette image au prochain envoi
-export const VERSION_SERVEUR = "7";
+export const VERSION_SERVEUR = "8";
 const CLE_IMAGE = "runpod_image";
 const NOM = "studio-video-eco";
 
@@ -93,7 +94,7 @@ export async function creerServeur(
 
 // Serveur du studio voix (dossier worker-voix/) : sa propre image, construite par GitHub
 // (.github/workflows/serveur-voix.yml). À augmenter avec worker-voix/VERSION.
-export const VERSION_SERVEUR_VOIX = "4";
+export const VERSION_SERVEUR_VOIX = "5";
 const IMAGE_VOIX = `ghcr.io/randnjara/studio-video-ia-voix:v${VERSION_SERVEUR_VOIX}`;
 const NOM_VOIX = "studio-voix";
 
@@ -111,6 +112,7 @@ export async function mettreAJourServeurVoix(supabase: SupabaseClient, endpointI
     body: JSON.stringify({ image: IMAGE_VOIX }),
   });
   await supabase.from("reglages").upsert({ cle: cleImage, valeur: IMAGE_VOIX });
+  await noterEvenementServeur(supabase, "serveur-image", `Serveur voix passé sur ${IMAGE_VOIX.split("/").pop()}`, { ancienne: data?.valeur ?? null, image: IMAGE_VOIX }, endpointId);
 }
 
 // Stockage du modèle chez RunPod (« network volume ») : le modèle reste sur ce disque entre deux pauses,
@@ -232,6 +234,7 @@ export async function mettreAJourServeur(supabase: SupabaseClient, endpointId: s
     body: JSON.stringify({ image }),
   });
   await supabase.from("reglages").upsert({ cle: cleImage, valeur: image });
+  await noterEvenementServeur(supabase, "serveur-image", `Serveur ${endpointId} passé sur ${image.split("/").pop()}`, { ancienne: data?.valeur ?? null, image }, endpointId);
 }
 
 // Cache gratuit de RunPod : un serveur par modèle (champ « Model » du serveur, réglé dans la console RunPod).
@@ -262,7 +265,7 @@ export async function creerServeurVace(): Promise<string> {
 // construite par GitHub (.github/workflows/serveur-lipsync.yml), même dépôt d'images que le serveur vidéo, étiquette
 // « lipsync ». À augmenter avec worker-lipsync/VERSION. Le gros modèle (Wan 2.1) est dans le cache de RunPod (champ
 // « Model ») ; les poids InfiniteTalk, wav2vec et le LoRA rapide sont téléchargés au premier démarrage.
-export const VERSION_SERVEUR_LIPSYNC = "1";
+export const VERSION_SERVEUR_LIPSYNC = "2";
 const IMAGE_LIPSYNC = `ghcr.io/randnjara/studio-video-ia-worker:lipsync-v${VERSION_SERVEUR_LIPSYNC}`;
 export const SERVEUR_LIPSYNC = { nom: "studio-lipsync", modele: "Wan-AI/Wan2.1-I2V-14B-480P" } as const;
 

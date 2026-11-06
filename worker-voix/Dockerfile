@@ -20,5 +20,5 @@ RUN python3 -m pip install --no-cache-dir -r requirements.txt \
 COPY precharger.py .
 RUN python3 precharger.py
 
-COPY handler.py decoupage.py alignement.py ton.py ./
+COPY handler.py decoupage.py alignement.py ton.py progression.py ./
 CMD ["python3", "-u", "handler.py"]

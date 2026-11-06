@@ -38,6 +38,17 @@ from huggingface_hub import hf_hub_download, list_repo_files
 from PIL import Image, ImageOps
 
 from amelioration import finitions
+from progression import commencer, signaler
+
+
+def suivi_etapes(total, quoi):
+    """Rappel de diffusers à chaque étape : « calcul » avec le % des étapes faites (envoyé au studio)."""
+
+    def rappel(pipe, i, t, kwargs):
+        signaler("calcul", (i + 1) / max(1, total) * 100, f"étape {i + 1}/{total} · {quoi}")
+        return kwargs
+
+    return rappel
 
 MODELE = os.environ.get("WAN_MODEL", "Wan-AI/Wan2.2-I2V-A14B-Diffusers")
 LORA_REPO = os.environ.get("LORA_REPO", "lightx2v/Wan2.2-Distill-Loras")
@@ -220,6 +231,7 @@ def generer_video(pipe, entree):
         height=hauteur,
         num_frames=nombre_images(entree.get("duration", 5)),
         num_inference_steps=ETAPES,
+        callback_on_step_end=suivi_etapes(ETAPES, f"{nombre_images(entree.get('duration', 5))} images"),
         # La version rapide se passe du guidage classique : 1.0 sur les deux experts
         guidance_scale=1.0,
         guidance_scale_2=1.0,
@@ -233,6 +245,7 @@ def deposer_video(entree, images, secondes):
     """Finitions demandées par le studio (couleurs, fluidité, netteté), puis dépôt du clip (et de sa dernière image si
     elle est demandée) dans le stockage du studio."""
     debut = time.time()
+    signaler("calcul", 100, f"finitions de {len(images)} images (couleurs, fluidité, netteté)", forcer=True)
     video, derniere = finitions(images, entree.get("finitions") or {})
     print(f"Finitions en {time.time() - debut:.1f} s : {len(images)} → {len(video)} images, {video[0].width}x{video[0].height}")
     # RIFE double les images : la durée du clip reste la même
@@ -240,6 +253,7 @@ def deposer_video(entree, images, secondes):
     with tempfile.TemporaryDirectory() as dossier:
         chemin = os.path.join(dossier, "clip.mp4")
         export_to_video(video, chemin, fps=round(fps), quality=8)
+        signaler("envoi", None, f"dépôt de la vidéo ({len(video)} images)", forcer=True)
         with open(chemin, "rb") as f:
             envoi = requests.put(
                 entree["upload_url"],
@@ -293,6 +307,7 @@ def generer_vace(pipe, entree):
         height=hauteur,
         num_frames=n,
         num_inference_steps=ETAPES if pipe.rapide else VACE_ETAPES_NORMALES,
+        callback_on_step_end=suivi_etapes(ETAPES if pipe.rapide else VACE_ETAPES_NORMALES, f"{n} images, visage fidèle"),
         guidance_scale=1.0 if pipe.rapide else 5.0,
         guidance_scale_2=1.0 if pipe.rapide else 5.0,
         generator=torch.Generator("cuda").manual_seed(int(entree.get("seed", 0)) % 2**32),
@@ -317,6 +332,7 @@ def generer_image(pipe, entree):
         width=largeur,
         height=hauteur,
         num_inference_steps=QWEN_ETAPES,
+        callback_on_step_end=suivi_etapes(QWEN_ETAPES, "photo de départ"),
         true_cfg_scale=1.0,
         generator=torch.Generator("cuda").manual_seed(int(entree.get("seed", 0)) % 2**32),
     ).images[0]
@@ -324,6 +340,7 @@ def generer_image(pipe, entree):
 
     tampon = BytesIO()
     photo.save(tampon, format="JPEG", quality=92)
+    signaler("envoi", None, "dépôt de la photo", forcer=True)
     envoi = requests.put(
         entree["upload_url"],
         data=tampon.getvalue(),
@@ -346,6 +363,7 @@ EN_MEMOIRE = {"metier": None, "pipe": None}
 def handler(job):
     try:
         entree = job["input"]
+        commencer(job)
         metier = entree.get("mode", "video")
         if metier not in METIERS:
             return {"error": f"Métier inconnu : {metier}"}
@@ -355,7 +373,14 @@ def handler(job):
             EN_MEMOIRE["pipe"], EN_MEMOIRE["metier"] = None, None
             gc.collect()
             torch.cuda.empty_cache()
+            depot = {"video": MODELE, "vace": VACE_MODELE, "image": QWEN_MODELE}[metier]
+            # Modèle absent du cache RunPod : il est téléchargé (long) ; sinon le serveur démarre en le lisant
+            if dans_cache(depot) or (metier == "video" and WAN_LOCAL and os.path.isfile(f"{WAN_LOCAL}/model_index.json")):
+                signaler("demarrage", None, f"chargement de {depot.split('/')[-1]} sur la carte graphique", forcer=True)
+            else:
+                signaler("telechargement", None, f"téléchargement de {depot.split('/')[-1]}", forcer=True)
             EN_MEMOIRE["pipe"], EN_MEMOIRE["metier"] = charger(), metier
+            signaler("calcul", 0, "modèle prêt", forcer=True)
         return generer(EN_MEMOIRE["pipe"], entree)
     except Exception as e:
         traceback.print_exc()
