@@ -219,9 +219,13 @@ def telecharger_image(url):
 
 
 def nombre_images(duree):
-    """Le modèle veut 4k + 1 images : 5 s à 16 images/s donnent 81 images."""
+    """Le modèle veut 4k + 1 images : 5 s à 16 images/s donnent 81 images.
+
+    Arrondi au-dessus : le clip dure au moins sa réplique (le montage le coupe à la durée exacte du plan), sinon il
+    manquait jusqu'à 1/8 s par plan et l'image prenait du retard sur la voix off.
+    """
     duree = min(max(float(duree or 5), 1.0), 10.0)
-    return 4 * round(duree * IMAGES_PAR_SECONDE / 4) + 1
+    return 4 * math.ceil(duree * IMAGES_PAR_SECONDE / 4 - 1e-6) + 1
 
 
 def generer_video(pipe, entree):
