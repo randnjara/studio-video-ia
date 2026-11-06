@@ -6,10 +6,12 @@ import { lireEtatFile } from "@/lib/file-attente";
 import { journaliser } from "@/lib/journal";
 import { MOUVEMENT_PAR_DEFAUT } from "@/lib/libelles";
 import { segmentValide } from "@/lib/minutage";
+import { type RepliqueAudio, verifierLignesAudio } from "@/lib/audio-d-abord";
 import { demanderEssais, marquerEnProduction } from "@/lib/production";
 import { demanderPhotos, propagerPhoto, suivrePhotos } from "@/lib/photos";
 import { agrandirStockage, mettreAJourServeur } from "@/lib/runpod-admin";
-import { endpointDuMoteur, endpointPhoto, estMoteur, moteursDisponibles } from "@/lib/runpod";
+import { endpointDuMoteur, endpointLipsync, endpointPhoto, estMoteur, moteursDisponibles } from "@/lib/runpod";
+import { risquesPlans } from "@/lib/risques";
 import { requireProfile } from "@/lib/session";
 import { type EtatServeur, surveiller } from "@/lib/surveillance";
 
@@ -414,6 +416,7 @@ export async function actualiserPhotos(projectId: string): Promise<{ restants: n
 }
 
 export type LigneTableau = {
+  numero?: number | null;
   voix: string;
   mouvement: string;
   description: string;
@@ -431,9 +434,30 @@ export type LigneTableau = {
 };
 
 // Import d'un tableau de scènes (CSV, par exemple le tableau maître d'un projet préparé ailleurs) : un plan par ligne
-export async function importerTableau(projectId: string, lignes: LigneTableau[], accord: boolean) {
+// « audio » : flux audio d'abord. Numéro, début, fin, durée et voix de chaque ligne sont vérifiés contre les répliques de
+// la voix off audio (dernière transcription du projet) et remis à leur valeur audio : le tableau naît calé sur l'audio.
+export async function importerTableau(projectId: string, lignesFichier: LigneTableau[], accord: boolean, audio = false) {
   const { supabase, profile } = await requireProfile();
-  if (lignes.length === 0) retour(projectId, "?erreur=import-vide");
+  if (lignesFichier.length === 0) retour(projectId, "?erreur=import-vide");
+  let lignes = lignesFichier;
+  let transcription: { voix_creation_id?: string; repliques: RepliqueAudio[] } | null = null;
+  let corrections: string[] = [];
+  if (audio) {
+    const { data: versions } = await supabase
+      .from("project_versions")
+      .select("data")
+      .eq("project_id", projectId)
+      .eq("kind", "scenario")
+      .order("created_at", { ascending: false })
+      .limit(10);
+    transcription =
+      (versions ?? []).map((v) => (v.data as { transcription?: typeof transcription }).transcription).find((t) => t?.repliques?.length) ?? null;
+    if (!transcription) retour(projectId, "?erreur=import-audio&detail=" + encodeURIComponent("Aucune transcription de la voix off audio : préparez-la d'abord."));
+    const v = verifierLignesAudio(lignesFichier, transcription.repliques);
+    if ("erreur" in v) retour(projectId, "?erreur=import-audio&detail=" + encodeURIComponent(v.erreur));
+    lignes = v.lignes;
+    corrections = v.corrections;
+  }
   // Dernier plan du projet. Les numéros de plan continu du fichier repartent de 1 : ils sont décalés après le sien,
   // pour que le premier nouveau plan ne prolonge pas le dernier ancien (toutes les colonnes : 0016 peut manquer)
   const { data: dernier } = await supabase
@@ -460,7 +484,8 @@ export async function importerTableau(projectId: string, lignes: LigneTableau[],
     intention: court(l.intention),
     pose_debut: court(l.pose_debut),
     pose_fin: court(l.pose_fin),
-    duration_s: l.duree && l.duree >= 2 && l.duree <= 10 ? l.duree : 5,
+    // Audio d'abord : la durée réelle de la réplique (souvent avec des décimales, parfois moins de 2 s)
+    duration_s: audio && l.duree ? Math.max(0.3, Math.round(l.duree * 100) / 100) : l.duree && l.duree >= 2 && l.duree <= 10 ? l.duree : 5,
     consent_confirmed: accord,
   }));
   let { data: crees, error } = await supabase
@@ -480,15 +505,31 @@ export async function importerTableau(projectId: string, lignes: LigneTableau[],
   const minutes = (crees ?? []).flatMap((c) => {
     const l = lignes[c.position - debut];
     return l && segmentValide(l.debut ?? null, l.fin ?? null)
-      ? [{ scene_id: c.id, source: "ia", audio_path: "", debut_s: l.debut, fin_s: l.fin, texte: court(l.voix, 2000) }]
+      ? [
+          {
+            scene_id: c.id,
+            source: "ia",
+            audio_path: "",
+            debut_s: l.debut,
+            fin_s: l.fin,
+            texte: court(l.voix, 2000),
+            // Audio d'abord : minutage lu dans cette voix off, la seule source (le plan est « calé sur l'audio »)
+            ...(transcription?.voix_creation_id ? { voix_creation_id: transcription.voix_creation_id } : {}),
+          },
+        ]
       : [];
   });
   if (minutes.length > 0) await supabase.from("voice_clips").insert(minutes);
   await Promise.all([
-    journaliser(supabase, profile.id, "import", "plan", null, { project_id: projectId, nombre: lignes.length, source: "tableau" }),
+    journaliser(supabase, profile.id, "import", "plan", null, {
+      project_id: projectId,
+      nombre: lignes.length,
+      source: audio ? "tableau-audio" : "tableau",
+      corrections: corrections.length,
+    }),
     marquerEnProduction(supabase, projectId),
   ]);
-  retour(projectId, `?importe=${Math.min(lignes.length, 300)}`);
+  retour(projectId, `?importe=${Math.min(lignes.length, 300)}${corrections.length ? `&corrige-audio=${corrections.length}` : ""}`);
 }
 
 
@@ -510,12 +551,17 @@ export type LigneCorrection = {
 // numéro dans l'ordre du tableau. Les répliques ne sont jamais modifiées ; une cellule vide garde la valeur actuelle.
 export async function corrigerPlans(projectId: string, lignes: LigneCorrection[]) {
   const { supabase, profile } = await requireProfile();
-  const { data: scenes } = await supabase
-    .from("scenes")
-    .select("id, duration_s, intention, cadrage, angle, lieu, pose_debut, pose_fin, image_description, motion_prompt, image_path")
-    .eq("project_id", projectId)
-    .order("position");
-  if (!scenes?.length) retour(projectId, "?erreur=correction");
+  const { data: lues } = await supabase.from("scenes").select("*").eq("project_id", projectId).order("position");
+  if (!lues?.length) retour(projectId, "?erreur=correction");
+  const scenes = lues;
+  // Plans calés sur la voix off audio : leur durée vient de l'audio, jamais du tableau réimporté
+  const { data: cales } = await supabase
+    .from("voice_clips")
+    .select("scene_id")
+    .in("scene_id", scenes.map((s) => s.id))
+    .not("voix_creation_id", "is", null)
+    .not("debut_s", "is", null);
+  const caleAudio = new Set((cales ?? []).map((c) => c.scene_id));
 
   const court = (t: string, n = 300) => String(t ?? "").trim().slice(0, n);
   const changements: { id: string; maj: Record<string, string | number> }[] = [];
@@ -533,15 +579,53 @@ export async function corrigerPlans(projectId: string, lignes: LigneCorrection[]
       image_description: court(l.description, 2000),
       motion_prompt: court(l.mouvement, 2000),
     };
-    if (l.duree && l.duree >= 2 && l.duree <= 10) proposes.duration_s = l.duree;
+    if (l.duree && l.duree >= 2 && l.duree <= 10 && !caleAudio.has(s.id)) proposes.duration_s = l.duree;
     const maj = Object.fromEntries(
       Object.entries(proposes).filter(([k, v]) => v !== "" && v !== (s as Record<string, unknown>)[k]),
     );
     if (Object.keys(maj).length) changements.push({ id: s.id, maj });
     if (l.photoARefaire && s.image_path) photos.push(l.numero);
   }
-  const resultats = await Promise.all(changements.map((c) => supabase.from("scenes").update(c.maj).eq("id", c.id)));
-  if (resultats.some((r) => r.error)) retour(projectId, "?erreur=correction");
+  // Un seul appel pour tous les plans (Cloudflare limite le nombre d'appels par requête)
+  if (changements.length) {
+    const parId = new Map(scenes.map((s) => [s.id, s]));
+    const { error } = await supabase.from("scenes").upsert(
+      changements.map((c) => {
+        const { updated_at: _, ...s } = parId.get(c.id)!;
+        void _;
+        return { ...s, ...c.maj };
+      }),
+    );
+    if (error) retour(projectId, "?erreur=correction");
+  }
   await journaliser(supabase, profile.id, "correction", "plan", null, { project_id: projectId, nombre: changements.length });
   retour(projectId, `?corriges=${changements.length}${photos.length ? `&refaire=${photos.join(",")}` : ""}`);
+}
+
+// « Plans à risque » : applique la correction proposée de prompt_video aux plans cochés (un seul appel : la place des plans
+// ne change pas, l'unicité de la place est vérifiée à la fin de la transaction)
+export async function appliquerCorrectionsRisques(projectId: string, formData: FormData) {
+  const { supabase, profile } = await requireProfile();
+  const choisis = new Set(formData.getAll("risques").map(String));
+  const [{ data }, lipsync] = await Promise.all([
+    supabase
+      .from("scenes")
+      .select("id, project_id, position, motion_prompt, cadrage, pose_debut, pose_fin, intention, lieu")
+      .eq("project_id", projectId)
+      .order("position"),
+    endpointLipsync(),
+  ]);
+  const plans = data ?? [];
+  const corrections = risquesPlans(plans, Boolean(lipsync)).filter((r) => r.correction && choisis.has(r.id));
+  if (corrections.length === 0) retour(projectId, "?corrige=0#risques");
+  const parId = new Map(plans.map((p) => [p.id, p]));
+  const { error } = await supabase.from("scenes").upsert(
+    corrections.map((r) => {
+      const p = parId.get(r.id)!;
+      return { id: p.id, project_id: p.project_id, position: p.position, motion_prompt: r.correction! };
+    }),
+  );
+  if (error) retour(projectId, "?erreur=correction-risques#risques");
+  await journaliser(supabase, profile.id, "correction-risques", "projet", projectId, { nombre: corrections.length });
+  retour(projectId, `?corrige=${corrections.length}#risques`);
 }

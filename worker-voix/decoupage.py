@@ -63,29 +63,52 @@ def silences(chemin, seuil_db=-35, duree_min=0.12):
     return [(max(0.0, d), f) for d, f in zip(debuts, fins) if f > d]
 
 
-def pauses_whisper(chemin, langue, cle):
-    """Pauses entre deux mots, repérées par Whisper (horodatage de chaque mot). Vide si Whisper n'est pas disponible."""
-    if cle in _transcriptions:
-        return _transcriptions[cle]
+def modele_whisper(nom=WHISPER):
+    """Modèle Whisper gardé en mémoire (carte graphique, sinon processeur). None si faster-whisper manque."""
     try:
         from faster_whisper import WhisperModel
     except ImportError:
-        return []
-    modele = _transcriptions.get("__modele__")
-    if modele is None:
+        return None
+    cle = f"__modele__{nom}"
+    if cle not in _transcriptions:
         try:
-            modele = WhisperModel(WHISPER, device="cuda", compute_type="float16")
+            _transcriptions[cle] = WhisperModel(nom, device="cuda", compute_type="float16")
         except Exception:
-            modele = WhisperModel(WHISPER, device="cpu", compute_type="int8")
-        _transcriptions["__modele__"] = modele
+            _transcriptions[cle] = WhisperModel(nom, device="cpu", compute_type="int8")
+    return _transcriptions[cle]
+
+
+def mots_whisper(chemin, langue, prompt=None, nom=WHISPER):
+    """Mots prononcés avec leur horodatage : [{"mot", "debut", "fin"}] (le mot garde sa ponctuation).
+    « prompt » : texte attendu (les répliques des plans), qui aide Whisper à reconnaître les mots."""
+    modele = modele_whisper(nom)
+    if modele is None:
+        raise RuntimeError("Whisper (faster-whisper) n'est pas installé sur le serveur voix.")
     segments, _ = modele.transcribe(
         chemin,
         language=langue if langue in LANGUES_WHISPER else None,
         word_timestamps=True,
         vad_filter=False,
+        initial_prompt=(prompt or None),
+        condition_on_previous_text=True,
     )
-    mots = [(m.start, m.end) for s in segments for m in (s.words or [])]
-    pauses = [(a_fin, b_debut) for (_, a_fin), (b_debut, _) in zip(mots, mots[1:]) if b_debut - a_fin >= 0.04]
+    return [
+        {"mot": m.word.strip(), "debut": float(m.start), "fin": float(m.end)}
+        for s in segments
+        for m in (s.words or [])
+        if m.word.strip()
+    ]
+
+
+def pauses_whisper(chemin, langue, cle):
+    """Pauses entre deux mots, repérées par Whisper (horodatage de chaque mot). Vide si Whisper n'est pas disponible."""
+    if cle in _transcriptions:
+        return _transcriptions[cle]
+    try:
+        mots = mots_whisper(chemin, langue)
+    except RuntimeError:
+        return []
+    pauses = [(a["fin"], b["debut"]) for a, b in zip(mots, mots[1:]) if b["debut"] - a["fin"] >= 0.04]
     _transcriptions[cle] = pauses
     return pauses
 

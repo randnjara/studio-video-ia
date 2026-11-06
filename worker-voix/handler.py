@@ -38,6 +38,8 @@ LANGUES_CHATTERBOX = {
 # Première lettre du nom d'une voix Kokoro = sa langue (a : anglais US, b : anglais UK, f : français…)
 LANGUES_KOKORO = {"a", "b", "e", "f", "h", "i", "p", "z"}
 TEXTE_MAX = 5000
+# Modèle Whisper de la transcription et du calage des plans (plus juste que le petit modèle du recalage, surtout en malgache)
+WHISPER_TRANSCRIPTION = os.environ.get("WHISPER_TRANSCRIPTION", "medium")
 PAUSE_S = 0.3
 
 EN_MEMOIRE = {}
@@ -301,10 +303,86 @@ def decouper_voix_off(entree):
     }
 
 
+def telecharger_wav16k(url, dossier):
+    """Télécharge la voix off et la décode en WAV 16 kHz mono (ffmpeg). Renvoie (chemin, son, fréquence)."""
+    from decoupage import en_wav_16k
+
+    source = os.path.join(dossier, "voix-off")
+    reponse = requests.get(url, timeout=300)
+    reponse.raise_for_status()
+    with open(source, "wb") as f:
+        f.write(reponse.content)
+    wav = os.path.join(dossier, "voix-16k.wav")
+    son, frequence = en_wav_16k(source, wav)
+    return wav, son, frequence
+
+
+def prompt_initial(textes, limite=700):
+    """Texte attendu donné à Whisper (début des répliques) : il aide à reconnaître les mots, surtout en malgache."""
+    texte = " ".join(t.strip() for t in textes if t and t.strip())
+    return texte[:limite].rsplit(" ", 1)[0] if len(texte) > limite else texte
+
+
+def aligner_plans(entree):
+    """« 🎧 Caler les plans sur la voix off » : début, fin et durée réels de chaque plan, lus dans l'audio."""
+    from alignement import aligner
+    from decoupage import mots_whisper
+
+    plans = entree.get("plans") or []
+    if not entree.get("source_url") or not plans:
+        return {"error": "Il faut la voix off et les répliques des plans."}
+    debut = time.time()
+    with tempfile.TemporaryDirectory() as dossier:
+        wav, son, frequence = telecharger_wav16k(entree["source_url"], dossier)
+        mots = mots_whisper(wav, str(entree.get("langue") or ""), prompt_initial([p.get("texte", "") for p in plans]), WHISPER_TRANSCRIPTION)
+    duree = len(son) / frequence
+    resultat = aligner(plans, mots, duree)
+    # Indices du ton de chaque plan (débit, pauses, volume, montée/descente), lus dans l'audio
+    from ton import description, indices, ton
+    import numpy as np
+
+    paroles = [(p["parole_debut"], p["parole_fin"]) for p in resultat if p["parole_debut"] is not None]
+    volumes = [20 * np.log10(max(float(np.sqrt(np.mean(son[int(a * frequence):max(int(a * frequence) + 1, int(b * frequence))].astype(np.float64) ** 2))), 1e-6)) for a, b in paroles]
+    mediane = float(np.median(volumes)) if volumes else 0.0
+    fin_precedente = 0.0
+    for p in resultat:
+        if p["parole_debut"] is None:
+            p.update({"ton": None, "description": "", "pause_apres": None})
+            continue
+        i = indices(son, frequence, p["parole_debut"], p["parole_fin"], p["parole_debut"] - fin_precedente, max(1, len(p["prononce"].split())), mediane)
+        p.update({"ton": ton(p["prononce"], i), "indices": i, "description": description(i), "pause_apres": round(p["fin"] - p["parole_fin"], 2)})
+        fin_precedente = p["parole_fin"]
+    return {
+        "plans": resultat,
+        "duree_voix": round(duree, 3),
+        "mots": len(mots),
+        "secondes": round(time.time() - debut, 1),
+    }
+
+
+def transcrire_voix(entree):
+    """« Préparer le tableau depuis l'audio » : répliques de 5 s au plus, horodatées, avec les indices du ton."""
+    from decoupage import mots_whisper
+    from ton import transcrire
+
+    if not entree.get("source_url"):
+        return {"error": "Il faut la voix off."}
+    debut = time.time()
+    with tempfile.TemporaryDirectory() as dossier:
+        wav, son, frequence = telecharger_wav16k(entree["source_url"], dossier)
+        mots = mots_whisper(wav, str(entree.get("langue") or ""), prompt_initial([entree.get("texte", "")]), WHISPER_TRANSCRIPTION)
+        repliques = transcrire(son, frequence, mots)
+    return {"repliques": repliques, "duree_voix": round(len(son) / frequence, 3), "secondes": round(time.time() - debut, 1)}
+
+
 def handler(job):
     try:
         if job["input"].get("moteur") == "decouper":
             return decouper_voix_off(job["input"])
+        if job["input"].get("moteur") == "aligner":
+            return aligner_plans(job["input"])
+        if job["input"].get("moteur") == "transcrire":
+            return transcrire_voix(job["input"])
         return generer(job["input"])
     except Exception as e:
         traceback.print_exc()

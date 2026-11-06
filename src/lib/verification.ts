@@ -1,5 +1,6 @@
 // Prompt de vérification du script et des plans, à coller dans un assistant gratuit (ChatGPT, Claude, Gemini…).
 // Rien n'est envoyé par le studio : la personne copie le texte et le colle elle-même.
+import { REGLES_RISQUES } from "@/lib/risques";
 import { CATEGORIES, type Categorie, plansContinus } from "@/lib/categories";
 
 type PlanVerif = {
@@ -108,7 +109,9 @@ ${tableau}
 2. Lieux : le moins de lieux possible (un seul pour un film de 2 minutes ou moins : c'est le geste qui fait varier), de longues séquences par lieu ; jamais de changement de lieu au milieu d'une phrase ou d'une idée, ni de lieu tenu un seul plan. Un témoignage reste dans un seul lieu (un souvenir se raconte depuis ce lieu). Corrige « lieu », les poses et les prompts en conséquence.
 2 bis. Découpage : les règles absolues et celles de la catégorie passent avant tout. Deux plans continus qui se suivent changent le cadrage, par un lent mouvement de caméra au milieu de la première ligne du nouveau plan ; dans un même plan continu, rien ne change. Caméra toujours du même côté de la personne dans une séquence (règle des 180°).
 2 ter. Continuité entre plans voisins : visage, âge, coiffure, tenue, accessoires, objets, lieu, moment de la journée, lumière, direction du regard (règle des 180°) ; sur tout le film, chaque ligne reprend exactement la pose_fin de la précédente, commence et finit sur une image calme (caméra fixe pendant la première et la dernière seconde). Dans un même lieu, aucun prompt_image n'invente ou ne change un élément du décor (banc, fleurs, colonnes, couleur du ciel, heure) : corrige-le pour qu'il ne garde que le nom du lieu et ce qui est derrière la personne dans ce cadrage.
-3. Chaque prompt_video : une seule action principale réalisable dans la durée, découpée en temps (0-1s, 1-3s…), caméra précise (fixe, ou un seul mouvement lent au milieu de la ligne), rien qui contredise la photo de départ, pas de texte à l'écran, mains visibles si un geste les montre (sinon adapter le cadrage ou remplacer le geste par une expression), lèvres libres pendant la parole.
+3. Chaque prompt_video : une seule action principale réalisable dans la durée, découpée en temps (0-1s, 1-3s…), caméra précise (fixe, ou un seul lent rapprochement au milieu de la ligne), rien qui contredise la photo de départ, pas de texte à l'écran, mains visibles si un geste les montre (sinon adapter le cadrage ou remplacer le geste par une expression).
+3 bis. Prévention des risques (lip-sync : la bouche est animée par la voix off). Vérifie chaque ligne (prompt_video, pose_debut, pose_fin, intention) contre ces règles et CORRIGE toute ligne qui en viole une :
+${REGLES_RISQUES}
 4. Variété : aucun geste répété en boucle (comparer aux 10 lignes voisines), aucun cadrage ou angle répété d'un plan continu à l'autre ; chaque geste vient du sens de la réplique ; pas la même phrase recopiée au début ou à la fin de chaque prompt.
 5. Langue : prompt_image et prompt_video en anglais ; les répliques (« voix ») restent EXACTEMENT telles quelles.
 ${
@@ -135,4 +138,103 @@ ${COLONNES_CORRECTION.join(";")}
    B. Les plans qu'il faudrait ajouter (après quel plan, voix, prompt_video) : je les ajouterai moi-même.
    C. Une fiche de continuité courte : personnages et tenues, lieux et lumière, palette, style de caméra.
 Pas de long tableau dans la discussion : tout ce qui concerne les plans va dans le fichier.`;
+}
+
+// Minutage réel d'un plan, lu dans la voix off audio par Whisper (calage)
+export type MinutageAudio = {
+  debut: number;
+  fin: number;
+  prononce?: string;
+  pause_apres?: number | null;
+  ton?: string | null;
+  description?: string;
+};
+
+const temps = (s: number) => {
+  const m = Math.floor(s / 60);
+  return `${String(m).padStart(2, "0")}:${(s - m * 60).toFixed(1).padStart(4, "0")}`;
+};
+
+// « 📋 Copier la consigne pour refaire le tableau » : après le calage sur la voix off audio, les durées ont changé et les
+// prompt_video écrits pour les anciennes durées ne collent plus. La consigne donne à l'assistant, pour chaque plan, le texte
+// réellement prononcé, debut/fin réels, la durée, la pause qui suit et le ton détecté, avec les règles anti-risques ; il
+// réécrit intention, poses et prompts SANS toucher au minutage. Le fichier se réimporte comme un tableau corrigé (même
+// numérotation) : les prompts sont remplacés, le minutage audio est gardé.
+export function promptRefaireTableau(
+  projet: { title: string; aspect_ratio: string },
+  plans: (PlanVerif & { aRefaire?: boolean })[],
+  minutages: (MinutageAudio | null)[],
+  categorie: Categorie = "film",
+  voix = "la voix off",
+) {
+  const cat = CATEGORIES[categorie];
+  const continus = plansContinus(plans);
+  const total = minutages.reduce((m, x) => Math.max(m, x?.fin ?? 0), 0);
+  const audio = plans
+    .map((p, i) => {
+      const m = minutages[i];
+      if (!m) return `${i + 1} | (pas de minutage audio) | ${Number(p.duration_s || 5)} s | ${p.voiceover_text}`;
+      return [
+        `${i + 1}`,
+        `${temps(m.debut)} → ${temps(m.fin)}`,
+        `${(m.fin - m.debut).toFixed(2)} s`,
+        m.pause_apres !== null && m.pause_apres !== undefined ? `pause après ${m.pause_apres.toFixed(1)} s` : "",
+        m.ton ? `ton ${m.ton}${m.description ? ` (${m.description})` : ""}` : "",
+        p.aRefaire ? "PROMPT À REFAIRE" : "",
+        `prononcé : « ${(m.prononce || p.voiceover_text).trim()} »`,
+      ]
+        .filter(Boolean)
+        .join(" | ");
+    })
+    .join("\n");
+  const tableau = [
+    COLONNES_CORRECTION.join(";"),
+    ...plans.map((p, i) =>
+      [
+        String(i + 1),
+        String(continus[i]?.numero ?? ""),
+        "",
+        "",
+        "",
+        p.voiceover_text,
+        (minutages[i] ? minutages[i]!.fin - minutages[i]!.debut : Number(p.duration_s || 5)).toFixed(2),
+        p.intention ?? "",
+        p.cadrage ?? "",
+        p.angle ?? "",
+        p.lieu ?? "",
+        p.pose_debut ?? "",
+        p.pose_fin ?? "",
+        p.image_description ?? "",
+        p.motion_prompt,
+      ]
+        .map(cellule)
+        .join(";"),
+    ),
+  ].join("\n");
+
+  return `Tu es réalisateur et scripte sur un film fait entièrement en vidéo générée par IA, avec LIP-SYNC : la bouche de la personne est animée automatiquement par ${voix} (audio). Chaque plan est un clip qui dure EXACTEMENT le temps de sa réplique dans l'audio.
+
+FILM : « ${projet.title} » — format ${projet.aspect_ratio} — ${plans.length} plans — durée ${temps(total)} (celle de la voix off audio) — catégorie : ${cat.libelle}
+
+=== CE QUI A CHANGÉ ===
+Le minutage vient maintenant de la VOIX OFF AUDIO (transcription horodatée par Whisper) : c'est la seule référence. Les durées de l'ancien tableau n'étaient que des estimations ; beaucoup ont changé (un plan estimé à 5 s dure parfois 2,8 s). Les « prompt_video » écrits en tranches « 0-1s / 1-3s / 3-4s / 4-5s » pour l'ancienne durée ne correspondent plus : réécris-les pour la durée réelle. Les plans marqués « PROMPT À REFAIRE » sont prioritaires, mais vérifie tous les plans.
+
+=== MINUTAGE RÉEL, LU DANS L'AUDIO (à respecter à la lettre) ===
+numéro | début → fin | durée | pause après | ton détecté (débit, pauses, volume, montée/descente de la voix) | texte réellement prononcé
+${audio}
+
+=== RÈGLES ===
+1. NE CHANGE JAMAIS : le numéro, le nombre de plans, l'ordre, « voix », « duree » (recopie la durée donnée, à la seconde près) ni « plan_continu ». Le minutage audio est gardé tel quel par le studio.
+2. « prompt_video » en anglais, 30 à 70 mots, découpé en tranches qui couvrent EXACTEMENT la durée réelle (par exemple pour 2,8 s : "0-1s: … 1-2s: … 2-2.8s: …"), un seul geste principal, lent et petit, qui vient du SENS et du TON réel de la réplique (calme, joyeux, ému, rieur, interrogatif : lis les indices). La dernière tranche arrive sur la pose_fin, tenue immobile. Jamais la parole ni la bouche : la bouche est pilotée par l'audio.
+3. « intention » : l'émotion réelle entendue dans la voix (le ton détecté), précisée par le sens. « pose_debut » = pose_fin de la ligne précédente, mot pour mot ; poses calmes et stables.
+4. « prompt_image » : garde l'actuel sauf s'il viole une règle ci-dessous ; « photo_a_refaire » : oui seulement si tu changes la pose de départ ou le cadrage d'un plan qui a déjà sa photo.
+5. ${REGLES_RISQUES}
+6. Catégorie « ${cat.libelle} » :
+${cat.consigne}
+
+=== TABLEAU ACTUEL (CSV, point-virgule, « duree » = durée réelle dans l'audio) ===
+${tableau}
+
+=== RÉPONSE ATTENDUE ===
+Le fichier corrigé, à télécharger, nommé ${FICHIER_CORRIGE}, en CSV UTF-8, séparateur point-virgule, chaque cellule entre guillemets, avec exactement ces colonnes : ${COLONNES_CORRECTION.join(";")}. Une ligne par plan, les ${plans.length} plans, mêmes numéros. « verdict » : CORRIGÉ pour une ligne réécrite, OK sinon (recopiée à l'identique). Si tu ne peux pas créer de fichier, donne le même contenu dans un seul bloc \`\`\`csv. Ensuite, en quelques lignes en français : les plans les plus délicats et pourquoi.`;
 }

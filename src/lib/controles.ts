@@ -4,6 +4,7 @@ import { memeNom } from "@/lib/noms";
 // Aucun appel extérieur : tout se calcule à l'affichage.
 
 import { CATEGORIES, type Categorie, MOTS_MOUVEMENT, fenetreMouvement, momentMouvement, plansContinus } from "@/lib/categories";
+import { raisonsPlan } from "@/lib/risques";
 
 export type PlanControle = {
   id: string;
@@ -14,6 +15,8 @@ export type PlanControle = {
   cadrage: string;
   angle: string;
   pose_fin?: string;
+  pose_debut?: string | null;
+  intention?: string | null;
   lieu?: string | null;
   plan_continu?: number | null;
 };
@@ -85,7 +88,8 @@ export function pasEnAnglais(texte: string) {
 // Plus serré que le plan poitrine : le visage remplit l'image et l'IA en invente les détails (MAMAN 2)
 const CADRAGES_SERRES = ["très gros plan", "gros plan", "plan rapproché"];
 
-export function alertesPlans(plans: PlanControle[], mouvementParDefaut = "", categorie: Categorie = "film") {
+// « lipsync » : la bouche est animée par la voix off (règle R7 : prompt_video ne parle jamais de parole ni de bouche)
+export function alertesPlans(plans: PlanControle[], mouvementParDefaut = "", categorie: Categorie = "film", lipsync = true) {
   const alertes = new Map<string, string[]>();
   const ajouter = (id: string, texte: string) => alertes.set(id, [...(alertes.get(id) ?? []), texte]);
   const communsMvt = motsCommuns(plans.map((p) => p.motion_prompt));
@@ -165,6 +169,9 @@ export function alertesPlans(plans: PlanControle[], mouvementParDefaut = "", cat
       ajouter(p.id, "Mouvement passe-partout : écrivez le geste propre à cette réplique.");
     if (pasEnAnglais(p.motion_prompt))
       ajouter(p.id, "Mouvement écrit en français ou en malgache : le modèle vidéo comprend surtout l'anglais.");
+
+    // Prévention des risques (R1 à R7) : correction proposée dans la liste « Plans à risque »
+    for (const r of raisonsPlan(p, prec, lipsync)) ajouter(p.id, `Risque ${r.texte} : voyez « Plans à risque » pour la correction proposée.`);
   });
   return alertes;
 }

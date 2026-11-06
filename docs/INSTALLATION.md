@@ -111,6 +111,22 @@ Réglages du serveur (variables d'environnement du serveur RunPod, facultatives)
 
 Tests sans carte graphique : `npm run test:lipsync` (montage : décalage voix/bouche < 2 images, régler la voix ne touche pas la vidéo), `python3 worker-voix/test_decoupage.py` (morceaux exacts, recalage), `python3 worker-lipsync/test_video.py` (durée = voix ± 1 image, pas de piste audio).
 
+## 9. Audio d'abord : la voix off audio fixe les plans
+
+La voix off AUDIO est la seule source de minutage ; son texte n'est que ce qui a été lu.
+
+**Nouveau projet (flux recommandé, onglet ChatGPT, encadré « À partir de la voix off audio — recommandé »)** :
+1. Importer la voix off audio (⬆, ou glisser-déposer) ou la créer dans le studio voix.
+2. « Préparer le tableau depuis l'audio » : le serveur voix (Whisper `medium`, mots horodatés) découpe la voix en répliques de 5 s au plus, aux pauses et aux fins de phrases, et mesure le ton de chacune (débit, pauses, volume, montée ou descente : calme, joyeux, ému, rieur, interrogatif). Ces répliques SONT la liste des plans. Rien n'est écrit par Whisper dans les prompts.
+3. Télécharger le fichier pré-rempli (numéro, début, fin, durée, voix) et copier la consigne : ChatGPT ou Claude ne remplit que la mise en scène (intention, geste, cadrage, angle, lieu, raccord, poses, prompts), avec des repères « Xs-Ys » calculés sur la vraie durée, et toutes les règles (dont R1 à R7 ci-dessous). Avec le secret `ANTHROPIC_API_KEY` dans Cloudflare (Worker → Settings → Variables and Secrets → Secret), le bouton « ✨ Remplir le tableau automatiquement » le fait sans copier-coller (Claude Opus 5.5). La clé `OPENAI_API_KEY` n'est pas utilisée.
+4. Importer le tableau : numéro, début, fin, durée et voix sont vérifiés et remis à leur valeur audio (une réplique manquante est refusée). Les plans naissent calés sur l'audio ; la découpe de la voix off part toute seule.
+
+**Projet existant (tableau fait avant, durées estimées)** : dans l'onglet Plans, choisir ou importer la voix off cale automatiquement les plans dessus (« 🎧 Caler les plans sur la voix off » pour relancer) : chaque plan dure exactement sa réplique prononcée et la pause qui suit, la durée du film devient celle de l'audio, une réplique de plus de 5 s est scindée à la pause la plus proche (texte et prompt répartis, poses raccordées), et l'ancien tableau est gardé (« Scripts précédents » → « Revenir à ce tableau »). Les repères des prompt_video sont remis à l'échelle ; les plans dont la durée a changé de plus de 0,5 s sont marqués « ✏ prompt à refaire », et « 📋 Copier la consigne pour refaire le tableau » donne à l'assistant le texte prononcé, le minutage réel, les pauses et le ton de chaque plan. Le tableau rendu se réimporte comme « tableau corrigé » : les prompts sont remplacés, le minutage audio est gardé.
+
+**Prévention des risques (par défaut)** : la consigne du tableau, la vérification et la liste « Plans à risque » (onglet Plans, score par plan, raison et correction proposée de prompt_video) appliquent R1 à R7 : jamais de recul ni de cadrage plus large en cours de film ; pas de rire franc ni de tête penchée (rotation ≤ 15°) ; émotion par les yeux, la respiration et les sourcils, jamais par la bouche ; mains calmes, jamais près du visage, pas de doigts détaillés ; pas d'objet tenu, de cheveux devant le visage, de lumière qui change, de changement de lieu ou de tenue ; arcs de caméra ≤ 15° ; en lip-sync, prompt_video n'évoque jamais la parole ni la bouche.
+
+Le serveur voix passe en version 4 (Whisper `medium` rangé dans l'image) ; le studio le bascule tout seul. Aucune migration n'est nécessaire : transcriptions et anciens tableaux sont gardés dans `project_versions`.
+
 ## Catégorie du film et plans continus (migration 0016)
 
 Appliquez la migration `supabase/migrations/0016_categorie.sql` (SQL Editor → coller → **Run**). Elle ajoute la **catégorie** du film (interview, documentaire, film, promotion, tutoriel, clip) et le **plan continu** des lignes du tableau. Sans elle, le studio marche comme avant : la catégorie choisie n'est pas gardée et les lignes ne sont pas regroupées.

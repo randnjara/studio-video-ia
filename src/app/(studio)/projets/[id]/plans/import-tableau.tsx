@@ -100,7 +100,7 @@ const norm = (t: string) =>
     .trim();
 
 // Mots-clés reconnus dans les titres de colonnes (le premier titre qui correspond l'emporte)
-const COLONNES: Record<keyof Omit<LigneTableau, "duree" | "plan_continu" | "debut" | "fin">, string[]> = {
+const COLONNES: Record<keyof Omit<LigneTableau, "duree" | "plan_continu" | "debut" | "fin" | "numero">, string[]> = {
   voix: ["dialogue", "voix", "replique", "texte"],
   mouvement: ["mouvement", "motion", "prompt video"],
   description: ["description", "prompt image", "image"],
@@ -143,6 +143,7 @@ function convertir(lignes: string[][], personnage: string): { plans: LigneTablea
   // Minutage du plan dans la voix off (« 00:05 ») : il sert à découper la voix off pour le lip-sync
   const colDebut = titres.findIndex((t) => t === "debut" || t === "debut s" || t === "start");
   const colFin = titres.findIndex((t) => t === "fin" || t === "fin s" || t === "end");
+  const colNumero = titres.findIndex((t) => t === "numero" || t === "n" || t === "no" || t === "num" || t === "plan n");
   const lire = (l: string[], i?: number) => {
     const v = i === undefined || i < 0 ? "" : (l[i] ?? "").trim();
     return vide(v) ? "" : v;
@@ -168,6 +169,7 @@ function convertir(lignes: string[][], personnage: string): { plans: LigneTablea
       pose_fin: lire(l, index.pose_fin),
       duree: Number(lire(l, duree).replace(",", ".")) || null,
       plan_continu: Number.parseInt(lire(l, continu), 10) || null,
+      numero: Number.parseInt(lire(l, colNumero), 10) || null,
       debut: lireTemps(lire(l, colDebut)),
       fin: lireTemps(lire(l, colFin)),
     };
@@ -179,8 +181,21 @@ function convertir(lignes: string[][], personnage: string): { plans: LigneTablea
   };
 }
 
-export function ImportTableau({ projectId, personnageParDefaut = "" }: { projectId: string; personnageParDefaut?: string }) {
+// « audio » : flux audio d'abord. Le tableau doit garder numero, debut, fin, duree et voix des répliques audio (vérifiés
+// et remis à leur valeur à l'import). « remplir » : remplissage automatique par Claude (clé ANTHROPIC_API_KEY présente).
+export function ImportTableau({
+  projectId,
+  personnageParDefaut = "",
+  audio = false,
+  remplir,
+}: {
+  projectId: string;
+  personnageParDefaut?: string;
+  audio?: boolean;
+  remplir?: () => Promise<{ csv: string } | { erreur: string }>;
+}) {
   const [texte, setTexte] = useState("");
+  const [remplissage, setRemplissage] = useState<"" | "encours">("");
   const [personnage, setPersonnage] = useState(personnageParDefaut);
   const [accord, setAccord] = useState(true);
   const [erreur, setErreur] = useState<string | null>(null);
@@ -200,6 +215,33 @@ export function ImportTableau({ projectId, personnageParDefaut = "" }: { project
         Colonnes reconnues : voix ou dialogue, mouvement, description, action, cadrage, angle, lieu ou décor, intention, pose
         de début et de fin, durée, et le minutage « debut » / « fin » (pour découper la voix off en lip-sync). Un scénario Markdown « ## SCÈNE 01 … » est aussi accepté.
       </p>
+      {audio && (
+        <p className="text-sm">
+          Audio d&apos;abord : le tableau doit garder exactement les numéros, débuts, fins, durées et voix des répliques audio. À
+          l&apos;import, ces colonnes sont vérifiées et remises à leur valeur audio ; une réplique manquante est refusée.
+        </p>
+      )}
+      {remplir && (
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            className="bouton"
+            disabled={remplissage === "encours" || enCours}
+            onClick={async () => {
+              setErreur(null);
+              setRemplissage("encours");
+              const r = await remplir().catch(() => ({ erreur: "Connexion perdue." }));
+              setRemplissage("");
+              if ("erreur" in r) setErreur(r.erreur);
+              else setTexte(r.csv);
+            }}
+          >
+            {remplissage === "encours" && <Roue />}
+            {remplissage === "encours" ? "Claude remplit le tableau (plusieurs minutes)…" : "✨ Remplir le tableau automatiquement"}
+          </button>
+          <span className="text-xs text-sourdine">Sans copier-coller : Claude reçoit la consigne et rend le tableau, à relire avant de créer les plans.</span>
+        </div>
+      )}
       <input
         type="file"
         accept=".csv,.md,.txt,text/csv,text/markdown,text/plain"
@@ -253,7 +295,7 @@ export function ImportTableau({ projectId, personnageParDefaut = "" }: { project
             demarrer(async () => {
               setErreur(null);
               try {
-                await importerTableau(projectId, plans, accord);
+                await importerTableau(projectId, plans, accord, audio);
               } catch (e) {
                 unstable_rethrow(e);
                 setErreur(e instanceof Error ? e.message : String(e));

@@ -28,7 +28,7 @@ export const CATEGORIES: Record<Categorie, Regles> = {
     planMax: 40,
     consigne: `CATÉGORIE : INTERVIEW / TÉMOIGNAGE. Une personne parle à la caméra, comme dans un vrai reportage filmé.
 - Un plan continu (un cadrage tenu, caméra fixe) dure de 10 à 40 s. On change de cadrage seulement quand le sujet change vraiment, ou pour se rapprocher au moment le plus fort de l'émotion. Pour un film d'une minute : 2 ou 3 plans continus au plus.
-- Changements de cadrage : surtout de lents rapprochements (slow push-in) ; un recul (slow pull-back) au plus une fois, car l'IA doit alors inventer le décor autour. Pas de changement d'angle : la personne reste face ou 3/4, du même côté.
+- Changements de cadrage : uniquement de lents rapprochements (slow push-in), jamais de recul ni de cadrage plus large en cours de film (l'IA devrait inventer le décor et le corps hors champ). Pas de changement d'angle : la personne reste face ou 3/4, du même côté.
 - Commence assez large (plan taille ou plan américain) pour pouvoir te rapprocher ensuite (plan poitrine, plan rapproché, gros plan).
 - Un seul lieu ; la personne reste assise ou debout à la même place pendant tout le film.
 - Gestes : petits et naturels (hochement de tête, main qui se lève un peu puis revient, sourire, regard qui part puis revient vers la caméra). Pas de grand geste de bras, pas de salut de la main.`,
@@ -39,7 +39,7 @@ export const CATEGORIES: Record<Categorie, Regles> = {
     planMin: 5,
     planMax: 15,
     consigne: `CATÉGORIE : DOCUMENTAIRE. Une voix off raconte ; l'image montre ce dont elle parle.
-- Un plan continu dure de 5 à 15 s. À chaque nouvelle information importante, la caméra va vers ce dont parle la voix (lent panoramique, lente avancée vers un détail, recul pour montrer le lieu), au milieu d'un clip.
+- Un plan continu dure de 5 à 15 s. À chaque nouvelle information importante, la caméra va vers ce dont parle la voix (lent panoramique de 15° au plus, lente avancée vers un détail ; jamais de recul : le film s'ouvre sur son cadrage le plus large), au milieu d'un clip.
 - La personne ne parle pas à la caméra sauf si la voix off est la sienne.
 - Un nouveau lieu seulement quand la voix off parle vraiment d'un autre endroit.`,
   },
@@ -69,7 +69,7 @@ export const CATEGORIES: Record<Categorie, Regles> = {
     planMax: 30,
     consigne: `CATÉGORIE : TUTORIEL / DÉMONSTRATION. On montre comment faire, étape par étape.
 - Un plan continu par étape (5 à 30 s) : même cadrage tant que l'étape dure.
-- Pour un geste précis, la caméra se rapproche lentement des mains et de l'objet, au milieu d'un clip ; elle recule ensuite vers un plan taille pour conclure.`,
+- Pour un geste précis, la caméra se rapproche lentement des mains et de l'objet, au milieu d'un clip ; elle garde ensuite ce cadrage (jamais de recul).`,
   },
   clip: {
     libelle: "Clip musical",
@@ -77,7 +77,7 @@ export const CATEGORIES: Record<Categorie, Regles> = {
     planMin: 3,
     planMax: 10,
     consigne: `CATÉGORIE : CLIP MUSICAL. Les images suivent le rythme de la musique.
-- Un plan continu dure de 3 à 10 s : c'est la catégorie où la caméra bouge le plus (rapprochements, reculs, panoramiques, sur le temps fort de la musique), mais toujours au milieu d'un clip et jamais deux mouvements dans le même clip.
+- Un plan continu dure de 3 à 10 s : c'est la catégorie où la caméra bouge le plus (rapprochements et lents panoramiques de 15° au plus, sur le temps fort de la musique ; jamais de recul), mais toujours au milieu d'un clip et jamais deux mouvements dans le même clip.
 - Le lieu et la tenue restent les mêmes dans une même séquence.`,
   },
 };
