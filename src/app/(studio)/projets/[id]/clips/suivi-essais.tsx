@@ -41,23 +41,27 @@ export function SuiviEssais({ projectId, enCours, enPause }: { projectId: string
     const debut = Date.now();
     const compteur = setInterval(() => setSecondes(Math.round((Date.now() - debut) / 1000)), 1000);
     noter(enCours === 1 ? "1 vidéo en cours" : `${enCours} vidéos en cours`);
+    // Un seul tour à la fois : le suivant part 10 s APRÈS la fin du précédent. Next.js exécute les actions serveur
+    // l'une après l'autre ; avec un minuteur fixe, les tours lents (envoi à RunPod) s'empilaient et le bouton
+    // « Valider ce clip » restait bloqué sur « Validation… » derrière eux.
+    let minuteur: ReturnType<typeof setTimeout> | undefined;
     const tour = async () => {
       const r = await actualiserEssais(projectId).catch(() => null);
       if (!actif) return;
       if (!r) {
         noter("Le studio ne répond pas (connexion internet ?)", "alerte");
-        return;
+      } else {
+        setServeur(r.serveur);
+        if (r.serveur) noter(r.serveur.arret ?? r.serveur.texte, r.serveur.arret ? "alerte" : r.serveur.ton);
+        if (r.restants !== enCours || r.serveur?.arret) router.refresh();
       }
-      setServeur(r.serveur);
-      if (r.serveur) noter(r.serveur.arret ?? r.serveur.texte, r.serveur.arret ? "alerte" : r.serveur.ton);
-      if (r.restants !== enCours || r.serveur?.arret) router.refresh();
+      if (actif) minuteur = setTimeout(tour, 10_000);
     };
     tour();
-    const boucle = setInterval(tour, 10_000);
     return () => {
       actif = false;
       clearInterval(compteur);
-      clearInterval(boucle);
+      clearTimeout(minuteur);
     };
   }, [projectId, enCours, router, noter]);
 

@@ -12,11 +12,16 @@ const SILENCE_MAX_MIN = 4;
 const abonnes = new Map<string, Set<(t: Travail | null) => void>>();
 let minuterie: ReturnType<typeof setInterval> | null = null;
 const finis = new Map<string, Travail>();
+// Un seul appel à la fois : les actions serveur passent l'une après l'autre, et des appels qui s'empilent
+// retardent les boutons de la page (« Valider ce clip » restait sur « Validation… »)
+let enVol = false;
 
 async function tour() {
   const ids = [...abonnes.keys()].filter((id) => !finis.has(id));
-  if (ids.length === 0) return;
+  if (ids.length === 0 || enVol) return;
+  enVol = true;
   const travaux = await lireTravaux(ids).catch(() => null);
+  enVol = false;
   if (!travaux) return;
   for (const id of ids) {
     const t = travaux.find((x) => x.runpod_job_id === id) ?? null;
