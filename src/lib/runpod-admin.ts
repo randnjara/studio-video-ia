@@ -1,5 +1,6 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { CUDA_AUTORISES, type Sorte, cartesAutorisees } from "@/lib/cartes-gpu";
 import { cle } from "@/lib/runpod";
 import { noterEvenementServeur } from "@/lib/travaux";
 
@@ -7,7 +8,7 @@ import { noterEvenementServeur } from "@/lib/travaux";
 // L'image est construite par GitHub à chaque changement du dossier worker/ (.github/workflows/serveur-video.yml).
 export const IMAGE_SERVEUR = "ghcr.io/randnjara/studio-video-ia-worker:latest";
 // À augmenter avec worker/VERSION : le studio fait passer notre serveur sur cette image au prochain envoi
-export const VERSION_SERVEUR = "8";
+export const VERSION_SERVEUR = "9";
 const CLE_IMAGE = "runpod_image";
 const NOM = "studio-video-eco";
 
@@ -21,35 +22,28 @@ async function rest(chemin: string, init?: RequestInit) {
   return texte ? JSON.parse(texte) : null;
 }
 
-// Les cartes de 80 Go (A100, H100) font tenir tout le modèle en mémoire
-async function cartes80Go(): Promise<string[]> {
+// Cartes proposées par RunPod en ce moment (null si son API ne répond pas)
+async function cartesProposees(): Promise<string[] | null> {
   const res = await fetch("https://api.runpod.io/graphql", {
     method: "POST",
     headers: { Authorization: `Bearer ${cle()}`, "Content-Type": "application/json" },
     body: JSON.stringify({ query: "query { gpuTypes { id memoryInGb } }" }),
-  });
-  const data = (await res.json().catch(() => null)) as { data?: { gpuTypes?: { id: string; memoryInGb: number }[] } } | null;
-  const ids = (data?.data?.gpuTypes ?? []).filter((g) => g.memoryInGb >= 80 && g.memoryInGb <= 96).map((g) => g.id);
-  return ids.length > 0 ? ids : ["NVIDIA A100 80GB PCIe", "NVIDIA A100-SXM4-80GB", "NVIDIA H100 80GB HBM3", "NVIDIA H100 PCIe"];
+  }).catch(() => null);
+  const data = (await res?.json().catch(() => null)) as { data?: { gpuTypes?: { id: string }[] } } | null;
+  const ids = (data?.data?.gpuTypes ?? []).map((g) => g.id);
+  return ids.length ? ids : null;
 }
 
-// Le studio voix tient sur une petite carte (16 à 24 Go), bien moins chère. Liste fixe : l'API de création
-// n'accepte que certains noms de cartes, et la liste complète de RunPod en contient d'autres.
-const CARTES_VOIX = [
-  "NVIDIA RTX A4000",
-  "NVIDIA RTX A4500",
-  "NVIDIA RTX 4000 Ada Generation",
-  "NVIDIA RTX A5000",
-  "NVIDIA L4",
-  "NVIDIA GeForce RTX 3090",
-  "NVIDIA GeForce RTX 4090",
-];
+// Cartes de 80 à 96 Go (A100, H100, RTX PRO 6000 Blackwell) : liste explicite, cohérente avec l'image (src/lib/cartes-gpu.ts)
+async function cartes80Go(sorte: Sorte = "video"): Promise<string[]> {
+  return cartesAutorisees(sorte, await cartesProposees());
+}
 
 export async function creerServeur(
   nom = NOM,
   nomModele = NOM,
   image = IMAGE_SERVEUR,
-  options: { cartes?: string[]; disqueGo?: number; maxMachines?: number } = {},
+  options: { cartes?: string[]; disqueGo?: number; maxMachines?: number; sorte?: Sorte } = {},
 ): Promise<string> {
   // Réutilise le modèle de serveur s'il existe déjà (par exemple après un premier essai interrompu)
   const modeles = ((await rest("/templates").catch(() => [])) ?? []) as { id: string; name: string }[];
@@ -72,21 +66,27 @@ export async function creerServeur(
   const existant = existants.find((e) => e.name === nom);
   if (existant) return existant.id;
 
-  const endpoint = await rest("/endpoints", {
-    method: "POST",
-    body: JSON.stringify({
-      name: nom,
-      templateId: modele.id,
-      gpuTypeIds: options.cartes ?? (await cartes80Go()),
+  const corps = {
+    name: nom,
+    templateId: modele.id,
+    gpuTypeIds: options.cartes ?? (await cartes80Go(options.sorte)),
       gpuCount: 1,
       workersMin: 0, // rien n'est payé quand rien ne tourne
       workersMax: options.maxMachines ?? 2,
       idleTimeout: 30, // garde le serveur 30 s après un clip, pour enchaîner une série sans redémarrer
       executionTimeoutMs: 900_000,
-      scalerType: "QUEUE_DELAY",
-      scalerValue: 4,
-      flashboot: true,
-    }),
+    scalerType: "QUEUE_DELAY",
+    scalerValue: 4,
+    flashboot: true,
+  };
+  // Images CUDA 12.8 : seulement des machines dont le pilote le permet. Si RunPod refuse ce réglage, le serveur est créé
+  // sans lui (les machines trop anciennes restent alors possibles)
+  const endpoint = await rest("/endpoints", {
+    method: "POST",
+    body: JSON.stringify({ ...corps, allowedCudaVersions: CUDA_AUTORISES }),
+  }).catch((e: unknown) => {
+    if (e instanceof Error && /allowedCudaVersions|cuda/i.test(e.message)) return rest("/endpoints", { method: "POST", body: JSON.stringify(corps) });
+    throw e;
   });
   if (!endpoint?.id) throw new Error("RunPod n'a pas renvoyé d'identifiant de serveur.");
   return String(endpoint.id);
@@ -94,13 +94,13 @@ export async function creerServeur(
 
 // Serveur du studio voix (dossier worker-voix/) : sa propre image, construite par GitHub
 // (.github/workflows/serveur-voix.yml). À augmenter avec worker-voix/VERSION.
-export const VERSION_SERVEUR_VOIX = "5";
+export const VERSION_SERVEUR_VOIX = "6";
 const IMAGE_VOIX = `ghcr.io/randnjara/studio-video-ia-voix:v${VERSION_SERVEUR_VOIX}`;
 const NOM_VOIX = "studio-voix";
 
 export async function creerServeurVoix(): Promise<string> {
   // Les modèles de voix sont déjà dans l'image : un petit disque suffit
-  return creerServeur(NOM_VOIX, NOM_VOIX, IMAGE_VOIX, { cartes: CARTES_VOIX, disqueGo: 30, maxMachines: 1 });
+  return creerServeur(NOM_VOIX, NOM_VOIX, IMAGE_VOIX, { cartes: cartesAutorisees("voix", await cartesProposees()), disqueGo: 30, maxMachines: 1, sorte: "voix" });
 }
 
 export async function mettreAJourServeurVoix(supabase: SupabaseClient, endpointId: string) {
@@ -265,12 +265,12 @@ export async function creerServeurVace(): Promise<string> {
 // construite par GitHub (.github/workflows/serveur-lipsync.yml), même dépôt d'images que le serveur vidéo, étiquette
 // « lipsync ». À augmenter avec worker-lipsync/VERSION. Le gros modèle (Wan 2.1) est dans le cache de RunPod (champ
 // « Model ») ; les poids InfiniteTalk, wav2vec et le LoRA rapide sont téléchargés au premier démarrage.
-export const VERSION_SERVEUR_LIPSYNC = "2";
+export const VERSION_SERVEUR_LIPSYNC = "3";
 const IMAGE_LIPSYNC = `ghcr.io/randnjara/studio-video-ia-worker:lipsync-v${VERSION_SERVEUR_LIPSYNC}`;
 export const SERVEUR_LIPSYNC = { nom: "studio-lipsync", modele: "Wan-AI/Wan2.1-I2V-14B-480P" } as const;
 
 export async function creerServeurLipsync(): Promise<string> {
-  return creerServeur(SERVEUR_LIPSYNC.nom, SERVEUR_LIPSYNC.nom, IMAGE_LIPSYNC, { disqueGo: 80 });
+  return creerServeur(SERVEUR_LIPSYNC.nom, SERVEUR_LIPSYNC.nom, IMAGE_LIPSYNC, { disqueGo: 80, sorte: "lipsync" });
 }
 
 // Supprime l'ancien serveur (attaché au disque) puis le disque payant

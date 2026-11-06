@@ -136,6 +136,19 @@ Chaque travail envoyé à un serveur RunPod (voix, transformation, découpe, cal
 - Appliquez `supabase/migrations/0020_travaux_serveur.sql` (SQL Editor → coller → **Run**). Sans elle, tout fonctionne comme avant, mais rien n'est noté et l'historique affiche un message.
 - Les trois images des serveurs passent en nouvelle version (vidéo v8, voix v5, lip-sync v2) pour envoyer ces nouvelles ; le studio les bascule tout seul au prochain envoi.
 
+## 11. Cartes Blackwell (RTX PRO 6000, MIG 1g.24gb, B200)
+
+RunPod range les cartes Blackwell (sm_120) dans « Latest generation ». Elles exigent une image CUDA 12.8 ou plus : sur une image plus ancienne (voix v4/v5 : torch 2.6 CUDA 12.4), le premier calcul plante (« no kernel image is available for execution on the device ») et RunPod marque la machine « unhealthy ».
+
+- Images CUDA 12.8 (Blackwell et cartes d'avant, sm_80 à sm_90) : vidéo/photo/VACE **v9** (torch 2.11), voix **v6** (torch 2.7.1 ; Chatterbox installé sans ses dépendances car il demande torch 2.6), lip-sync **v3** (torch 2.7.1, xformers 0.0.31.post1, flash-attn 2.8.3 précompilé). La construction vérifie que torch contient sm_80, sm_90 et sm_120.
+- Au démarrage, chaque serveur contrôle sa carte : si elle n'est pas gérée, chaque travail répond « Carte X non compatible avec l'image … » (visible dans l'historique) au lieu de planter. Whisper passe sur le processeur et le lip-sync sur l'attention de PyTorch si leur bibliothèque n'a pas de code pour la carte.
+- Création des serveurs : liste explicite des cartes par image (`src/lib/cartes-gpu.ts`) et machines avec un pilote CUDA 12.8 au moins. Les machines « unhealthy » signalées par RunPod apparaissent dans l'historique.
+
+**Remettre les cartes « Latest generation »**, une fois les nouvelles images construites (workflows « Serveur vidéo », « Serveur voix » et « Serveur lip-sync » verts après le merge) :
+1. Lancer un travail de chaque sorte (une voix, un clip, un clip lip-sync) : le studio passe chaque serveur sur sa nouvelle image (voir « 🧾 Historique » → « Nouvelle image du serveur »). Ou, dans la console RunPod, serveur → **Manage** → **Edit Endpoint** → **Container Image** : `ghcr.io/randnjara/studio-video-ia-voix:v6`, `ghcr.io/randnjara/studio-video-ia-worker:lipsync-v3`, `ghcr.io/randnjara/studio-video-ia-worker:v9`.
+2. Même écran : **GPU Configuration** → cocher de nouveau les cartes « Latest generation » voulues (RTX PRO 6000, MIG 24 Go…), et **Allowed CUDA versions** : 12.8 et plus. **Save**.
+3. Vérifier : un travail sur une carte Blackwell se termine, sans « worker unhealthy » ni « non compatible avec l'image » dans l'historique.
+
 ## Catégorie du film et plans continus (migration 0016)
 
 Appliquez la migration `supabase/migrations/0016_categorie.sql` (SQL Editor → coller → **Run**). Elle ajoute la **catégorie** du film (interview, documentaire, film, promotion, tutoriel, clip) et le **plan continu** des lignes du tableau. Sans elle, le studio marche comme avant : la catégorie choisie n'est pas gardée et les lignes ne sont pas regroupées.

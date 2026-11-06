@@ -38,7 +38,20 @@ from huggingface_hub import hf_hub_download, list_repo_files
 from PIL import Image, ImageOps
 
 from amelioration import finitions
+from gpu import verifier_carte
 from progression import commencer, signaler
+
+# Carte graphique gérée par le torch de l'image ? Sinon chaque travail répond par un message clair, sans planter
+CARTE_OK, CARTE = verifier_carte()
+print(f"Carte graphique : {CARTE}")
+
+
+def carte_refusee(job):
+    if CARTE_OK:
+        return None
+    commencer(job)
+    signaler("demarrage", None, CARTE, forcer=True)
+    return {"error": CARTE}
 
 
 def suivi_etapes(total, quoi):
@@ -362,6 +375,9 @@ EN_MEMOIRE = {"metier": None, "pipe": None}
 
 def handler(job):
     try:
+        refus = carte_refusee(job)
+        if refus:
+            return refus
         entree = job["input"]
         commencer(job)
         metier = entree.get("mode", "video")
