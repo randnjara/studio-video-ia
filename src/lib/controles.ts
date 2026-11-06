@@ -5,6 +5,7 @@ import { memeNom } from "@/lib/noms";
 
 import { CATEGORIES, type Categorie, MOTS_MOUVEMENT, fenetreMouvement, momentMouvement, plansContinus } from "@/lib/categories";
 import { raisonsPlan } from "@/lib/risques";
+import { MOTS_PAR_SECONDE_MAX, voixTropLongue } from "@/lib/debit-voix";
 
 export type PlanControle = {
   id: string;
@@ -19,10 +20,12 @@ export type PlanControle = {
   intention?: string | null;
   lieu?: string | null;
   plan_continu?: number | null;
+  // Minutage lu dans l'audio réel (tableau préparé depuis l'audio, plan calé, morceau découpé) : pas d'alerte de débit
+  minutageAudio?: boolean;
 };
 
-// Débit moyen d'une voix posée, en mots par seconde
-export const MOTS_PAR_SECONDE = 2.5;
+// Débit maximal avant l'alerte « voix off trop longue » : une seule constante, dans debit-voix.ts
+export { MOTS_PAR_SECONDE_MAX } from "@/lib/debit-voix";
 // Le modèle vidéo (Wan 2.2) est fait pour des clips de 5 s : plus long, l'image se dégrade
 export const DUREE_MAX = 5;
 const VOISINS = 10; // ChatGPT répétait les gestes par cycles de 10 scènes
@@ -59,10 +62,7 @@ function motsCommuns(textes: string[]) {
   return new Set([...compte].filter(([, n]) => n > seuil).map(([m]) => m));
 }
 
-export function dureeVoix(texte: string) {
-  const n = texte.trim().split(/\s+/).filter(Boolean).length;
-  return n / MOTS_PAR_SECONDE;
-}
+
 
 const ANGLAIS = new Set("the a an and with of to in on at her his she he their slowly slow camera looks look smiles smile turns turn hand hands head while toward towards into from gently soft light".split(" "));
 const AUTRES = new Set("le la les une des et avec sur dans vers elle il son sa ses lentement doucement main mains tete regarde sourit ny sy amin ary izy mitsiky mijery manokatra tanana loha".split(" "));
@@ -159,11 +159,16 @@ export function alertesPlans(plans: PlanControle[], mouvementParDefaut = "", cat
     if (moment && (moment.debut < fenetre.debut || moment.fin > fenetre.fin))
       ajouter(p.id, `Mouvement de caméra de ${moment.debut} à ${moment.fin} s : placez-le au milieu du clip, entre ${fenetre.debut} et ${fenetre.fin} s, jamais à la première ni à la dernière seconde.`);
 
-    const voix = dureeVoix(p.voiceover_text);
+    // Voix trop longue : jamais quand la durée vient de l'audio réel (le texte est ce qui est prononcé) ; sinon au-delà de
+    // MOTS_PAR_SECONDE_MAX mots par seconde
+    const trop = voixTropLongue({ texte: p.voiceover_text, duree, minutageAudio: p.minutageAudio });
     if (duree > DUREE_MAX)
       ajouter(p.id, `Plan de ${duree} s : au-delà de ${DUREE_MAX} s la vidéo se dégrade, coupez la réplique en deux plans.`);
-    else if (voix > duree + 0.5)
-      ajouter(p.id, `Voix off d'environ ${Math.ceil(voix)} s pour un plan de ${duree} s : raccourcissez le texte ou coupez en deux plans.`);
+    else if (trop)
+      ajouter(
+        p.id,
+        `Voix off de ${trop.mots} mots pour un plan estimé à ${duree} s (${String(trop.debit).replace(".", ",")} mots/s, plus de ${MOTS_PAR_SECONDE_MAX}) : allongez le plan vers ${String(trop.dureeNecessaire).replace(".", ",")} s ou coupez la réplique en deux plans. Si la voix off audio existe, calez plutôt les plans dessus.`,
+      );
 
     if (mouvementParDefaut && p.motion_prompt === mouvementParDefaut)
       ajouter(p.id, "Mouvement passe-partout : écrivez le geste propre à cette réplique.");
