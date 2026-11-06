@@ -23,12 +23,13 @@ RUN git clone https://github.com/MeiGen-AI/InfiniteTalk /app/InfiniteTalk \
 
 COPY requirements.txt .
 # Versions liées entre elles : torch 2.7.1 + CUDA 12.8 (déjà dans l'image, Python 3.11), xformers 0.0.31.post1 (roue PyPI
-# faite pour torch 2.7.1) et la roue précompilée de flash-attn 2.8.3 pour CUDA 12 / torch 2.7 / Python 3.11, dans l'ABI C++
+# faite pour torch 2.7.1) et la roue précompilée de flash-attn 2.8.0.post2 pour CUDA 12 / torch 2.7 / Python 3.11, dans l'ABI C++
 # du torch installé (lue ci-dessous). Rien n'est compilé : la machine de construction n'a pas de carte graphique.
 # Si flash-attn n'a pas de code pour la carte, le serveur passe à l'attention de PyTorch (voir handler.py).
 # « contraintes » empêche requirements.txt de changer la version de torch. Une dépendance tire « opencv-python » (qui veut
 # libGL, absente de l'image) : on garde seulement la version « headless » de cv2.
-ARG FLASH_ATTN_VERSION=2.8.3
+# 2.8.0.post2 : la plus récente acceptée par xformers 0.0.31.post1 (« >=2.7.1,<=2.8.0 », comparé sur les 3 premiers chiffres)
+ARG FLASH_ATTN_VERSION=2.8.0.post2
 RUN echo "torch==2.7.1" > /tmp/contraintes.txt \
  && python3 -m pip install --no-cache-dir -c /tmp/contraintes.txt xformers==0.0.31.post1 \
  && python3 -m pip install --no-cache-dir -c /tmp/contraintes.txt -r requirements.txt \

@@ -140,7 +140,7 @@ Chaque travail envoyé à un serveur RunPod (voix, transformation, découpe, cal
 
 RunPod range les cartes Blackwell (sm_120) dans « Latest generation ». Elles exigent une image CUDA 12.8 ou plus : sur une image plus ancienne (voix v4/v5 : torch 2.6 CUDA 12.4), le premier calcul plante (« no kernel image is available for execution on the device ») et RunPod marque la machine « unhealthy ».
 
-- Images CUDA 12.8 (Blackwell et cartes d'avant, sm_80 à sm_90) : vidéo/photo/VACE **v9** (torch 2.11), voix **v6** (torch 2.7.1 ; Chatterbox installé sans ses dépendances car il demande torch 2.6), lip-sync **v3** (torch 2.7.1, xformers 0.0.31.post1, flash-attn 2.8.3 précompilé). La construction vérifie que torch contient sm_80, sm_90 et sm_120.
+- Images CUDA 12.8 (Blackwell et cartes d'avant, sm_80 à sm_90) : vidéo/photo/VACE **v9** (torch 2.11), voix **v6** (torch 2.7.1 ; Chatterbox installé sans ses dépendances car il demande torch 2.6), lip-sync **v3** (torch 2.7.1, xformers 0.0.31.post1, flash-attn 2.8.0.post2 précompilé). La construction vérifie que torch contient sm_80, sm_90 et sm_120.
 - Au démarrage, chaque serveur contrôle sa carte : si elle n'est pas gérée, chaque travail répond « Carte X non compatible avec l'image … » (visible dans l'historique) au lieu de planter. Whisper passe sur le processeur et le lip-sync sur l'attention de PyTorch si leur bibliothèque n'a pas de code pour la carte.
 - Création des serveurs : liste explicite des cartes par image (`src/lib/cartes-gpu.ts`) et machines avec un pilote CUDA 12.8 au moins. Les machines « unhealthy » signalées par RunPod apparaissent dans l'historique.
 
