@@ -6,6 +6,9 @@ on:
   push:
     branches: [main]
     paths: ["worker/**", ".github/workflows/serveur-video.yml"]
+  # Dans une PR : l'image est construite (et vérifiée : CUDA 12.8, Blackwell compris) sans être publiée
+  pull_request:
+    paths: ["worker/**", ".github/workflows/serveur-video.yml"]
   workflow_dispatch:
 
 permissions:
@@ -24,6 +27,7 @@ jobs:
           df -h /
       - uses: actions/checkout@v4
       - uses: docker/login-action@v3
+        if: github.event_name != 'pull_request'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -36,7 +40,7 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: worker
-          push: true
+          push: ${{ github.event_name != 'pull_request' }}
           tags: |
             ghcr.io/${{ github.repository }}-worker:latest
             ghcr.io/${{ github.repository }}-worker:${{ github.sha }}

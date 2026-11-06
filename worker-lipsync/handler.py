@@ -33,7 +33,20 @@ from einops import rearrange  # noqa: E402
 from huggingface_hub import hf_hub_download  # noqa: E402
 from PIL import Image, ImageOps  # noqa: E402
 
+from gpu import verifier_carte  # noqa: E402
 from progression import commencer, signaler  # noqa: E402
+
+# Carte graphique gérée par le torch de l'image ? Sinon chaque travail répond par un message clair, sans planter
+CARTE_OK, CARTE = verifier_carte()
+print(f"Carte graphique : {CARTE}")
+
+
+def carte_refusee(job):
+    if CARTE_OK:
+        return None
+    commencer(job)
+    signaler("demarrage", None, CARTE, forcer=True)
+    return {"error": CARTE}
 from video import FENETRE, echantillons_minimum, ecrire_mp4_muet, nombre_images  # noqa: E402
 
 # Suivi du calcul : InfiniteTalk avance par fenêtres de 81 images, chacune en ETAPES étapes (barre tqdm) ; chaque étape
@@ -126,8 +139,38 @@ def charger():
     # Les étapes de diffusion d'InfiniteTalk passent par tqdm : on les compte pour le studio
     import wan.multitalk as multitalk
 
+    attention_sans_flash_attn()
+
     multitalk.tqdm = suivi_tqdm
     print(f"InfiniteTalk prêt en {time.time() - debut:.0f} s ({ETAPES} étapes, voix {GUIDAGE_VOIX}, texte {GUIDAGE_TEXTE})")
+
+
+def attention_sans_flash_attn():
+    """flash-attn sans code pour cette carte (ex. Blackwell sm_120 avec une roue sans sm_120) : InfiniteTalk passe à
+    l'attention de PyTorch (SDPA), un peu plus lente mais juste (un seul clip à la fois, sans remplissage)."""
+    import torch
+
+    try:
+        import flash_attn
+
+        q = torch.randn(1, 16, 2, 64, device="cuda", dtype=torch.bfloat16)
+        flash_attn.flash_attn_func(q, q, q)
+        print("flash-attn utilisable sur cette carte")
+        return False
+    except Exception as e:
+        print(f"flash-attn inutilisable ici ({str(e).splitlines()[0][:160]}) : attention de PyTorch")
+    import wan.modules.attention as attention
+    import wan.modules.multitalk_model as modele
+
+    attention.FLASH_ATTN_2_AVAILABLE = False
+    attention.FLASH_ATTN_3_AVAILABLE = False
+
+    def sdpa(q, k, v, q_lens=None, k_lens=None, **options):
+        sortie = attention.attention(q, k, v, **{k2: v2 for k2, v2 in options.items() if k2 in ("dropout_p", "causal", "dtype")})
+        return sortie.to(q.dtype)
+
+    modele.flash_attention = sdpa
+    return True
 
 
 def telecharger(url, chemin):
@@ -239,6 +282,9 @@ def generer(entree):
 
 def handler(job):
     try:
+        refus = carte_refusee(job)
+        if refus:
+            return refus
         entree = job["input"]
         commencer(job)
         if entree.get("mode", "lipsync") != "lipsync":

@@ -29,7 +29,20 @@ import runpod
 import soundfile as sf
 import torch
 
+from gpu import verifier_carte
 from progression import commencer, signaler
+
+# Carte graphique gérée par le torch de l'image ? Sinon chaque travail répond par un message clair, sans planter
+CARTE_OK, CARTE = verifier_carte()
+print(f"Carte graphique : {CARTE}")
+
+
+def carte_refusee(job):
+    if CARTE_OK:
+        return None
+    commencer(job)
+    signaler("demarrage", None, CARTE, forcer=True)
+    return {"error": CARTE}
 
 APPAREIL = "cuda" if torch.cuda.is_available() else "cpu"
 # Langues comprises par Chatterbox multilingue
@@ -388,6 +401,9 @@ def transcrire_voix(entree):
 
 def handler(job):
     try:
+        refus = carte_refusee(job)
+        if refus:
+            return refus
         commencer(job)
         if job["input"].get("moteur") == "decouper":
             return decouper_voix_off(job["input"])

@@ -4,6 +4,7 @@ import { CLE_ARRET_SERVEUR, type EtatFile, attente, lireArretServeur } from "@/l
 import { cle } from "@/lib/runpod";
 import { arreterServeurs } from "@/lib/runpod-admin";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { noterEvenementServeur } from "@/lib/travaux";
 
 // Surveillance de nos serveurs RunPod pendant une génération : état de la machine, affiché sous la barre de progression,
 // et arrêt automatique quand plus rien n'avance, pour ne pas payer une machine qui tourne dans le vide.
@@ -28,6 +29,39 @@ export type EtatServeur = {
   // Rempli quand le studio vient de couper le serveur
   arret?: string;
 };
+
+// Machines « unhealthy » chez RunPod (image qui plante au démarrage, carte non gérée…) : notées dans l'historique, au plus
+// une fois par quart d'heure et par serveur
+const SANTE_INTERVALLE_MS = 15 * 60 * 1000;
+async function noterMauvaiseSante(supabase: SupabaseClient, serveur: string, machines: number) {
+  const { data: recent } = await supabase
+    .from("travaux_serveur")
+    .select("id")
+    .eq("type", "serveur-sante")
+    .eq("serveur", serveur)
+    .gte("created_at", new Date(Date.now() - SANTE_INTERVALLE_MS).toISOString())
+    .limit(1);
+  if (recent?.length) return;
+  await noterEvenementServeur(
+    supabase,
+    "serveur-sante",
+    `RunPod : ${machines} machine(s) en mauvaise santé (« worker unhealthy ») sur le serveur ${serveur}. Souvent une image qui plante au démarrage, par exemple sur une carte qu'elle ne gère pas : voyez les journaux du serveur dans la console RunPod.`,
+    { machines },
+    serveur,
+  );
+}
+
+// Santé d'un serveur pendant un travail en file (serveur voix : découpe, calage, transcription) : une machine en mauvaise
+// santé est notée dans l'historique et décrite pour la personne
+export async function verifierSante(supabase: SupabaseClient, serveur: string | null) {
+  if (!serveur) return null;
+  const sante = await lireSante(serveur);
+  if (sante && sante.workers.unhealthy > 0) {
+    await noterMauvaiseSante(supabase, serveur, sante.workers.unhealthy);
+    return `RunPod signale ${sante.workers.unhealthy} machine(s) en mauvaise santé sur ce serveur (voir l'historique).`;
+  }
+  return null;
+}
 
 async function lireSante(serveur: string): Promise<Sante | null> {
   try {
@@ -111,6 +145,7 @@ export async function surveiller(
       .maybeSingle(),
   ]);
   const vu = decrire(sante);
+  if (sante && sante.workers.unhealthy > 0) await noterMauvaiseSante(supabase, serveur, sante.workers.unhealthy);
   // Sans travail envoyé chez RunPod, rien ne peut tourner pour nous
   if (parties.length === 0 || etat.enPause || etat.serveurArrete)
     return { ...vu, inactifS: 0, limiteS: Math.round(limite / 1000) };

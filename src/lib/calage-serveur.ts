@@ -4,6 +4,7 @@ import { type Cale, type PlanTableau, appliquerCalage } from "@/lib/calage";
 import { BUCKET } from "@/lib/production";
 import { PRIX_SECONDE_VOIX, lancerVoixWhisper, lireTravailVoix } from "@/lib/runpod";
 import { mettreAJourServeurVoix } from "@/lib/runpod-admin";
+import { verifierSante } from "@/lib/surveillance";
 import { lireServeurVoix } from "@/lib/voix-serveur";
 
 // La voix off AUDIO est la seule source de minutage. Dès qu'elle est importée ou choisie, Whisper (serveur voix) la
@@ -92,7 +93,11 @@ export async function finirCalage(
   } catch (e) {
     return { erreur: (e instanceof Error ? e.message : String(e)).slice(0, 300) };
   }
-  if (statut.etat === "en_cours") return { etat: "en_cours" };
+  // Encore en file chez RunPod : une machine qui plante au démarrage (« unhealthy ») est notée dans l'historique
+  if (statut.etat === "en_cours") {
+    if (statut.enFile) await verifierSante(supabase, (await lireServeurVoix(supabase)).serveur).catch(() => null);
+    return { etat: "en_cours" };
+  }
   if (statut.etat === "echouee") return { erreur: statut.erreur };
   const cales = (Array.isArray(statut.sortie.plans) ? statut.sortie.plans : []) as Cale[];
   if (cales.length === 0) return { erreur: "Le serveur voix n'a calé aucun plan." };
@@ -227,7 +232,10 @@ export async function finirTranscription(supabase: SupabaseClient, auteurId: str
   } catch (e) {
     return { erreur: (e instanceof Error ? e.message : String(e)).slice(0, 300) };
   }
-  if (statut.etat === "en_cours") return { etat: "en_cours" as const };
+  if (statut.etat === "en_cours") {
+    if (statut.enFile) await verifierSante(supabase, (await lireServeurVoix(supabase)).serveur).catch(() => null);
+    return { etat: "en_cours" as const };
+  }
   if (statut.etat === "echouee") return { erreur: statut.erreur };
   const repliques = Array.isArray(statut.sortie.repliques) ? (statut.sortie.repliques as Record<string, unknown>[]) : [];
   if (repliques.length === 0) return { erreur: "Aucune parole reconnue dans cette voix off." };
