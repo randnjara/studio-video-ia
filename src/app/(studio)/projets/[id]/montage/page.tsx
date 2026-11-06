@@ -25,7 +25,8 @@ type Clip = {
   duree: number;
   videoPath: string | null;
   voix: string;
-  lipsync?: { creationId: string | null; debut: number; fin: number | null; muette: boolean };
+  // Clip calé sur la voix off : lip-sync, ou autre moteur sur un plan qui a son morceau de voix (bouche par le texte)
+  lipsync?: { creationId: string | null; debut: number; fin: number | null; muette: boolean; moteur: boolean };
 };
 type Essai = {
   id: string;
@@ -59,7 +60,7 @@ export default async function PageMontage({
   const sp = await searchParams;
   const supabase = await getClient();
 
-  const [{ data: scenes }, { data: projet }, montages, { data: voixStudio }] = await Promise.all([
+  const [{ data: scenes }, { data: projet }, montages, { data: voixStudio }, { data: morceaux }] = await Promise.all([
     supabase
       .from("scenes")
       .select(
@@ -76,7 +77,21 @@ export default async function PageMontage({
       .eq("project_id", id)
       .eq("status", "terminee")
       .order("created_at", { ascending: false }),
+    // Morceaux de voix off des plans : les clips des autres moteurs se calent aussi sur la voix (le plus récent par plan)
+    supabase
+      .from("voice_clips")
+      .select("scene_id, debut_s, fin_s, duration_s, voix_creation_id, created_at, scenes!inner(project_id)")
+      .eq("scenes.project_id", id)
+      .not("debut_s", "is", null)
+      .order("created_at", { ascending: false }),
   ]);
+  const morceauDuPlan = new Map<string, { debut: number; fin: number | null; creationId: string | null }>();
+  for (const m of (morceaux ?? []) as { scene_id: string; debut_s: number | string; fin_s: number | string | null; duration_s: number | string | null; voix_creation_id: string | null }[]) {
+    if (morceauDuPlan.has(m.scene_id)) continue;
+    const debut = Number(m.debut_s);
+    const fin = m.fin_s !== null ? Number(m.fin_s) : m.duration_s !== null ? debut + Number(m.duration_s) : null;
+    morceauDuPlan.set(m.scene_id, { debut, fin, creationId: m.voix_creation_id });
+  }
   const format = (projet?.aspect_ratio as string) ?? "9:16";
 
   // Tous les clips du projet, repérés par leur essai ; les clips validés sont ceux proposés pour un montage
@@ -86,6 +101,7 @@ export default async function PageMontage({
   (scenes ?? []).forEach((s, i) => {
     if (s.image_path) photos.push({ chemin: s.image_path, nature: "image", nom: `Photo plan ${i + 1}`, duree: null });
     for (const t of s.takes as unknown as Essai[]) {
+      const morceau = morceauDuPlan.get(s.id as string);
       const lipsync =
         t.moteur === "lipsync" && t.audio_debut_s !== null && t.audio_debut_s !== undefined
           ? {
@@ -93,8 +109,12 @@ export default async function PageMontage({
               debut: Number(t.audio_debut_s),
               fin: t.audio_fin_s !== null && t.audio_fin_s !== undefined ? Number(t.audio_fin_s) : null,
               muette: t.video_muette !== false,
+              moteur: true,
             }
-          : undefined;
+          : t.moteur !== "lipsync" && morceau
+            ? // Autre moteur (bouche par le texte) : calé sur la réplique audio de son plan ; la vidéo est muette
+              { ...morceau, muette: true, moteur: false }
+            : undefined;
       const clip: Clip = {
         takeId: t.id,
         planNumero: i + 1,
@@ -122,7 +142,7 @@ export default async function PageMontage({
     return {
       chemin: c.videoPath!,
       nature: "video",
-      nom: `Plan ${c.planNumero}${c.lipsync ? " · lip-sync" : ""}`,
+      nom: `Plan ${c.planNumero}${c.lipsync?.moteur ? " · lip-sync" : ""}`,
       duree: c.duree,
       takeId: c.takeId,
       ...(c.lipsync && v

@@ -82,8 +82,18 @@ const resolutionDe = (moteur: Moteur) => (moteur === "eco-720" || moteur === "qu
 // Lip-sync : la bouche suit la voix off, la consigne du tableau ne décrit que gestes, regard et caméra
 const PAROLE = "The person speaks to the camera, natural lip movements following the voice, expressive face.";
 
-const consigneVideo = (consigne: string, fiches: string, lipsync = false) =>
-  [`${consigne.trim().replace(/[.\s]+$/, "")}.`, lipsync ? PAROLE : "", fiches, STABILITE].filter(Boolean).join(" ");
+// Autres moteurs, sur un plan qui a son morceau de voix off : ils n'entendent pas la voix, la bouche est donc animée
+// par le texte (elle parle pendant tout le plan, calé sur la réplique audio ; pas mot à mot comme le lip-sync)
+const PAROLE_TEXTE =
+  "The person is talking to the camera the whole time, mouth clearly opening and closing as if saying the words, natural jaw movement, expressive face.";
+
+const consigneVideo = (consigne: string, fiches: string, lipsync = false, parle = false) =>
+  [`${consigne.trim().replace(/[.\s]+$/, "")}.`, lipsync ? PAROLE : parle ? PAROLE_TEXTE : "", fiches, STABILITE]
+    .filter(Boolean)
+    .join(" ");
+
+// Un plan parle à l'image s'il a son morceau de voix off (découpé pour lui) et une réplique
+const parleAlImage = (morceau: MorceauVoix | undefined, voix: unknown) => Boolean(morceau && String(voix ?? "").trim());
 
 // Morceau de voix off d'un plan, prêt pour le lip-sync (découpé : un fichier et une durée)
 export type MorceauVoix = { id: string; scene_id: string; audio_path: string; debut_s: number | null; fin_s: number | null; duration_s: number | null };
@@ -193,7 +203,8 @@ export async function lancerPlan(
   if (!plan.consent_confirmed) return "sans-accord";
 
   // Lip-sync : le plan doit avoir son morceau de voix off (bouton « Découper la voix off »)
-  const morceau = moteur === "lipsync" ? (await morceauxVoix(supabase, [plan.id])).get(plan.id) : undefined;
+  // Autres moteurs : le morceau donne la durée exacte de la réplique et fait parler la personne (bouche par le texte)
+  const morceau = (await morceauxVoix(supabase, [plan.id])).get(plan.id);
   if (moteur === "lipsync" && !morceau) return "sans-voix";
 
   const duree = morceau ? dureeMorceau(morceau) : Number(plan.duration_s) || 5;
@@ -210,7 +221,7 @@ export async function lancerPlan(
       moteur,
       resolution: resolutionDe(moteur),
       created_by: auteurId,
-      ...(morceau ? champsLipsync(morceau) : {}),
+      ...(morceau && moteur === "lipsync" ? champsLipsync(morceau) : {}),
     })
     .select("id")
     .single();
@@ -249,6 +260,8 @@ export async function lancerPlan(
       prompt: consigneVideo(
         typeof depart === "string" ? plan.motion_prompt : depart.consigne,
         (await fichesPersonnages(supabase, plan.project_id))(String((plan as { image_description?: string }).image_description ?? "")),
+        false,
+        parleAlImage(morceau, (plan as { voiceover_text?: string }).voiceover_text),
       ),
       imageUrl: signee.signedUrl,
       format,
@@ -300,16 +313,18 @@ export async function demanderEssais(
   plans: Plan[],
   moteur: Moteur,
 ): Promise<{ inscrits: number; erreur: string | null }> {
-  const morceaux = moteur === "lipsync" ? await morceauxVoix(supabase, plans.map((p) => p.id)) : null;
+  // Morceaux de voix off : la durée exacte de chaque réplique (tous les moteurs) et le son du lip-sync
+  const morceaux = await morceauxVoix(supabase, plans.map((p) => p.id));
+  const lipsync = moteur === "lipsync";
   // Lip-sync : seuls les plans qui ont leur morceau de voix off partent
-  const prets = plans.filter((p) => p.image_path && p.motion_prompt && p.consent_confirmed && (!morceaux || morceaux.has(p.id)));
-  if (prets.length === 0) return { inscrits: 0, erreur: morceaux ? "sans-voix" : "selection-vide" };
+  const prets = plans.filter((p) => p.image_path && p.motion_prompt && p.consent_confirmed && (!lipsync || morceaux.has(p.id)));
+  if (prets.length === 0) return { inscrits: 0, erreur: lipsync ? "sans-voix" : "selection-vide" };
   const { error } = await supabase.from("takes").insert(
     prets.map((plan) => {
-      const morceau = morceaux?.get(plan.id);
+      const morceau = morceaux.get(plan.id);
       const duree = morceau ? dureeMorceau(morceau) : Number(plan.duration_s) || 5;
       return {
-        ...(morceau ? champsLipsync(morceau) : {}),
+        ...(morceau && lipsync ? champsLipsync(morceau) : {}),
         scene_id: plan.id,
         status: "en_cours",
         seed: Math.floor(Math.random() * 2_000_000_000),
@@ -370,18 +385,21 @@ async function echecEssai(supabase: SupabaseClient, essai: EssaiEnCours, erreur:
 async function envoyerEssais(supabase: SupabaseClient, projectId: string, enAttente: EssaiEnCours[], etat: EtatFile) {
   if (enAttente.length === 0) return;
   const lipsync = enAttente.filter((e) => e.moteur === "lipsync").map((e) => e.id);
-  const [{ data: projet }, { data: scenes }, fiches, { data: sons }] = await Promise.all([
+  const scenesIds = [...new Set(enAttente.map((e) => e.scene_id))];
+  const [{ data: projet }, { data: scenes }, fiches, { data: sons }, morceaux] = await Promise.all([
     supabase.from("projects").select("aspect_ratio").eq("id", projectId).single(),
     supabase
       .from("scenes")
       // Toutes les colonnes : le cadrage et le plan continu sont lus si la migration 0016 est passée
       .select("*")
-      .in("id", [...new Set(enAttente.map((e) => e.scene_id))]),
+      .in("id", scenesIds),
     fichesPersonnages(supabase, projectId),
     // Lip-sync : le morceau de voix off inscrit avec chaque clip
     lipsync.length
       ? supabase.from("takes").select("id, audio_path, audio_debut_s, audio_fin_s").in("id", lipsync)
       : Promise.resolve({ data: [] as { id: string; audio_path: string | null; audio_debut_s: number | null; audio_fin_s: number | null }[] }),
+    // Autres moteurs : la réplique audio de chaque plan (durée exacte, et la personne parle à l'image)
+    morceauxVoix(supabase, scenesIds),
   ]);
   // Prise unique : un clip attend la fin du précédent. Les clips d'un même lot ont la même date : on les range dans
   // l'ordre du film pour que le premier clip du plan passe avant ses suites, et on regarde un peu plus loin dans la
@@ -418,9 +436,12 @@ async function envoyerEssais(supabase: SupabaseClient, projectId: string, enAtte
       const son = essai.moteur === "lipsync" ? sons?.find((s) => s.id === essai.id) : undefined;
       if (essai.moteur === "lipsync" && !son?.audio_path) throw new Error("Ce plan n'a pas de morceau de voix off : découpez la voix off.");
       // Lip-sync : la vidéo dure exactement le morceau de voix (le serveur la recale à l'image près)
+      const morceau = plan ? morceaux.get(plan.id) : undefined;
       const duree = son
         ? Math.max(0.5, Number(son.audio_fin_s) - Number(son.audio_debut_s)) || Number(plan.duration_s) || 5
-        : Number(plan.duration_s) || 5;
+        : morceau
+          ? dureeMorceau(morceau)
+          : Number(plan.duration_s) || 5;
       // La vidéo sera rangée à côté des photos du projet ; notre serveur l'y dépose lui-même
       const videoPath = `${projectId}/essais/${essai.id}.mp4`;
       const notreServeur = essai.moteur !== "qualite";
@@ -445,7 +466,12 @@ async function envoyerEssais(supabase: SupabaseClient, projectId: string, enAtte
       if (son && !lienSon?.data?.signedUrl) throw new Error("Morceau de voix off introuvable dans le stockage.");
       const jobId = await lancerGeneration({
         moteur: essai.moteur,
-        prompt: consigneVideo(depart.consigne, fiches(String(plan.image_description ?? "")), essai.moteur === "lipsync"),
+        prompt: consigneVideo(
+          depart.consigne,
+          fiches(String(plan.image_description ?? "")),
+          essai.moteur === "lipsync",
+          parleAlImage(morceau, plan.voiceover_text),
+        ),
         imageUrl: signee.signedUrl,
         format: projet?.aspect_ratio ?? "16:9",
         duree,
